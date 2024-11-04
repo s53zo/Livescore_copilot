@@ -43,10 +43,14 @@ class ScoreReporter:
     def get_band_breakdown_with_rate(self, station_id, callsign, contest):
         """Get band breakdown and calculate QSO rate for each band with interpolation"""
         current_query = """
-            SELECT band, qsos, multipliers, cs.timestamp
+            SELECT 
+                bb.band, 
+                bb.qsos as band_qsos, 
+                bb.multipliers, 
+                cs.timestamp
             FROM band_breakdown bb
             JOIN contest_scores cs ON cs.id = bb.contest_score_id
-            WHERE contest_score_id = ?;
+            WHERE bb.contest_score_id = ?;
         """
         
         previous_query = """
@@ -57,7 +61,7 @@ class ScoreReporter:
             )
             SELECT 
                 bb.band, 
-                bb.qsos,
+                bb.qsos as prev_band_qsos,
                 cs.timestamp,
                 ABS(ROUND((JULIANDAY(cs.timestamp) - 
                           JULIANDAY((SELECT timestamp FROM CurrentTimestamp))) * 24, 2)) as hours_diff
@@ -66,7 +70,8 @@ class ScoreReporter:
             WHERE cs.callsign = ? 
             AND cs.contest = ?
             AND cs.timestamp < (SELECT timestamp FROM CurrentTimestamp)
-            ORDER BY cs.timestamp DESC;
+            AND cs.timestamp >= datetime((SELECT timestamp FROM CurrentTimestamp), '-4 hour')  -- Limit to last 4 hours
+            ORDER BY cs.timestamp DESC, bb.band;
         """
         
         try:
@@ -89,6 +94,7 @@ class ScoreReporter:
                         'mults': mults,
                         'timestamp': current_timestamp
                     }
+                    self.logger.debug(f"Current data for {band}: QSOs={qsos}, Mults={mults}")
                 
                 # Get previous data points
                 cursor.execute(previous_query, (station_id, callsign, contest))
@@ -102,32 +108,42 @@ class ScoreReporter:
                     
                     # Find the closest previous data point for this band
                     previous_qsos = 0
+                    time_diff = 1.0  # Default to 1 hour if no previous data
                     rate = 0
-                    found_previous = False
+                    
+                    # Log current QSOs
+                    self.logger.debug(f"Processing {band} band:")
+                    self.logger.debug(f"  Current QSOs: {current_qsos}")
                     
                     for prev_row in previous_data:
                         prev_band, prev_qsos, prev_timestamp, hours_diff = prev_row
                         if prev_band == band:
-                            # Found a previous data point for this band
-                            found_previous = True
-                            if hours_diff > 0:  # Avoid division by zero
-                                rate = self.calculate_rate(current_qsos, prev_qsos, hours_diff)
+                            previous_qsos = prev_qsos
+                            time_diff = hours_diff
+                            
+                            # Log previous data found
+                            self.logger.debug(f"  Found previous data:")
+                            self.logger.debug(f"    Previous QSOs: {prev_qsos}")
+                            self.logger.debug(f"    Time diff: {hours_diff:.2f} hours")
+                            
+                            if hours_diff > 0:
+                                qso_diff = current_qsos - prev_qsos
+                                rate = int(round(qso_diff / hours_diff))
+                                
+                                self.logger.debug(f"    QSO diff: {qso_diff}")
+                                self.logger.debug(f"    Calculated rate: {rate}/hr")
                             break
                     
                     result[band] = (current_qsos, current['mults'], rate)
-                    
-                    # Log rate calculation details for debugging
-                    self.logger.debug(f"{band} band rate calculation:")
-                    self.logger.debug(f"  Current QSOs: {current_qsos}")
-                    self.logger.debug(f"  Previous QSOs: {previous_qsos}")
-                    self.logger.debug(f"  Calculated Rate: {rate}/hr")
                 
                 return result
                 
         except sqlite3.Error as e:
             self.logger.error(f"Database error in rate calculation: {e}")
+            self.logger.error(f"Current query: {current_query}")
+            self.logger.error(f"Previous query: {previous_query}")
             return {}
-
+    
     def format_band_data(self, band_data):
         """Format band data as QSO/Mults (rate/h)"""
         if band_data:
@@ -314,6 +330,7 @@ def main():
     # Set debug level if requested
     if args.debug:
         reporter.logger.setLevel(logging.DEBUG)
+        reporter.logger.debug("Debug logging enabled")
         
     stations = reporter.get_station_details(args.callsign, args.contest)
     
