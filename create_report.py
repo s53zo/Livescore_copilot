@@ -12,8 +12,121 @@ class ScoreReporter:
         self.db_path = db_path or 'contest_data.db'
         self.template_path = template_path or 'templates/score_template.html'
         self.rate_minutes = rate_minutes
-        self.setup_logging()
+        self._setup_logging()
         self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}, Rate interval: {rate_minutes} minutes")
+
+    def _setup_logging(self):
+        """Setup logging configuration"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        self.logger = logging.getLogger('ScoreReporter')
+
+    def load_template(self):
+        """Load HTML template from file"""
+        try:
+            self.logger.debug(f"Loading template from: {self.template_path}")
+            with open(self.template_path, 'r') as f:
+                return f.read()
+        except IOError as e:
+            self.logger.error(f"Error loading template: {e}")
+            return None
+
+    def get_station_details(self, callsign, contest):
+        """Get station details and nearby competitors"""
+        query = """
+            WITH StationScore AS (
+                SELECT 
+                    cs.id, 
+                    cs.callsign, 
+                    cs.score, 
+                    cs.power, 
+                    cs.assisted,
+                    cs.timestamp, 
+                    cs.qsos, 
+                    cs.multipliers,
+                    'current' as position,
+                    1 as rn
+                FROM contest_scores cs
+                WHERE cs.callsign = ? 
+                AND cs.contest = ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            ),
+            NearbyStations AS (
+                SELECT 
+                    cs.id,
+                    cs.callsign, 
+                    cs.score, 
+                    cs.power, 
+                    cs.assisted,
+                    cs.timestamp, 
+                    cs.qsos, 
+                    cs.multipliers,
+                    CASE
+                        WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                        WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                    END as position,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY 
+                            CASE
+                                WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                                WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                            END
+                        ORDER BY 
+                            CASE
+                                WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
+                            CASE
+                                WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
+                    ) as rn
+                FROM contest_scores cs
+                WHERE cs.contest = ?
+                AND cs.power = (SELECT power FROM StationScore)
+                AND cs.assisted = (SELECT assisted FROM StationScore)
+                AND cs.callsign != (SELECT callsign FROM StationScore)
+                AND cs.timestamp = (
+                    SELECT MAX(timestamp)
+                    FROM contest_scores cs2
+                    WHERE cs2.callsign = cs.callsign
+                    AND cs2.contest = cs.contest
+                )
+            )
+            SELECT 
+                id,
+                callsign, 
+                score, 
+                power, 
+                assisted,
+                timestamp, 
+                qsos, 
+                multipliers,
+                position,
+                rn
+            FROM (
+                SELECT * FROM StationScore
+                UNION ALL
+                SELECT * FROM NearbyStations
+                WHERE (position = 'above' AND rn <= 2)
+                OR (position = 'below' AND rn <= 2)
+            )
+            ORDER BY score DESC;
+        """
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (callsign, contest, contest))
+                stations = cursor.fetchall()
+                
+                if not stations:
+                    self.logger.error(f"No data found for {callsign} in {contest}")
+                    return None
+                
+                return stations
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error: {e}")
+            return None
 
     def get_total_qso_rate(self, station_id, callsign, contest):
         """Calculate total QSO rate over specified time period"""
@@ -126,9 +239,6 @@ class ScoreReporter:
                 for band in current_by_band:
                     current = current_by_band[band]
                     current_qsos = current['qsos']
-                    
-                    # Find the closest previous data point for this band
-                    previous_qsos = 0
                     rate = 0
                     
                     for prev_row in previous_data:
