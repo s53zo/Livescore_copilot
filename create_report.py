@@ -3,11 +3,11 @@ import argparse
 import sqlite3
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 class ScoreReporter:
-    def __init__(self, db_path='contest_data.db', template_path='templates/score_template.html'):
+    def __init__(self, db_path='contest_data.db', template_path='templates/contest_template.html'):
         self.db_path = db_path
         self.template_path = template_path
         self.setup_logging()
@@ -20,7 +20,6 @@ class ScoreReporter:
         self.logger = logging.getLogger('ScoreReporter')
 
     def load_template(self):
-        """Load HTML template from file"""
         try:
             with open(self.template_path, 'r') as f:
                 return f.read()
@@ -117,9 +116,9 @@ class ScoreReporter:
             self.logger.error(f"Database error: {e}")
             return None
 
-    def get_band_breakdown(self, station_id):
-        """Get band breakdown for a station"""
-        query = """
+    def get_band_breakdown_with_rate(self, station_id, callsign, contest):
+        """Get band breakdown and calculate QSO rate for each band"""
+        current_query = """
             SELECT band, qsos, multipliers
             FROM band_breakdown
             WHERE contest_score_id = ?
@@ -134,21 +133,56 @@ class ScoreReporter:
             END;
         """
         
+        hour_ago_query = """
+            SELECT bb.band, bb.qsos
+            FROM contest_scores cs
+            JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+            WHERE cs.callsign = ? 
+            AND cs.contest = ?
+            AND cs.timestamp >= datetime(?, '-1 hour')
+            AND cs.timestamp < ?
+            ORDER BY cs.timestamp DESC
+            LIMIT 1;
+        """
+        
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query, (station_id,))
-                return {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+                
+                # Get current band breakdown
+                cursor.execute(current_query, (station_id,))
+                current_data = cursor.fetchall()
+                current_by_band = {row[0]: (row[1], row[2]) for row in current_data}
+                
+                # Get timestamp of the current record
+                cursor.execute("SELECT timestamp FROM contest_scores WHERE id = ?", (station_id,))
+                current_timestamp = cursor.fetchone()[0]
+                
+                # Get data from an hour ago
+                cursor.execute(hour_ago_query, (callsign, contest, current_timestamp, current_timestamp))
+                hour_ago_data = cursor.fetchall()
+                hour_ago_by_band = {row[0]: row[1] for row in hour_ago_data}
+                
+                # Calculate rates and combine data
+                result = {}
+                for band in current_by_band:
+                    current_qsos, mults = current_by_band[band]
+                    hour_ago_qsos = hour_ago_by_band.get(band, 0)
+                    rate = max(0, current_qsos - hour_ago_qsos)  # Ensure rate is not negative
+                    result[band] = (current_qsos, mults, rate)
+                
+                return result
+                
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
             return {}
 
-    def format_band_data(self, band_breakdown, band):
-        """Format band data as QSO/Mults"""
-        if band in band_breakdown:
-            qsos, mults = band_breakdown[band]
-            return f"{qsos}/{mults}"
-        return "-/-"
+    def format_band_data(self, band_data):
+        """Format band data as QSO/Mults (rate/h)"""
+        if band_data:
+            qsos, mults, rate = band_data
+            return f"{qsos}/{mults} ({rate})"
+        return "-/- (0)"
 
     def generate_html(self, callsign, contest, stations, output_dir):
         """Generate HTML report"""
@@ -166,7 +200,7 @@ class ScoreReporter:
             station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
             
             # Get band breakdown for this station
-            band_breakdown = self.get_band_breakdown(station_id)
+            band_breakdown = self.get_band_breakdown_with_rate(station_id, callsign_val, contest)
             
             # Format timestamp
             ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
@@ -180,12 +214,12 @@ class ScoreReporter:
                 <td>{i}</td>
                 <td>{callsign_val}</td>
                 <td>{score:,}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown, '160')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown, '80')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown, '40')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown, '20')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown, '15')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown, '10')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('160'))}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('80'))}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('40'))}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('20'))}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('15'))}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('10'))}</td>
                 <td class="band-data">{qsos}/{mults}</td>
                 <td>{ts}</td>
             </tr>"""
@@ -233,7 +267,7 @@ def main():
         if not success:
             sys.exit(1)
     else:
-        print(f"No data found for {callsign} in {contest}")
+        print(f"No data found for {args.callsign} in {args.contest}")
         sys.exit(1)
 
 if __name__ == "__main__":
