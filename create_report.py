@@ -213,7 +213,7 @@ class ScoreReporter:
         os.makedirs(output_dir, exist_ok=True)
         
         # Write HTML file
-        output_file = os.path.join(output_dir, f'score_report_{callsign}_{contest}.html')
+        output_file = os.path.join(output_dir, 'live.html')
         try:
             with open(output_file, 'w') as f:
                 f.write(html_content)
