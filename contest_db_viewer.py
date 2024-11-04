@@ -13,7 +13,7 @@ class ContestDatabaseViewer:
         self.setup_logging()
         
     def setup_logging(self):
-        """Setup logging configuration"""
+        """Setup logging configuration """
         log_level = logging.DEBUG if self.debug else logging.INFO
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         console_handler = logging.StreamHandler(sys.stdout)
