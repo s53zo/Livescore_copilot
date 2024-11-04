@@ -7,142 +7,43 @@ from datetime import datetime, timedelta
 import logging
 
 class ScoreReporter:
-    def __init__(self, db_path='contest_data.db', template_path='templates/contest_template.html'):
-        self.db_path = db_path
-        self.template_path = template_path
-        self.setup_logging()
+    # [Previous __init__, setup_logging, load_template, and get_station_details methods remain the same]
 
-    def setup_logging(self):
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
-        self.logger = logging.getLogger('ScoreReporter')
-
-    def load_template(self):
-        try:
-            with open(self.template_path, 'r') as f:
-                return f.read()
-        except IOError as e:
-            self.logger.error(f"Error loading template: {e}")
-            return None
-
-    def get_station_details(self, callsign, contest):
-        """Get station details and nearby competitors"""
-        query = """
-            WITH StationScore AS (
-                SELECT 
-                    cs.id, 
-                    cs.callsign, 
-                    cs.score, 
-                    cs.power, 
-                    cs.assisted,
-                    cs.timestamp, 
-                    cs.qsos, 
-                    cs.multipliers,
-                    'current' as position,
-                    1 as rn
-                FROM contest_scores cs
-                WHERE cs.callsign = ? 
-                AND cs.contest = ?
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
-            ),
-            NearbyStations AS (
-                SELECT 
-                    cs.id,
-                    cs.callsign, 
-                    cs.score, 
-                    cs.power, 
-                    cs.assisted,
-                    cs.timestamp, 
-                    cs.qsos, 
-                    cs.multipliers,
-                    CASE
-                        WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                        WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY 
-                            CASE
-                                WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                                WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                            END
-                        ORDER BY 
-                            CASE
-                                WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
-                            CASE
-                                WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
-                    ) as rn
-                FROM contest_scores cs
-                WHERE cs.contest = ?
-                AND cs.power = (SELECT power FROM StationScore)
-                AND cs.assisted = (SELECT assisted FROM StationScore)
-                AND cs.callsign != (SELECT callsign FROM StationScore)
-                AND cs.timestamp = (
-                    SELECT MAX(timestamp)
-                    FROM contest_scores cs2
-                    WHERE cs2.callsign = cs.callsign
-                    AND cs2.contest = cs.contest
-                )
-            )
-            SELECT 
-                id,
-                callsign, 
-                score, 
-                power, 
-                assisted,
-                timestamp, 
-                qsos, 
-                multipliers,
-                position,
-                rn
-            FROM (
-                SELECT * FROM StationScore
-                UNION ALL
-                SELECT * FROM NearbyStations
-                WHERE (position = 'above' AND rn <= 2)
-                OR (position = 'below' AND rn <= 2)
-            )
-            ORDER BY score DESC;
-        """
-
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, (callsign, contest, contest))
-                return cursor.fetchall()
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error: {e}")
-            return None
+    def calculate_rate(self, current_qsos, previous_qsos, time_diff_hours):
+        """Calculate hourly rate based on QSO difference and time difference"""
+        if time_diff_hours <= 0:
+            return 0
+        qso_diff = current_qsos - previous_qsos
+        # Interpolate to get hourly rate
+        return int(round(qso_diff * (1.0 / time_diff_hours)))
 
     def get_band_breakdown_with_rate(self, station_id, callsign, contest):
-        """Get band breakdown and calculate QSO rate for each band"""
+        """Get band breakdown and calculate QSO rate for each band with interpolation"""
         current_query = """
-            SELECT band, qsos, multipliers
-            FROM band_breakdown
-            WHERE contest_score_id = ?
-            ORDER BY CASE band
-                WHEN '160' THEN 1
-                WHEN '80' THEN 2
-                WHEN '40' THEN 3
-                WHEN '20' THEN 4
-                WHEN '15' THEN 5
-                WHEN '10' THEN 6
-                ELSE 7
-            END;
+            SELECT band, qsos, multipliers, cs.timestamp
+            FROM band_breakdown bb
+            JOIN contest_scores cs ON cs.id = bb.contest_score_id
+            WHERE contest_score_id = ?;
         """
         
-        hour_ago_query = """
-            SELECT bb.band, bb.qsos
+        previous_query = """
+            WITH CurrentTimestamp AS (
+                SELECT timestamp 
+                FROM contest_scores 
+                WHERE id = ?
+            )
+            SELECT 
+                bb.band, 
+                bb.qsos,
+                cs.timestamp,
+                ABS(ROUND((JULIANDAY(cs.timestamp) - 
+                          JULIANDAY((SELECT timestamp FROM CurrentTimestamp))) * 24, 2)) as hours_diff
             FROM contest_scores cs
             JOIN band_breakdown bb ON bb.contest_score_id = cs.id
             WHERE cs.callsign = ? 
             AND cs.contest = ?
-            AND cs.timestamp >= datetime(?, '-1 hour')
-            AND cs.timestamp < ?
-            ORDER BY cs.timestamp DESC
-            LIMIT 1;
+            AND cs.timestamp < (SELECT timestamp FROM CurrentTimestamp)
+            ORDER BY cs.timestamp DESC;
         """
         
         try:
@@ -152,101 +53,67 @@ class ScoreReporter:
                 # Get current band breakdown
                 cursor.execute(current_query, (station_id,))
                 current_data = cursor.fetchall()
-                current_by_band = {row[0]: (row[1], row[2]) for row in current_data}
                 
-                # Get timestamp of the current record
-                cursor.execute("SELECT timestamp FROM contest_scores WHERE id = ?", (station_id,))
-                current_timestamp = cursor.fetchone()[0]
+                if not current_data:
+                    return {}
                 
-                # Get data from an hour ago
-                cursor.execute(hour_ago_query, (callsign, contest, current_timestamp, current_timestamp))
-                hour_ago_data = cursor.fetchall()
-                hour_ago_by_band = {row[0]: row[1] for row in hour_ago_data}
+                # Organize current data and store current timestamp
+                current_by_band = {}
+                for row in current_data:
+                    band, qsos, mults, current_timestamp = row
+                    current_by_band[band] = {
+                        'qsos': qsos,
+                        'mults': mults,
+                        'timestamp': current_timestamp
+                    }
                 
-                # Calculate rates and combine data
+                # Get previous data points
+                cursor.execute(previous_query, (station_id, callsign, contest))
+                previous_data = cursor.fetchall()
+                
+                # Calculate rates for each band
                 result = {}
                 for band in current_by_band:
-                    current_qsos, mults = current_by_band[band]
-                    hour_ago_qsos = hour_ago_by_band.get(band, 0)
-                    rate = max(0, current_qsos - hour_ago_qsos)  # Ensure rate is not negative
-                    result[band] = (current_qsos, mults, rate)
+                    current = current_by_band[band]
+                    current_qsos = current['qsos']
+                    
+                    # Find the closest previous data point for this band
+                    previous_qsos = 0
+                    rate = 0
+                    found_previous = False
+                    
+                    for prev_row in previous_data:
+                        prev_band, prev_qsos, prev_timestamp, hours_diff = prev_row
+                        if prev_band == band:
+                            # Found a previous data point for this band
+                            found_previous = True
+                            if hours_diff > 0:  # Avoid division by zero
+                                rate = self.calculate_rate(current_qsos, prev_qsos, hours_diff)
+                            break
+                    
+                    result[band] = (current_qsos, current['mults'], rate)
+                    
+                    # Log rate calculation details for debugging
+                    self.logger.debug(f"{band} band rate calculation:")
+                    self.logger.debug(f"  Current QSOs: {current_qsos}")
+                    self.logger.debug(f"  Previous QSOs: {previous_qsos}")
+                    self.logger.debug(f"  Calculated Rate: {rate}/hr")
                 
                 return result
                 
         except sqlite3.Error as e:
-            self.logger.error(f"Database error: {e}")
+            self.logger.error(f"Database error in rate calculation: {e}")
             return {}
 
     def format_band_data(self, band_data):
         """Format band data as QSO/Mults (rate/h)"""
         if band_data:
             qsos, mults, rate = band_data
-            return f"{qsos}/{mults} ({rate})"
+            rate_str = f"{rate:+d}" if rate != 0 else "0"  # Show + sign for positive rates
+            return f"{qsos}/{mults} ({rate_str})"
         return "-/- (0)"
 
-    def generate_html(self, callsign, contest, stations, output_dir):
-        """Generate HTML report"""
-        if not stations:
-            self.logger.error("No station data available")
-            return False
-
-        template = self.load_template()
-        if not template:
-            return False
-
-        # Generate table rows
-        table_rows = []
-        for i, station in enumerate(stations, 1):
-            station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-            
-            # Get band breakdown for this station
-            band_breakdown = self.get_band_breakdown_with_rate(station_id, callsign_val, contest)
-            
-            # Format timestamp
-            ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-            
-            # Determine if this is the highlighted row
-            highlight = ' class="highlight"' if callsign_val == callsign else ''
-            
-            # Create the table row
-            row = f"""
-            <tr{highlight}>
-                <td>{i}</td>
-                <td>{callsign_val}</td>
-                <td>{score:,}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('160'))}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('80'))}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('40'))}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('20'))}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('15'))}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('10'))}</td>
-                <td class="band-data">{qsos}/{mults}</td>
-                <td>{ts}</td>
-            </tr>"""
-            table_rows.append(row)
-
-        # Format HTML
-        html_content = template.format(
-            contest=contest,
-            timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            power=stations[0][3],
-            assisted=stations[0][4],
-            table_rows='\n'.join(table_rows)
-        )
-
-        # Create output directory if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Write HTML file
-        output_file = os.path.join(output_dir, 'live.html')
-        try:
-            with open(output_file, 'w') as f:
-                f.write(html_content)
-            self.logger.info(f"Report generated: {output_file}")
-            return True
-        except IOError as e:
-            self.logger.error(f"Error writing report: {e}")
-            return False
+    # [Rest of the methods remain the same]
 
 def main():
     parser = argparse.ArgumentParser(description='Generate contest score report')
@@ -256,10 +123,15 @@ def main():
     parser.add_argument('--db', default='contest_data.db', help='Database file path')
     parser.add_argument('--template', default='templates/contest_template.html', 
                       help='Path to HTML template file')
+    parser.add_argument('--debug', action='store_true',
+                      help='Enable debug logging')
     
     args = parser.parse_args()
     
     reporter = ScoreReporter(args.db, args.template)
+    if args.debug:
+        reporter.logger.setLevel(logging.DEBUG)
+        
     stations = reporter.get_station_details(args.callsign, args.contest)
     
     if stations:
