@@ -2,9 +2,9 @@
 import argparse
 import sqlite3
 import os
+import sys
 from datetime import datetime
 import logging
-import pkg_resources
 
 class ScoreReporter:
     def __init__(self, db_path='contest_data.db', template_path='templates/score_template.html'):
@@ -33,8 +33,17 @@ class ScoreReporter:
         """Get station details and nearby competitors"""
         query = """
             WITH StationScore AS (
-                SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
-                       cs.timestamp, cs.qsos, cs.multipliers
+                SELECT 
+                    cs.id, 
+                    cs.callsign, 
+                    cs.score, 
+                    cs.power, 
+                    cs.assisted,
+                    cs.timestamp, 
+                    cs.qsos, 
+                    cs.multipliers,
+                    'current' as position,
+                    1 as rn
                 FROM contest_scores cs
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
@@ -42,12 +51,31 @@ class ScoreReporter:
                 LIMIT 1
             ),
             NearbyStations AS (
-                SELECT cs.callsign, cs.score, cs.power, cs.assisted,
-                       cs.timestamp, cs.qsos, cs.multipliers,
-                       CASE
-                           WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                           WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                       END as position
+                SELECT 
+                    cs.id,
+                    cs.callsign, 
+                    cs.score, 
+                    cs.power, 
+                    cs.assisted,
+                    cs.timestamp, 
+                    cs.qsos, 
+                    cs.multipliers,
+                    CASE
+                        WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                        WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                    END as position,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY 
+                            CASE
+                                WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                                WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                            END
+                        ORDER BY 
+                            CASE
+                                WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
+                            CASE
+                                WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
+                    ) as rn
                 FROM contest_scores cs
                 WHERE cs.contest = ?
                 AND cs.power = (SELECT power FROM StationScore)
@@ -60,27 +88,24 @@ class ScoreReporter:
                     AND cs2.contest = cs.contest
                 )
             )
-            SELECT * FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY position ORDER BY 
-                    CASE position 
-                        WHEN 'above' THEN score END ASC,
-                    CASE position 
-                        WHEN 'below' THEN score END DESC
-                ) as rn
-                FROM NearbyStations
-                WHERE position = 'above'
+            SELECT 
+                id,
+                callsign, 
+                score, 
+                power, 
+                assisted,
+                timestamp, 
+                qsos, 
+                multipliers,
+                position,
+                rn
+            FROM (
+                SELECT * FROM StationScore
                 UNION ALL
-                SELECT *, 1 as rn
-                FROM StationScore
-                CROSS JOIN (SELECT 'current' as position)
-                UNION ALL
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY position ORDER BY score DESC) as rn
-                FROM NearbyStations
-                WHERE position = 'below'
+                SELECT * FROM NearbyStations
+                WHERE (position = 'above' AND rn <= 2)
+                OR (position = 'below' AND rn <= 2)
             )
-            WHERE (position = 'above' AND rn <= 2)
-            OR position = 'current'
-            OR (position = 'below' AND rn <= 2)
             ORDER BY score DESC;
         """
 
@@ -222,4 +247,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-  
