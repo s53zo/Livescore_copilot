@@ -183,41 +183,46 @@ class ContestDatabaseViewer:
             self.logger.info(f"Valid sort fields are: {', '.join(valid_sort_fields.keys())}")
             sys.exit(1)
 
-        # Base query
-        base_select = """
-            SELECT 
-                timestamp,
-                contest,
-                callsign,
-                power,
-                score,
-                qsos,
-                multipliers,
-                club,
-                section,
-                assisted,
-                mode
+        sort_order = sort_order.upper()
+        if sort_order not in ['ASC', 'DESC']:
+            self.logger.error(f"Invalid sort order: {sort_order}")
+            self.logger.info("Valid sort orders are: ASC, DESC")
+            sys.exit(1)
+
+        # Base query using CTE to get latest scores
+        base_query = """
+            WITH latest_scores AS (
+                SELECT DISTINCT ON (cs.callsign, cs.contest) 
+                    cs.timestamp,
+                    cs.contest,
+                    cs.callsign,
+                    cs.power,
+                    cs.score,
+                    cs.qsos,
+                    cs.multipliers,
+                    cs.club,
+                    cs.section,
+                    cs.assisted,
+                    cs.mode
+                FROM contest_scores cs
+                WHERE 1=1
+                {contest_filter}
+                ORDER BY cs.callsign, cs.contest, cs.timestamp DESC
+            )
+            SELECT * FROM latest_scores
+            ORDER BY {sort_field} {sort_order}
+            {limit_clause}
         """
 
-        if latest:
-            query = f"{base_select} FROM contest_scores cs1 WHERE timestamp = (SELECT MAX(timestamp) FROM contest_scores cs2 WHERE cs2.callsign = cs1.callsign"
-        else:
-            query = f"{base_select} FROM contest_scores WHERE 1=1"
-
-        if contest:
-            if latest:
-                query += f" AND cs2.contest = ?"
-                query += ")"
-            else:
-                query += " AND contest = ?"
-
-        elif latest:
-            query += ")"
-
-        query += f" ORDER BY {valid_sort_fields[sort_by]} {sort_order}"
-
-        if limit:
-            query += f" LIMIT {limit}"
+        contest_filter = " AND contest = ?" if contest else ""
+        limit_clause = f" LIMIT {limit}" if limit else ""
+        
+        query = base_query.format(
+            contest_filter=contest_filter,
+            sort_field=valid_sort_fields[sort_by],
+            sort_order=sort_order,
+            limit_clause=limit_clause
+        )
         
         self.logger.debug(f"Executing query: {query}")
         
@@ -229,7 +234,7 @@ class ContestDatabaseViewer:
                 cursor.execute(query)
             results = cursor.fetchall()
             self.logger.debug(f"Retrieved {len(results)} records")
-            return results
+            return results 
 
     def get_band_breakdown(self, callsign=None, contest=None):
         """Retrieve band breakdown for specific callsign or all"""
