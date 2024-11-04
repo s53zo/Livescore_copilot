@@ -1,1 +1,108 @@
-ttt
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contest Progress Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            color: #333;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .info {
+            color: #7f8c8d;
+            margin-bottom: 20px;
+        }
+        
+        .category-info {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        th, td {
+            border: 1px solid #dee2e6;
+            padding: 12px 8px;
+            text-align: center;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        .highlight {
+            background-color: #e8f5e9 !important;
+            font-weight: bold;
+        }
+        
+        .highlight td {
+            border-top: 2px solid #4caf50;
+            border-bottom: 2px solid #4caf50;
+        }
+        
+        .band-breakdown {
+            margin-top: 30px;
+        }
+        
+        .band-breakdown h2 {
+            color: #2c3e50;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        
+        .timestamp {
+            font-style: italic;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <h1>Contest Progress Report - {contest}</h1>
+    <p class="timestamp">Updated: {timestamp}</p>
+    <div class="category-info">
+        <strong>Category:</strong> Power: {power} | Assisted: {assisted}
+    </div>
+    <table>
+        <tr>
+            <th>Place</th>
+            <th>Call Sign</th>
+            <th>Score</th>
+            <th>QSOs</th>
+            <th>Multipliers</th>
+            <th>Last Update</th>
+        </tr>
+        {table_rows}
+    </table>
+    <div class="band-breakdown">
+        <h2>Band Breakdown for {callsign}</h2>
+        <table>
+            <tr>
+                <th>Band</th>
+                <th>QSOs</th>
+                <th>Points</th>
+                <th>Multipliers</th>
+            </tr>
+            {band_breakdown}
+        </table>
+    </div>
+</body>
+</html>
