@@ -7,13 +7,12 @@ from datetime import datetime
 import logging
 
 class ScoreReporter:
-    def __init__(self, db_path='contest_data.db', template_path='templates/score_template.html'):
+    def __init__(self, db_path='contest_data.db', template_path='templates/contest_template.html'):
         self.db_path = db_path
         self.template_path = template_path
         self.setup_logging()
 
     def setup_logging(self):
-        """Setup logging configuration"""
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s'
@@ -113,32 +112,18 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(query, (callsign, contest, contest))
-                stations = cursor.fetchall()
-                
-                if not stations:
-                    self.logger.error(f"No data found for {callsign} in {contest}")
-                    return None
-                
-                return stations
+                return cursor.fetchall()
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
             return None
 
-    def get_band_breakdown(self, callsign, contest):
+    def get_band_breakdown(self, station_id):
         """Get band breakdown for a station"""
         query = """
-            SELECT bb.band, bb.qsos, bb.points, bb.multipliers
-            FROM contest_scores cs
-            JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-            WHERE cs.callsign = ?
-            AND cs.contest = ?
-            AND cs.timestamp = (
-                SELECT MAX(timestamp)
-                FROM contest_scores
-                WHERE callsign = ?
-                AND contest = ?
-            )
-            ORDER BY CASE bb.band
+            SELECT band, qsos, multipliers
+            FROM band_breakdown
+            WHERE contest_score_id = ?
+            ORDER BY CASE band
                 WHEN '160' THEN 1
                 WHEN '80' THEN 2
                 WHEN '40' THEN 3
@@ -152,11 +137,18 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query, (callsign, contest, callsign, contest))
-                return cursor.fetchall()
+                cursor.execute(query, (station_id,))
+                return {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
-            return None
+            return {}
+
+    def format_band_data(self, band_breakdown, band):
+        """Format band data as QSO/Mults"""
+        if band in band_breakdown:
+            qsos, mults = band_breakdown[band]
+            return f"{qsos}/{mults}"
+        return "-/-"
 
     def generate_html(self, callsign, contest, stations, output_dir):
         """Generate HTML report"""
@@ -171,32 +163,33 @@ class ScoreReporter:
         # Generate table rows
         table_rows = []
         for i, station in enumerate(stations, 1):
-            callsign_cell = station[1]
-            highlight = ' class="highlight"' if station[1] == callsign else ''
-            ts = datetime.strptime(station[5], '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+            station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+            
+            # Get band breakdown for this station
+            band_breakdown = self.get_band_breakdown(station_id)
+            
+            # Format timestamp
+            ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+            
+            # Determine if this is the highlighted row
+            highlight = ' class="highlight"' if callsign_val == callsign else ''
+            
+            # Create the table row
             row = f"""
             <tr{highlight}>
                 <td>{i}</td>
-                <td>{station[1]}</td>
-                <td>{station[2]:,}</td>
-                <td>{station[6]:,}</td>
-                <td>{station[7]:,}</td>
+                <td>{callsign_val}</td>
+                <td>{score:,}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown, '160')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown, '80')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown, '40')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown, '20')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown, '15')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown, '10')}</td>
+                <td class="band-data">{qsos}/{mults}</td>
                 <td>{ts}</td>
             </tr>"""
             table_rows.append(row)
-
-        # Get band breakdown
-        band_breakdown = self.get_band_breakdown(callsign, contest)
-        band_rows = []
-        if band_breakdown:
-            for band_data in band_breakdown:
-                band_rows.append(f"""
-                <tr>
-                    <td>{band_data[0]}m</td>
-                    <td>{band_data[1]:,}</td>
-                    <td>{band_data[2]:,}</td>
-                    <td>{band_data[3]:,}</td>
-                </tr>""")
 
         # Format HTML
         html_content = template.format(
@@ -204,9 +197,7 @@ class ScoreReporter:
             timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             power=stations[0][3],
             assisted=stations[0][4],
-            callsign=callsign,
-            table_rows='\n'.join(table_rows),
-            band_breakdown='\n'.join(band_rows)
+            table_rows='\n'.join(table_rows)
         )
 
         # Create output directory if it doesn't exist
@@ -229,7 +220,7 @@ def main():
     parser.add_argument('--contest', required=True, help='Contest name')
     parser.add_argument('--output-dir', required=True, help='Output directory for report')
     parser.add_argument('--db', default='contest_data.db', help='Database file path')
-    parser.add_argument('--template', default='templates/score_template.html', 
+    parser.add_argument('--template', default='templates/contest_template.html', 
                       help='Path to HTML template file')
     
     args = parser.parse_args()
@@ -242,8 +233,9 @@ def main():
         if not success:
             sys.exit(1)
     else:
-        print(f"No data found for {args.callsign} in {args.contest}")
+        print(f"No data found for {callsign} in {contest}")
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
+    
