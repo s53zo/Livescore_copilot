@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 class ScoreReporter:
-    def __init__(self, db_path='contest_data.db', template_path='templates/contest_template.html'):
+    def __init__(self, db_path='contest_data.db', template_path='templates/score_template.html'):
         self.db_path = db_path
         self.template_path = template_path
         self.setup_logging()
