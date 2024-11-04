@@ -189,12 +189,13 @@ class ContestDatabaseViewer:
             self.logger.info("Valid sort orders are: ASC, DESC")
             sys.exit(1)
 
-        # Base query using subquery to get latest scores
+        # Use a subquery to get the latest record ID for each callsign/contest combination
         query = """
-            WITH latest_timestamps AS (
-                SELECT callsign, contest, MAX(timestamp) as max_ts
-                FROM contest_scores
-                {where_clause}
+            WITH latest_records AS (
+                SELECT MAX(id) as latest_id
+                FROM contest_scores cs1
+                WHERE 1=1
+                {contest_filter}
                 GROUP BY callsign, contest
             )
             SELECT 
@@ -210,32 +211,22 @@ class ContestDatabaseViewer:
                 cs.assisted,
                 cs.mode
             FROM contest_scores cs
-            JOIN latest_timestamps lt 
-                ON cs.callsign = lt.callsign 
-                AND cs.contest = lt.contest 
-                AND cs.timestamp = lt.max_ts
-            {contest_where}
+            INNER JOIN latest_records lr ON cs.id = lr.latest_id
             ORDER BY {sort_field} {sort_order}
             {limit_clause}
         """
 
-        where_clause = "WHERE 1=1"
         contest_where = ""
         params = []
-
         if contest:
-            where_clause += " AND contest = ?"
-            contest_where = "WHERE cs.contest = ?"
-            params.extend([contest, contest])
+            contest_where = "AND contest = ?"
+            params.append(contest)
 
-        limit_clause = f" LIMIT {limit}" if limit else ""
-        
         formatted_query = query.format(
-            where_clause=where_clause,
-            contest_where=contest_where,
+            contest_filter=contest_where,
             sort_field=valid_sort_fields[sort_by],
             sort_order=sort_order,
-            limit_clause=limit_clause
+            limit_clause=f"LIMIT {limit}" if limit else ""
         )
         
         self.logger.debug(f"Executing query: {formatted_query}")
