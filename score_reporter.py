@@ -31,8 +31,18 @@ class ScoreReporter:
             self.logger.error(f"Error loading template: {e}")
             return None
 
-    def get_station_details(self, callsign, contest):
-        """Get station details and nearby competitors"""
+    # In score_reporter.py, replace the get_station_details method with this version:
+
+    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
+        """
+        Get station details and nearby competitors with optional DXCC/Zone filtering
+        
+        Args:
+            callsign: Target station callsign
+            contest: Contest name
+            filter_type: Optional - 'dxcc', 'cq_zone', or 'iaru_zone'
+            filter_value: Value to filter by (country name or zone number)
+        """
         query = """
             WITH StationScore AS (
                 SELECT 
@@ -44,9 +54,13 @@ class ScoreReporter:
                     cs.timestamp, 
                     cs.qsos, 
                     cs.multipliers,
+                    qi.dxcc_country,
+                    qi.cq_zone,
+                    qi.iaru_zone,
                     'current' as position,
                     1 as rn
                 FROM contest_scores cs
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
                 ORDER BY cs.timestamp DESC
@@ -62,6 +76,9 @@ class ScoreReporter:
                     cs.timestamp, 
                     cs.qsos, 
                     cs.multipliers,
+                    qi.dxcc_country,
+                    qi.cq_zone,
+                    qi.iaru_zone,
                     CASE
                         WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
                         WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
@@ -79,10 +96,12 @@ class ScoreReporter:
                                 WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
                     ) as rn
                 FROM contest_scores cs
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ?
                 AND cs.power = (SELECT power FROM StationScore)
                 AND cs.assisted = (SELECT assisted FROM StationScore)
                 AND cs.callsign != (SELECT callsign FROM StationScore)
+                {filter_clause}
                 AND cs.timestamp = (
                     SELECT MAX(timestamp)
                     FROM contest_scores cs2
@@ -110,15 +129,31 @@ class ScoreReporter:
             )
             ORDER BY score DESC;
         """
-
+        
+        params = [callsign, contest, contest]
+        filter_clause = ""
+        
+        if filter_type and filter_value:
+            if filter_type == 'dxcc':
+                filter_clause = "AND qi.dxcc_country = ?"
+                params.append(filter_value)
+            elif filter_type == 'cq_zone':
+                filter_clause = "AND qi.cq_zone = ?"
+                params.append(filter_value)
+            elif filter_type == 'iaru_zone':
+                filter_clause = "AND qi.iaru_zone = ?"
+                params.append(filter_value)
+        
+        formatted_query = query.format(filter_clause=filter_clause)
+        
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query, (callsign, contest, contest))
+                cursor.execute(formatted_query, params)
                 stations = cursor.fetchall()
                 
                 if not stations:
-                    self.logger.error(f"No data found for {callsign} in {contest}")
+                    self.logger.error(f"No data found for {callsign} in {contest} with filter {filter_type}={filter_value}")
                     return None
                 
                 return stations
