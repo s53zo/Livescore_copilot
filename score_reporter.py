@@ -71,7 +71,7 @@ class ScoreReporter:
                 SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
                        cs.timestamp, cs.qsos, cs.multipliers
                 FROM contest_scores cs
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ?
                 AND cs.power = (SELECT power FROM StationScore)
                 AND cs.assisted = (SELECT assisted FROM StationScore)
@@ -145,41 +145,25 @@ class ScoreReporter:
                     self.logger.debug(f"Applying DXCC filter: {filter_value}")
                 elif filter_type == 'cq_zone':
                     # Convert filter_value to integer for CQ zone
-                    zone_num = int(filter_value)
-                    filter_clause = "AND qi.cq_zone = ?"
-                    params.append(zone_num)
-                    self.logger.debug(f"Applying CQ zone filter: {zone_num}")
+                    filter_clause = "AND CAST(qi.cq_zone AS TEXT) = ?"
+                    params.append(str(filter_value))
+                    self.logger.debug(f"Applying CQ zone filter: {filter_value}")
                 elif filter_type == 'iaru_zone':
                     # Convert filter_value to integer for IARU zone
-                    zone_num = int(filter_value)
-                    filter_clause = "AND qi.iaru_zone = ?"
-                    params.append(zone_num)
-                    self.logger.debug(f"Applying IARU zone filter: {zone_num}")
+                    filter_clause = "AND CAST(qi.iaru_zone AS TEXT) = ?"
+                    params.append(str(filter_value))
+                    self.logger.debug(f"Applying IARU zone filter: {filter_value}")
             except ValueError as e:
                 self.logger.error(f"Error converting zone value: {filter_value} - {str(e)}")
                 return None
         
         formatted_query = query.format(filter_clause=filter_clause)
         self.logger.debug(f"Executing query with params: {params}")
+        self.logger.debug(f"Query: {formatted_query}")
         
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # First, let's verify the data in the database
-                if filter_type in ['cq_zone', 'iaru_zone']:
-                    verify_query = """
-                        SELECT DISTINCT qi.cq_zone, qi.iaru_zone, cs.callsign
-                        FROM contest_scores cs
-                        JOIN qth_info qi ON qi.contest_score_id = cs.id
-                        WHERE cs.contest = ?
-                        ORDER BY cs.callsign
-                    """
-                    cursor.execute(verify_query, [contest])
-                    results = cursor.fetchall()
-                    self.logger.debug(f"Available zones in contest: {results}")
-                
-                # Execute main query
                 cursor.execute(formatted_query, params)
                 stations = cursor.fetchall()
                 
@@ -188,6 +172,8 @@ class ScoreReporter:
                     return None
                 
                 self.logger.debug(f"Found {len(stations)} matching stations")
+                for station in stations:
+                    self.logger.debug(f"Station: {station}")
                 return stations
                 
         except sqlite3.Error as e:
