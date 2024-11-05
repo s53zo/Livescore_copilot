@@ -6,7 +6,7 @@ After=network.target
 User=root
 Group=root
 WorkingDirectory=/opt/livescore
-ExecStart=/usr/local/bin/gunicorn --bind 127.0.0.1:8089 web_interface:app
+ExecStart=/usr/local/bin/gunicorn -c gunicorn_config.py web_interface:app
 Restart=always
 
 [Install]
