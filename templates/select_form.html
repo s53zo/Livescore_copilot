@@ -120,6 +120,7 @@
                     </select>
                 </div>
 
+                <!-- Filter value dropdowns -->
                 <div class="form-group hidden" id="dxcc_filter">
                     <label for="dxcc_value">Select Country:</label>
                     <select name="filter_value" id="dxcc_value">
@@ -166,20 +167,16 @@
         });
 
         document.getElementById('filter_type').addEventListener('change', function() {
-            // Hide all filter value selects
+            // Hide all filter value selects and clear their values
             document.querySelectorAll('#dxcc_filter, #cq_zone_filter, #iaru_zone_filter').forEach(el => {
                 el.classList.add('hidden');
+                el.querySelector('select').value = '';
             });
             
-            // Show the selected filter's value select
+            // Show only the selected filter's value dropdown
             if (this.value) {
                 document.getElementById(this.value + '_filter').classList.remove('hidden');
             }
-
-            // Clear all filter values when changing filter type
-            document.querySelectorAll('select[name="filter_value"]').forEach(select => {
-                select.value = '';
-            });
         });
 
         // Enable/disable generate button based on required selections
