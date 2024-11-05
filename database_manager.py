@@ -16,6 +16,8 @@ class DatabaseManager:
             # Primary table indexes
             """CREATE INDEX IF NOT EXISTS idx_contest_scores_callsign_contest 
                ON contest_scores(callsign, contest)""",
+
+            """CREATE INDEX IF NOT EXISTS idx_qth_contest_score_id ON qth_info(contest_score_id)""",
             
             """CREATE INDEX IF NOT EXISTS idx_contest_scores_timestamp 
                ON contest_scores(timestamp)""",
