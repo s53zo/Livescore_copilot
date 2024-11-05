@@ -57,31 +57,56 @@ def index():
             cursor.execute("SELECT DISTINCT callsign FROM contest_scores ORDER BY callsign")
             callsigns = [row[0] for row in cursor.fetchall()]
             logger.debug(f"Found callsigns: {callsigns}")
-
-            cursor.execute("SELECT DISTINCT dxcc_country FROM qth_info WHERE dxcc_country IS NOT NULL")
-            dxcc_countries = [row[0] for row in cursor.fetchall()]
             
-            cursor.execute("SELECT DISTINCT cq_zone FROM qth_info WHERE cq_zone IS NOT NULL")
+            # Get available DXCC countries
+            logger.debug("Fetching DXCC countries")
+            cursor.execute("""
+                SELECT DISTINCT dxcc_country 
+                FROM qth_info 
+                WHERE dxcc_country IS NOT NULL AND dxcc_country != ''
+                ORDER BY dxcc_country
+            """)
+            countries = [row[0] for row in cursor.fetchall()]
+            logger.debug(f"Found countries: {countries}")
+            
+            # Get available CQ zones
+            logger.debug("Fetching CQ zones")
+            cursor.execute("""
+                SELECT DISTINCT cq_zone 
+                FROM qth_info 
+                WHERE cq_zone IS NOT NULL AND cq_zone != ''
+                ORDER BY cq_zone
+            """)
             cq_zones = [row[0] for row in cursor.fetchall()]
+            logger.debug(f"Found CQ zones: {cq_zones}")
             
-            cursor.execute("SELECT DISTINCT iaru_zone FROM qth_info WHERE iaru_zone IS NOT NULL")
+            # Get available IARU zones
+            logger.debug("Fetching IARU zones")
+            cursor.execute("""
+                SELECT DISTINCT iaru_zone 
+                FROM qth_info 
+                WHERE iaru_zone IS NOT NULL AND iaru_zone != ''
+                ORDER BY iaru_zone
+            """)
             iaru_zones = [row[0] for row in cursor.fetchall()]
-
-                  
+            logger.debug(f"Found IARU zones: {iaru_zones}")
+        
         if request.method == 'POST':
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
-            dxcc_country = request.form.get('dxcc_country')
-            cq_zone = request.form.get('cq_zone')
-            iaru_zone = request.form.get('iaru_zone')
+            filter_type = request.form.get('filter_type')
+            filter_value = request.form.get('filter_value')
+            
+            logger.info(f"POST request with callsign={callsign}, contest={contest}, "
+                       f"filter_type={filter_type}, filter_value={filter_value}")
             
             # Create reporter instance
             logger.debug("Creating ScoreReporter instance")
             reporter = ScoreReporter(Config.DB_PATH)
             
-            # Get station details
+            # Get station details with filters
             logger.debug("Getting station details")
-            stations = reporter.get_station_details(callsign, contest)
+            stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
             logger.debug(f"Station details result: {stations}")
             
             if stations:
@@ -98,18 +123,23 @@ def index():
                     return redirect('/reports/live.html')
                 else:
                     logger.error("Failed to generate report")
-                    return "Failed to generate report", 500
+                    return render_template('error.html', error="Failed to generate report")
             else:
                 logger.warning("No stations found")
-                return "No data found", 404
+                return render_template('error.html', error="No data found for the selected criteria")
         
         logger.debug("Rendering template")
-        return render_template('select_form.html', contests=contests, callsigns=callsigns, dxcc_countries=dxcc_countries, cq_zones=cq_zones, iaru_zones=iaru_zones)
+        return render_template('select_form.html', 
+                             contests=contests, 
+                             callsigns=callsigns,
+                             countries=countries,
+                             cq_zones=cq_zones,
+                             iaru_zones=iaru_zones)
     
     except Exception as e:
         logger.error("Exception occurred:")
         logger.error(traceback.format_exc())
-        return f"Error: {str(e)}", 500
+        return render_template('error.html', error=f"Error: {str(e)}")
 
 # Add error handlers
 @app.errorhandler(404)
