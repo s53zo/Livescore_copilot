@@ -141,17 +141,26 @@ class ScoreReporter:
         params = [callsign, contest, contest, contest]
         filter_clause = ""
         
-        if filter_type and filter_value:
+        # Check for both filter_type and non-empty filter_value
+        if filter_type and filter_value and str(filter_value).strip():
             self.logger.debug(f"Applying filter: {filter_type}={filter_value}")
+            
             if filter_type == 'dxcc':
                 filter_clause = "AND qi.dxcc_country = ?"
-                params.append(filter_value)
+                params.append(filter_value.strip())
+                self.logger.debug(f"Added DXCC filter: {filter_value.strip()}")
+                
             elif filter_type == 'cq_zone':
                 filter_clause = "AND CAST(qi.cq_zone AS TEXT) = ?"
-                params.append(str(filter_value))
+                params.append(str(filter_value).strip())
+                self.logger.debug(f"Added CQ zone filter: {filter_value.strip()}")
+                
             elif filter_type == 'iaru_zone':
                 filter_clause = "AND CAST(qi.iaru_zone AS TEXT) = ?"
-                params.append(str(filter_value))
+                params.append(str(filter_value).strip())
+                self.logger.debug(f"Added IARU zone filter: {filter_value.strip()}")
+        else:
+            self.logger.debug("No filter applied (missing or empty filter value)")
         
         formatted_query = query.format(filter_clause=filter_clause)
         self.logger.debug(f"Executing query with params: {params}")
@@ -160,20 +169,6 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # Debug query to check QTH info
-                if filter_type and filter_value:
-                    debug_query = """
-                        SELECT cs.callsign, qi.dxcc_country, qi.cq_zone, qi.iaru_zone
-                        FROM contest_scores cs
-                        JOIN qth_info qi ON qi.contest_score_id = cs.id
-                        WHERE cs.contest = ?
-                        ORDER BY cs.callsign
-                    """
-                    cursor.execute(debug_query, [contest])
-                    debug_results = cursor.fetchall()
-                    self.logger.debug(f"QTH info for contest: {debug_results}")
-                
                 cursor.execute(formatted_query, params)
                 stations = cursor.fetchall()
                 
@@ -182,6 +177,8 @@ class ScoreReporter:
                     return None
                 
                 self.logger.debug(f"Found {len(stations)} matching stations")
+                for station in stations:
+                    self.logger.debug(f"Matched station: {station[1]}")  # Log callsign
                 return stations
                 
         except sqlite3.Error as e:
