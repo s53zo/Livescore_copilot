@@ -172,6 +172,21 @@ def index():
             contest = request.form.get('contest')
             filter_type = request.form.get('filter_type')
             filter_value = request.form.get('filter_value')
+        
+            # Validate filter inputs
+            if filter_type and not filter_value:
+                return render_template('error.html', 
+                                     error="Filter type selected but no value provided")
+        
+            # Clean up filter inputs
+            if filter_type and filter_value:
+                filter_value = filter_value.strip()
+                if not filter_value:
+                    filter_type = None
+                    filter_value = None
+            else:
+                filter_type = None
+                filter_value = None
             
             logger.info(f"Processing report request: callsign={callsign}, contest={contest}, "
                        f"filter_type={filter_type}, filter_value={filter_value}")
