@@ -169,6 +169,94 @@ def get_example_queries():
         """
     }
 
+    def cleanup_small_contests(self, min_participants):
+        """Remove contests that have fewer than specified number of participants"""
+        print(f"\nLooking for contests with fewer than {min_participants} participants...")
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # First, get a list of contests and their participant counts
+                cursor.execute("""
+                    WITH UniqueCalls AS (
+                        SELECT DISTINCT contest, callsign
+                        FROM contest_scores
+                    )
+                    SELECT 
+                        contest,
+                        COUNT(DISTINCT callsign) as participant_count
+                    FROM UniqueCalls
+                    GROUP BY contest
+                    HAVING participant_count < ?
+                    ORDER BY participant_count DESC, contest
+                """, (min_participants,))
+                
+                small_contests = cursor.fetchall()
+                
+                if not small_contests:
+                    print("No contests found with fewer than " +
+                          f"{min_participants} participants.")
+                    return
+                
+                # Display contests that will be removed
+                headers = ['Contest', 'Participants']
+                print("\nContests to be removed:")
+                print(tabulate(small_contests, headers=headers, tablefmt='grid'))
+                
+                # Ask for confirmation
+                response = input("\nDo you want to remove these contests? (yes/no): ")
+                if response.lower() != 'yes':
+                    print("Operation cancelled.")
+                    return
+                
+                # Delete process
+                print("\nRemoving contests...")
+                for contest, _ in small_contests:
+                    print(f"Processing {contest}...")
+                    
+                    # Get contest_score_ids for this contest
+                    cursor.execute("""
+                        SELECT id FROM contest_scores WHERE contest = ?
+                    """, (contest,))
+                    score_ids = [row[0] for row in cursor.fetchall()]
+                    
+                    if score_ids:
+                        # Delete from band_breakdown
+                        cursor.execute("""
+                            DELETE FROM band_breakdown 
+                            WHERE contest_score_id IN (
+                                SELECT id FROM contest_scores WHERE contest = ?
+                            )
+                        """, (contest,))
+                        bb_count = cursor.rowcount
+                        
+                        # Delete from qth_info
+                        cursor.execute("""
+                            DELETE FROM qth_info 
+                            WHERE contest_score_id IN (
+                                SELECT id FROM contest_scores WHERE contest = ?
+                            )
+                        """, (contest,))
+                        qth_count = cursor.rowcount
+                        
+                        # Delete from contest_scores
+                        cursor.execute("""
+                            DELETE FROM contest_scores WHERE contest = ?
+                        """, (contest,))
+                        cs_count = cursor.rowcount
+                        
+                        print(f"Removed {cs_count} score entries, " +
+                              f"{bb_count} band breakdown entries, " +
+                              f"{qth_count} QTH info entries")
+                    
+                conn.commit()
+                print("\nCleanup complete!")
+                
+        except sqlite3.Error as e:
+            print(f"Database error: {e}", file=sys.stderr)
+            sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(
         description='Contest Database Management Tool',
@@ -187,10 +275,8 @@ Examples:
   Analyze query performance:
     %(prog)s --db contest_data.db --explain latest_scores
     
-Available example queries for --explain:
-  - latest_scores: Shows most recent scores for all callsigns
-  - band_breakdown: Shows band breakdown for W1AW
-  - contest_summary: Shows summary statistics for each contest
+  Remove small contests:
+    %(prog)s --db contest_data.db --cleanup-contests 5
         """)
     
     parser.add_argument('--db', default='contest_data.db',
@@ -206,6 +292,8 @@ Available example queries for --explain:
     action_group.add_argument('--explain',
                           choices=list(get_example_queries().keys()),
                           help='Analyze query execution plan for example queries')
+    action_group.add_argument('--cleanup-contests', type=int, metavar='MIN_PARTICIPANTS',
+                          help='Remove contests with fewer than MIN_PARTICIPANTS participants')
     
     parser.add_argument('--no-analyze', action='store_true',
                       help='Skip analyzing the database after creating indexes')
@@ -214,7 +302,12 @@ Available example queries for --explain:
     
     db_manager = DatabaseManager(args.db)
     
-    if args.create_indexes:
+    if args.cleanup_contests is not None:
+        if args.cleanup_contests < 1:
+            print("Error: Minimum participants must be at least 1", file=sys.stderr)
+            sys.exit(1)
+        db_manager.cleanup_small_contests(args.cleanup_contests)
+    elif args.create_indexes:
         db_manager.setup_indexes(not args.no_analyze)
     elif args.reindex:
         db_manager.reindex_database()
@@ -229,4 +322,3 @@ Available example queries for --explain:
 
 if __name__ == "__main__":
     main()
-  
