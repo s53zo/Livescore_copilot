@@ -56,15 +56,16 @@ def index():
         with get_db() as db:
             cursor = db.cursor()
             
-            # Get contests
-            logger.debug("Fetching contests")
+            # Get contests with the count of unique active stations (callsigns)
+            logger.debug("Fetching contests with active station counts")
             cursor.execute("""
-                SELECT DISTINCT contest 
-                FROM contest_scores 
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
                 ORDER BY contest
             """)
-            contests = [row[0] for row in cursor.fetchall()]
-            logger.debug(f"Found contests: {contests}")
+            contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            logger.debug(f"Found contests with station counts: {contests}")
             
             # If contest is selected (either via POST or GET parameter)
             selected_contest = request.form.get('contest') or request.args.get('contest')
