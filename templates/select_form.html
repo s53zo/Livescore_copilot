@@ -1,4 +1,3 @@
-<!-- /opt/livescore/templates/select_form.html -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -38,7 +37,7 @@
 </head>
 <body>
     <h1>Livescore Pilot</h1>
-    <form method="POST" action="/livescore-pilot">
+    <form method="POST">
         <div class="form-group">
             <label for="callsign">Select Callsign:</label>
             <select name="callsign" id="callsign" required>
@@ -63,29 +62,3 @@
     </form>
 </body>
 </html>
-
-<!-- /opt/livescore/templates/error.html -->
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Error - Livescore Pilot</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 20px auto;
-            padding: 20px;
-        }
-        .error {
-            color: red;
-            margin: 20px;
-        }
-    </style>
-</head>
-<body>
-    <h1>Error</h1>
-    <div class="error">{{ error }}</div>
-    <a href="/livescore-pilot">Return to home</a>
-</body>
-</html>
-
