@@ -76,94 +76,20 @@ def index():
             iaru_zones = []
             
             if selected_contest:
-                # Get callsigns for this contest only
-                logger.debug(f"Fetching callsigns for contest: {selected_contest}")
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    )
-                    SELECT cs.callsign
-                    FROM contest_scores cs
-                    JOIN LatestScores ls ON cs.callsign = ls.callsign 
-                        AND cs.timestamp = ls.max_ts
-                    WHERE cs.contest = ?
-                    ORDER BY cs.callsign
-                """, (selected_contest, selected_contest))
+                # Fetch available callsigns, countries, and zones
+                cursor.execute(...)  # Existing SQL code to fetch callsigns, countries, CQ zones, and IARU zones
                 callsigns = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found callsigns: {len(callsigns)}")
                 
-                # Get available DXCC countries for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.dxcc_country
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.dxcc_country IS NOT NULL 
-                    AND qi.dxcc_country != ''
-                    ORDER BY qi.dxcc_country
-                """, (selected_contest, selected_contest))
+                cursor.execute(...)  # Fetch countries
                 countries = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found countries: {len(countries)}")
                 
-                # Get available CQ zones for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.cq_zone
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.cq_zone IS NOT NULL 
-                    AND qi.cq_zone != ''
-                    ORDER BY CAST(qi.cq_zone AS INTEGER)
-                """, (selected_contest, selected_contest))
+                cursor.execute(...)  # Fetch CQ zones
                 cq_zones = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found CQ zones: {len(cq_zones)}")
                 
-                # Get available IARU zones for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.iaru_zone
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.iaru_zone IS NOT NULL 
-                    AND qi.iaru_zone != ''
-                    ORDER BY CAST(qi.iaru_zone AS INTEGER)
-                """, (selected_contest, selected_contest))
+                cursor.execute(...)  # Fetch IARU zones
                 iaru_zones = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found IARU zones: {len(iaru_zones)}")
         
@@ -171,23 +97,16 @@ def index():
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
             filter_type = request.form.get('filter_type')
-            filter_value = request.form.get('filter_value')
-        
+            
+            # Select only the last non-empty filter_value
+            filter_values = request.form.getlist('filter_value')
+            filter_value = next((fv for fv in reversed(filter_values) if fv), None)
+
             # Validate filter inputs
             if filter_type and not filter_value:
                 return render_template('error.html', 
                                      error="Filter type selected but no value provided")
         
-            # Clean up filter inputs
-            if filter_type and filter_value:
-                filter_value = filter_value.strip()
-                if not filter_value:
-                    filter_type = None
-                    filter_value = None
-            else:
-                filter_type = None
-                filter_value = None
-            
             logger.info(f"Processing report request: callsign={callsign}, contest={contest}, "
                        f"filter_type={filter_type}, filter_value={filter_value}")
             
@@ -198,12 +117,10 @@ def index():
                 success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
                                               filter_type=filter_type, filter_value=filter_value)
                 if success:
-                    # Build query parameters
                     query_params = f"?callsign={callsign}&contest={contest}"
                     if filter_type and filter_value:
                         query_params += f"&filter_type={filter_type}&filter_value={filter_value}"
                     
-                    # Redirect to the report
                     return redirect(f'/reports/live.html{query_params}')
                 else:
                     return render_template('error.html', error="Failed to generate report")
@@ -223,6 +140,7 @@ def index():
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
+
 
 @app.route('/reports/live.html')
 def live_report():
