@@ -1,124 +1,171 @@
-#!/usr/bin/env python3
 from flask import Flask, render_template, request, redirect, url_for, abort
 import sqlite3
-import os
-import logging
 import re
-from time import time
-from score_reporter import ScoreReporter
+import logging
+from functools import wraps
 
+class DatabaseConnection:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        
+    def __enter__(self):
+        self.conn = sqlite3.connect(self.db_path)
+        # Enable column access by name
+        self.conn.row_factory = sqlite3.Row
+        return self.conn
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.conn.close()
+
+class SecureDatabase:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        
+    def validate_input(self, value, pattern):
+        """Validate input matches expected pattern"""
+        if not value or not isinstance(value, str):
+            return False
+        return bool(re.match(pattern, value))
+        
+    def get_contests(self):
+        """Safely get list of contests"""
+        with DatabaseConnection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT contest FROM contest_scores ORDER BY contest")
+            return [row['contest'] for row in cursor.fetchall()]
+            
+    def get_callsigns(self):
+        """Safely get list of callsigns"""
+        with DatabaseConnection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT callsign FROM contest_scores ORDER BY callsign")
+            return [row['callsign'] for row in cursor.fetchall()]
+            
+    def get_station_details(self, callsign, contest):
+        """Get station details with SQL injection protection"""
+        # Input validation
+        if not self.validate_input(callsign, r'^[A-Z0-9]{3,10}$'):
+            logging.warning(f"Invalid callsign format attempted: {callsign}")
+            return None
+            
+        if not self.validate_input(contest, r'^[A-Za-z0-9\-_ ]{3,50}$'):
+            logging.warning(f"Invalid contest format attempted: {contest}")
+            return None
+            
+        query = """
+        WITH StationScore AS (
+            SELECT 
+                cs.id, 
+                cs.callsign, 
+                cs.score, 
+                cs.power, 
+                cs.assisted,
+                cs.timestamp, 
+                cs.qsos, 
+                cs.multipliers,
+                'current' as position,
+                1 as rn
+            FROM contest_scores cs
+            WHERE cs.callsign = ? 
+            AND cs.contest = ?
+            ORDER BY cs.timestamp DESC
+            LIMIT 1
+        ),
+        NearbyStations AS (
+            SELECT 
+                cs.id,
+                cs.callsign, 
+                cs.score, 
+                cs.power, 
+                cs.assisted,
+                cs.timestamp, 
+                cs.qsos, 
+                cs.multipliers,
+                CASE
+                    WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                    WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                END as position,
+                ROW_NUMBER() OVER (
+                    PARTITION BY 
+                        CASE
+                            WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                            WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                        END
+                    ORDER BY 
+                        CASE
+                            WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
+                        CASE
+                            WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
+                ) as rn
+            FROM contest_scores cs
+            WHERE cs.contest = ?
+            AND cs.power = (SELECT power FROM StationScore)
+            AND cs.assisted = (SELECT assisted FROM StationScore)
+            AND cs.callsign != (SELECT callsign FROM StationScore)
+            AND cs.timestamp = (
+                SELECT MAX(timestamp)
+                FROM contest_scores cs2
+                WHERE cs2.callsign = cs.callsign
+                AND cs2.contest = cs.contest
+            )
+        )
+        SELECT 
+            id,
+            callsign, 
+            score, 
+            power, 
+            assisted,
+            timestamp, 
+            qsos, 
+            multipliers,
+            position,
+            rn
+        FROM (
+            SELECT * FROM StationScore
+            UNION ALL
+            SELECT * FROM NearbyStations
+            WHERE (position = 'above' AND rn <= 2)
+            OR (position = 'below' AND rn <= 2)
+        )
+        ORDER BY score DESC;
+        """
+        
+        try:
+            with DatabaseConnection(self.db_path) as conn:
+                cursor = conn.cursor()
+                # Using parameterized query with parameters passed separately
+                cursor.execute(query, (callsign, contest, contest))
+                return cursor.fetchall()
+        except sqlite3.Error as e:
+            logging.error(f"Database error: {str(e)}")
+            return None
+
+# Update web_interface.py to use the secure database class
 app = Flask(__name__)
-
-# Configuration
-class Config:
-    DB_PATH = '/opt/livescore/contest_data.db'
-    OUTPUT_DIR = '/opt/livescore/reports'
-    # Rate limiting
-    MAX_REQUESTS = 30
-    WINDOW_SECONDS = 60
-    
-# Rate limiting storage
-request_history = {}
-
-def get_db():
-    """Get database connection with security settings"""
-    try:
-        return sqlite3.connect(Config.DB_PATH, 
-                             timeout=5,                    # Connection timeout
-                             isolation_level='IMMEDIATE',  # Transaction isolation
-                             check_same_thread=False)     # Thread safety
-    except sqlite3.Error as e:
-        app.logger.error(f"Database connection error: {e}")
-        abort(500)
-
-def is_rate_limited(ip):
-    """Simple rate limiting"""
-    current = time()
-    if ip not in request_history:
-        request_history[ip] = []
-    
-    # Clean old requests
-    request_history[ip] = [t for t in request_history[ip] 
-                          if t > current - Config.WINDOW_SECONDS]
-    
-    # Add new request
-    request_history[ip].append(current)
-    
-    return len(request_history[ip]) > Config.MAX_REQUESTS
-
-def validate_input(value, pattern):
-    """Validate input against pattern"""
-    if not value:
-        return False
-    return bool(re.match(pattern, value))
-
-def secure_query(cursor, query, params=None):
-    """Execute query with error handling"""
-    try:
-        if params:
-            return cursor.execute(query, params)
-        return cursor.execute(query)
-    except sqlite3.Error as e:
-        app.logger.error(f"Database query error: {e}")
-        abort(500)
-
-@app.before_request
-def before_request():
-    """Pre-request security checks"""
-    # Rate limiting
-    if is_rate_limited(request.remote_addr):
-        app.logger.warning(f"Rate limit exceeded for {request.remote_addr}")
-        abort(429)
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     try:
-        with get_db() as db:
-            cursor = db.cursor()
-            
-            # Safe queries with no user input
-            secure_query(cursor, "SELECT DISTINCT contest FROM contest_scores ORDER BY contest")
-            contests = [row[0] for row in cursor.fetchall()]
-            
-            secure_query(cursor, "SELECT DISTINCT callsign FROM contest_scores ORDER BY callsign")
-            callsigns = [row[0] for row in cursor.fetchall()]
+        db = SecureDatabase('/opt/livescore/contest_data.db')
         
         if request.method == 'POST':
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
             
-            # Input validation
-            if not validate_input(callsign, r'^[A-Z0-9]{3,10}$'):
-                app.logger.warning(f"Invalid callsign attempt: {callsign} from {request.remote_addr}")
-                return render_template('error.html', error="Invalid callsign format"), 400
+            stations = db.get_station_details(callsign, contest)
+            if not stations:
+                return render_template('error.html', error="Invalid input or no data found"), 400
                 
-            if not validate_input(contest, r'^[A-Za-z0-9\-_ ]{3,50}$'):
-                app.logger.warning(f"Invalid contest attempt: {contest} from {request.remote_addr}")
-                return render_template('error.html', error="Invalid contest format"), 400
-            
             reporter = ScoreReporter(Config.DB_PATH)
-            stations = reporter.get_station_details(callsign, contest)
-            
-            if stations:
-                reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+            if success:
                 return redirect('/reports/live.html')
+            return render_template('error.html', error="Failed to generate report"), 500
             
-            return render_template('error.html', error="No data found"), 404
-        
-        return render_template('select_form.html', contests=contests, callsigns=callsigns)
-    
+        return render_template('select_form.html', 
+                             contests=db.get_contests(),
+                             callsigns=db.get_callsigns())
+                             
     except Exception as e:
-        app.logger.error(f"Unexpected error: {str(e)}")
+        logging.error(f"Error in index: {str(e)}")
         return render_template('error.html', error="An error occurred"), 500
-
-# Error handlers
-@app.errorhandler(429)
-def too_many_requests(e):
-    return render_template('error.html', error="Too many requests. Please try again later."), 429
-
-@app.errorhandler(500)
-def server_error(e):
-    return render_template('error.html', error="Internal server error"), 500
-
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=8089)
