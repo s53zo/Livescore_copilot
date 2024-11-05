@@ -1,3 +1,51 @@
+#!/usr/bin/env python3
+from flask import Flask, render_template, request, redirect, url_for
+import sqlite3
+import os
+import logging
+import sys
+import traceback
+from score_reporter import ScoreReporter
+from datetime import datetime
+
+# Set up detailed logging before anything else
+logging.basicConfig(
+    level=logging.DEBUG,  # Changed to DEBUG level
+    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+    handlers=[
+        logging.FileHandler('/opt/livescore/logs/debug.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Log startup
+logger.info("Starting web interface application")
+
+try:
+    app = Flask(__name__)
+    logger.info("Flask app created successfully")
+except Exception as e:
+    logger.error(f"Failed to create Flask app: {str(e)}")
+    logger.error(traceback.format_exc())
+    raise
+
+class Config:
+    DB_PATH = '/opt/livescore/contest_data.db'
+    OUTPUT_DIR = '/opt/livescore/reports'
+
+def get_db():
+    """Database connection with logging"""
+    logger.debug("Attempting database connection")
+    try:
+        conn = sqlite3.connect(Config.DB_PATH)
+        logger.debug("Database connection successful")
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise
+
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
@@ -20,6 +68,13 @@ def index():
             
             # If contest is selected (either via POST or GET parameter)
             selected_contest = request.form.get('contest') or request.args.get('contest')
+            logger.debug(f"Selected contest: {selected_contest}")
+            
+            callsigns = []
+            countries = []
+            cq_zones = []
+            iaru_zones = []
+            
             if selected_contest:
                 # Get callsigns for this contest only
                 logger.debug(f"Fetching callsigns for contest: {selected_contest}")
@@ -38,9 +93,10 @@ def index():
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
                 callsigns = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found callsigns: {callsigns}")
+                logger.debug(f"Found callsigns: {len(callsigns)}")
                 
                 # Get available DXCC countries for this contest
+                logger.debug("Fetching DXCC countries")
                 cursor.execute("""
                     SELECT DISTINCT qi.dxcc_country
                     FROM contest_scores cs
@@ -51,8 +107,10 @@ def index():
                     ORDER BY qi.dxcc_country
                 """, (selected_contest,))
                 countries = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Found countries: {len(countries)}")
                 
                 # Get available CQ zones for this contest
+                logger.debug("Fetching CQ zones")
                 cursor.execute("""
                     SELECT DISTINCT qi.cq_zone
                     FROM contest_scores cs
@@ -63,8 +121,10 @@ def index():
                     ORDER BY qi.cq_zone
                 """, (selected_contest,))
                 cq_zones = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Found CQ zones: {len(cq_zones)}")
                 
                 # Get available IARU zones for this contest
+                logger.debug("Fetching IARU zones")
                 cursor.execute("""
                     SELECT DISTINCT qi.iaru_zone
                     FROM contest_scores cs
@@ -75,11 +135,7 @@ def index():
                     ORDER BY qi.iaru_zone
                 """, (selected_contest,))
                 iaru_zones = [row[0] for row in cursor.fetchall()]
-            else:
-                callsigns = []
-                countries = []
-                cq_zones = []
-                iaru_zones = []
+                logger.debug(f"Found IARU zones: {len(iaru_zones)}")
         
         if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
@@ -87,25 +143,16 @@ def index():
             filter_type = request.form.get('filter_type')
             filter_value = request.form.get('filter_value')
             
-            logger.info(f"POST request with callsign={callsign}, contest={contest}, "
+            logger.info(f"Processing report request: callsign={callsign}, contest={contest}, "
                        f"filter_type={filter_type}, filter_value={filter_value}")
             
-            # Create reporter instance
-            logger.debug("Creating ScoreReporter instance")
             reporter = ScoreReporter(Config.DB_PATH)
-            
-            # Get station details with filters
-            logger.debug("Getting station details")
             stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
-            logger.debug(f"Station details result: {stations}")
             
             if stations:
-                logger.debug("Generating HTML report")
                 success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-                logger.debug(f"HTML generation result: {success}")
-                
                 if success:
-                    logger.info("Redirecting to report")
+                    logger.info("Report generated successfully")
                     return redirect('/reports/live.html')
                 else:
                     logger.error("Failed to generate report")
@@ -114,7 +161,7 @@ def index():
                 logger.warning("No stations found")
                 return render_template('error.html', error="No data found for the selected criteria")
         
-        logger.debug("Rendering template")
+        logger.debug("Rendering template with data")
         return render_template('select_form.html', 
                              contests=contests,
                              selected_contest=selected_contest,
@@ -124,6 +171,39 @@ def index():
                              iaru_zones=iaru_zones)
     
     except Exception as e:
-        logger.error("Exception occurred:")
+        logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
+
+# Add error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    logger.error(f"404 error: {error}")
+    return render_template('error.html', error="Page not found"), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 error: {error}")
+    logger.error(traceback.format_exc())
+    return render_template('error.html', error="Internal server error"), 500
+
+# Only run the app if this file is run directly
+if __name__ == '__main__':
+    logger.info("Starting development server")
+    app.run(host='127.0.0.1', port=8089)
+else:
+    # When running under gunicorn
+    logger.info("Starting under gunicorn")
+
+# Add gunicorn error handlers
+def on_starting(server):
+    logger.info("Gunicorn starting up")
+
+def on_reload(server):
+    logger.info("Gunicorn reloading")
+
+def when_ready(server):
+    logger.info("Gunicorn ready")
+
+def on_exit(server):
+    logger.info("Gunicorn shutting down")
