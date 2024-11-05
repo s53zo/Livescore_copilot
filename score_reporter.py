@@ -41,6 +41,8 @@ class ScoreReporter:
             filter_type: Optional - 'dxcc', 'cq_zone', or 'iaru_zone'
             filter_value: Value to filter by (country name or zone number)
         """
+        self.logger.debug(f"Starting get_station_details with filter_type={filter_type}, filter_value={filter_value}")
+        
         query = """
             WITH StationScore AS (
                 SELECT 
@@ -64,48 +66,52 @@ class ScoreReporter:
                 ORDER BY cs.timestamp DESC
                 LIMIT 1
             ),
-            NearbyStations AS (
-                SELECT 
-                    cs.id,
-                    cs.callsign, 
-                    cs.score, 
-                    cs.power, 
-                    cs.assisted,
-                    cs.timestamp, 
-                    cs.qsos, 
-                    cs.multipliers,
-                    qi.dxcc_country,
-                    qi.cq_zone,
-                    qi.iaru_zone,
-                    CASE
-                        WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                        WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY 
-                            CASE
-                                WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                                WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                            END
-                        ORDER BY 
-                            CASE
-                                WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
-                            CASE
-                                WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
-                    ) as rn
+            ValidStations AS (
+                -- First get only stations that match our filter criteria
+                SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
+                       cs.timestamp, cs.qsos, cs.multipliers
                 FROM contest_scores cs
-                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ?
                 AND cs.power = (SELECT power FROM StationScore)
                 AND cs.assisted = (SELECT assisted FROM StationScore)
                 AND cs.callsign != (SELECT callsign FROM StationScore)
+                {filter_clause}
                 AND cs.timestamp = (
                     SELECT MAX(timestamp)
                     FROM contest_scores cs2
                     WHERE cs2.callsign = cs.callsign
                     AND cs2.contest = cs.contest
                 )
-                {filter_clause}
+            ),
+            NearbyStations AS (
+                -- Then find nearby stations from the filtered set
+                SELECT 
+                    vs.id,
+                    vs.callsign, 
+                    vs.score, 
+                    vs.power, 
+                    vs.assisted,
+                    vs.timestamp, 
+                    vs.qsos, 
+                    vs.multipliers,
+                    CASE
+                        WHEN vs.score > (SELECT score FROM StationScore) THEN 'above'
+                        WHEN vs.score < (SELECT score FROM StationScore) THEN 'below'
+                    END as position,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY 
+                            CASE
+                                WHEN vs.score > (SELECT score FROM StationScore) THEN 'above'
+                                WHEN vs.score < (SELECT score FROM StationScore) THEN 'below'
+                            END
+                        ORDER BY 
+                            CASE
+                                WHEN vs.score > (SELECT score FROM StationScore) THEN score END ASC,
+                            CASE
+                                WHEN vs.score < (SELECT score FROM StationScore) THEN score END DESC
+                    ) as rn
+                FROM ValidStations vs
             )
             SELECT 
                 id,
@@ -132,29 +138,48 @@ class ScoreReporter:
         filter_clause = ""
         
         if filter_type and filter_value:
-            if filter_type == 'dxcc':
-                filter_clause = """
-                    AND qi.dxcc_country = ?
-                """
-                params.append(filter_value)
-            elif filter_type == 'cq_zone':
-                # Cast both the database value and the input value to integers for comparison
-                filter_clause = """
-                    AND CAST(qi.cq_zone AS INTEGER) = CAST(? AS INTEGER)
-                """
-                params.append(filter_value)
-            elif filter_type == 'iaru_zone':
-                # Cast both the database value and the input value to integers for comparison
-                filter_clause = """
-                    AND CAST(qi.iaru_zone AS INTEGER) = CAST(? AS INTEGER)
-                """
-                params.append(filter_value)
+            try:
+                if filter_type == 'dxcc':
+                    filter_clause = "AND qi.dxcc_country = ?"
+                    params.append(filter_value)
+                    self.logger.debug(f"Applying DXCC filter: {filter_value}")
+                elif filter_type == 'cq_zone':
+                    # Convert filter_value to integer for CQ zone
+                    zone_num = int(filter_value)
+                    filter_clause = "AND qi.cq_zone = ?"
+                    params.append(zone_num)
+                    self.logger.debug(f"Applying CQ zone filter: {zone_num}")
+                elif filter_type == 'iaru_zone':
+                    # Convert filter_value to integer for IARU zone
+                    zone_num = int(filter_value)
+                    filter_clause = "AND qi.iaru_zone = ?"
+                    params.append(zone_num)
+                    self.logger.debug(f"Applying IARU zone filter: {zone_num}")
+            except ValueError as e:
+                self.logger.error(f"Error converting zone value: {filter_value} - {str(e)}")
+                return None
         
         formatted_query = query.format(filter_clause=filter_clause)
+        self.logger.debug(f"Executing query with params: {params}")
         
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                
+                # First, let's verify the data in the database
+                if filter_type in ['cq_zone', 'iaru_zone']:
+                    verify_query = """
+                        SELECT DISTINCT qi.cq_zone, qi.iaru_zone, cs.callsign
+                        FROM contest_scores cs
+                        JOIN qth_info qi ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        ORDER BY cs.callsign
+                    """
+                    cursor.execute(verify_query, [contest])
+                    results = cursor.fetchall()
+                    self.logger.debug(f"Available zones in contest: {results}")
+                
+                # Execute main query
                 cursor.execute(formatted_query, params)
                 stations = cursor.fetchall()
                 
@@ -162,7 +187,9 @@ class ScoreReporter:
                     self.logger.error(f"No data found for {callsign} in {contest} with filter {filter_type}={filter_value}")
                     return None
                 
+                self.logger.debug(f"Found {len(stations)} matching stations")
                 return stations
+                
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
             self.logger.error(f"Query: {formatted_query}")
