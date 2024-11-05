@@ -2,7 +2,6 @@
 from flask import Flask, render_template, request, redirect, url_for, abort
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_talisman import Talisman
 import sqlite3
 import os
 import logging
@@ -11,17 +10,6 @@ import re
 from score_reporter import ScoreReporter
 
 app = Flask(__name__)
-
-# Set up secure headers
-talisman = Talisman(
-    app,
-    force_https=False,  # Changed to False
-    session_cookie_secure=False,  # Changed to False
-    content_security_policy={
-        'default-src': "'self'",
-        'style-src': "'self' 'unsafe-inline'",
-    }
-)
 
 # Set up rate limiting
 limiter = Limiter(
@@ -134,4 +122,3 @@ def internal_error(error):
 @app.errorhandler(429)
 def ratelimit_error(error):
     return render_template('error.html', error="Too many requests. Please try again later."), 429
-  
