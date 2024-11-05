@@ -1,41 +1,3 @@
-#!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, url_for
-import sqlite3
-import os
-import logging
-import sys
-import traceback
-from score_reporter import ScoreReporter
-from datetime import datetime
-
-app = Flask(__name__)
-
-# Set up detailed logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-    handlers=[
-        logging.FileHandler('/opt/livescore/logs/debug.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
-
-class Config:
-    DB_PATH = '/opt/livescore/contest_data.db'
-    OUTPUT_DIR = '/opt/livescore/reports'
-
-def get_db():
-    """Database connection with logging"""
-    logger.debug("Attempting database connection")
-    try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        logger.debug("Database connection successful")
-        return conn
-    except Exception as e:
-        logger.error(f"Database connection failed: {str(e)}")
-        raise
-
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
@@ -48,50 +10,78 @@ def index():
             
             # Get contests
             logger.debug("Fetching contests")
-            cursor.execute("SELECT DISTINCT contest FROM contest_scores ORDER BY contest")
+            cursor.execute("""
+                SELECT DISTINCT contest 
+                FROM contest_scores 
+                ORDER BY contest
+            """)
             contests = [row[0] for row in cursor.fetchall()]
             logger.debug(f"Found contests: {contests}")
             
-            # Get callsigns
-            logger.debug("Fetching callsigns")
-            cursor.execute("SELECT DISTINCT callsign FROM contest_scores ORDER BY callsign")
-            callsigns = [row[0] for row in cursor.fetchall()]
-            logger.debug(f"Found callsigns: {callsigns}")
-            
-            # Get available DXCC countries
-            logger.debug("Fetching DXCC countries")
-            cursor.execute("""
-                SELECT DISTINCT dxcc_country 
-                FROM qth_info 
-                WHERE dxcc_country IS NOT NULL AND dxcc_country != ''
-                ORDER BY dxcc_country
-            """)
-            countries = [row[0] for row in cursor.fetchall()]
-            logger.debug(f"Found countries: {countries}")
-            
-            # Get available CQ zones
-            logger.debug("Fetching CQ zones")
-            cursor.execute("""
-                SELECT DISTINCT cq_zone 
-                FROM qth_info 
-                WHERE cq_zone IS NOT NULL AND cq_zone != ''
-                ORDER BY cq_zone
-            """)
-            cq_zones = [row[0] for row in cursor.fetchall()]
-            logger.debug(f"Found CQ zones: {cq_zones}")
-            
-            # Get available IARU zones
-            logger.debug("Fetching IARU zones")
-            cursor.execute("""
-                SELECT DISTINCT iaru_zone 
-                FROM qth_info 
-                WHERE iaru_zone IS NOT NULL AND iaru_zone != ''
-                ORDER BY iaru_zone
-            """)
-            iaru_zones = [row[0] for row in cursor.fetchall()]
-            logger.debug(f"Found IARU zones: {iaru_zones}")
+            # If contest is selected (either via POST or GET parameter)
+            selected_contest = request.form.get('contest') or request.args.get('contest')
+            if selected_contest:
+                # Get callsigns for this contest only
+                logger.debug(f"Fetching callsigns for contest: {selected_contest}")
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    )
+                    SELECT cs.callsign
+                    FROM contest_scores cs
+                    JOIN LatestScores ls ON cs.callsign = ls.callsign 
+                        AND cs.timestamp = ls.max_ts
+                    WHERE cs.contest = ?
+                    ORDER BY cs.callsign
+                """, (selected_contest, selected_contest))
+                callsigns = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Found callsigns: {callsigns}")
+                
+                # Get available DXCC countries for this contest
+                cursor.execute("""
+                    SELECT DISTINCT qi.dxcc_country
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.contest = ?
+                    AND qi.dxcc_country IS NOT NULL 
+                    AND qi.dxcc_country != ''
+                    ORDER BY qi.dxcc_country
+                """, (selected_contest,))
+                countries = [row[0] for row in cursor.fetchall()]
+                
+                # Get available CQ zones for this contest
+                cursor.execute("""
+                    SELECT DISTINCT qi.cq_zone
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.contest = ?
+                    AND qi.cq_zone IS NOT NULL 
+                    AND qi.cq_zone != ''
+                    ORDER BY qi.cq_zone
+                """, (selected_contest,))
+                cq_zones = [row[0] for row in cursor.fetchall()]
+                
+                # Get available IARU zones for this contest
+                cursor.execute("""
+                    SELECT DISTINCT qi.iaru_zone
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.contest = ?
+                    AND qi.iaru_zone IS NOT NULL 
+                    AND qi.iaru_zone != ''
+                    ORDER BY qi.iaru_zone
+                """, (selected_contest,))
+                iaru_zones = [row[0] for row in cursor.fetchall()]
+            else:
+                callsigns = []
+                countries = []
+                cq_zones = []
+                iaru_zones = []
         
-        if request.method == 'POST':
+        if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
             filter_type = request.form.get('filter_type')
@@ -111,10 +101,6 @@ def index():
             
             if stations:
                 logger.debug("Generating HTML report")
-                # Debug directory existence and permissions
-                logger.debug(f"Output directory exists: {os.path.exists(Config.OUTPUT_DIR)}")
-                logger.debug(f"Output directory permissions: {oct(os.stat(Config.OUTPUT_DIR).st_mode)[-3:]}")
-                
                 success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
                 logger.debug(f"HTML generation result: {success}")
                 
@@ -130,7 +116,8 @@ def index():
         
         logger.debug("Rendering template")
         return render_template('select_form.html', 
-                             contests=contests, 
+                             contests=contests,
+                             selected_contest=selected_contest,
                              callsigns=callsigns,
                              countries=countries,
                              cq_zones=cq_zones,
@@ -140,19 +127,3 @@ def index():
         logger.error("Exception occurred:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
-
-# Add error handlers
-@app.errorhandler(404)
-def not_found_error(error):
-    logger.error(f"404 error: {error}")
-    return render_template('error.html', error="Page not found"), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logger.error(f"500 error: {error}")
-    logger.error(traceback.format_exc())
-    return render_template('error.html', error="Internal server error"), 500
-
-if __name__ == '__main__':
-    logger.info("Starting application")
-    app.run(host='127.0.0.1', port=8089)
