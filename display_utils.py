@@ -107,3 +107,47 @@ def format_band_breakdown(data):
 def format_number(num):
     """Format numbers with thousands separator"""
     return f"{num:,}" if num else "0"
+
+def format_qth_details(data):
+    """Format and display QTH information"""
+    if not data:
+        print("No QTH records found.")
+        return
+
+    headers = ['Callsign', 'Contest', 'Timestamp', 'Country', 'CQ Zone', 
+              'IARU Zone', 'ARRL Section', 'State/Province', 'Grid']
+    
+    formatted_data = []
+    current_call = None
+    
+    for row in data:
+        # Format timestamp
+        formatted_row = list(row)
+        formatted_row[2] = datetime.strptime(row[2], '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+        
+        # Add separator line between different callsigns
+        if current_call is not None and current_call != row[0]:
+            formatted_data.append(['-' * 10] * len(headers))
+        
+        current_call = row[0]
+        formatted_data.append(formatted_row)
+    
+    print(tabulate(formatted_data, headers=headers, tablefmt='grid'))
+
+def format_qth_statistics(stats):
+    """Format and display QTH statistics"""
+    if not stats:
+        print("No QTH statistics available.")
+        return
+
+    print("\n=== QTH Statistics ===")
+    for category, count, items in stats:
+        print(f"\n{category}:")
+        print(f"Total unique: {count}")
+        if items:
+            item_list = items.split(',')
+            # Format items in columns
+            col_width = max(len(item) for item in item_list) + 2
+            cols = max(1, 80 // col_width)  # Limit to 80 chars width
+            for i in range(0, len(item_list), cols):
+                print("".join(item.ljust(col_width) for item in item_list[i:i+cols]))
