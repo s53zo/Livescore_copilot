@@ -59,9 +59,39 @@
                 {% endfor %}
             </select>
         </div>
+        <br>You can also select:<br>
+        <div class="form-group">
+        <label for="dxcc_country">Filter by DXCC Country:</label>
+        <select name="dxcc_country" id="dxcc_country">
+            <option value="">-- Select Country --</option>
+            {% for country in dxcc_countries %}
+            <option value="{{ country }}">{{ country }}</option>
+            {% endfor %}
+        </select>
+        </div>
+        or
+        <div class="form-group">
+            <label for="cq_zone">Filter by CQ Zone:</label>
+            <select name="cq_zone" id="cq_zone">
+                <option value="">-- Select CQ Zone --</option>
+                {% for zone in cq_zones %}
+                <option value="{{ zone }}">{{ zone }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        or
+        <div class="form-group">
+            <label for="iaru_zone">Filter by IARU Zone:</label>
+            <select name="iaru_zone" id="iaru_zone">
+                <option value="">-- Select IARU Zone --</option>
+                {% for zone in iaru_zones %}
+                <option value="{{ zone }}">{{ zone }}</option>
+                {% endfor %}
+            </select>
+        </div>
         
-        <button type="submit">Generate Report</button>
+        <button type="SUBMIT">Generate Report</button>
     </form>
-    <br><br>Code by Simon, S53ZO, data from competitors via Contest score distribution network
+    <br><br>Code by Simon, S53ZO, data from competitors via Contest score distribution network.
 </body>
 </html>
