@@ -88,7 +88,9 @@
                 <select name="contest" id="contest" required onchange="this.form.submit()">
                     <option value="">-- Select Contest --</option>
                     {% for contest in contests %}
-                    <option value="{{ contest }}" {% if selected_contest == contest %}selected{% endif %}>{{ contest }}</option>
+                    <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
+                        {{ contest.name }} ({{ contest.count }})
+                    </option>
                     {% endfor %}
                 </select>
             </div>
