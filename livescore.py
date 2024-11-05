@@ -17,56 +17,56 @@ class ContestDatabaseHandler:
         self.setup_database()
 
     def setup_database(self):
-    """Create the database tables if they don't exist."""
-    with sqlite3.connect(self.db_path) as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS contest_scores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME,
-                contest TEXT,
-                callsign TEXT,
-                power TEXT,
-                assisted TEXT,
-                transmitter TEXT,
-                ops TEXT,
-                bands TEXT,
-                mode TEXT,
-                overlay TEXT,
-                club TEXT,
-                section TEXT,
-                score INTEGER,
-                qsos INTEGER,
-                multipliers INTEGER,
-                points INTEGER
-            )
-        ''')
-        
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS band_breakdown (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                contest_score_id INTEGER,
-                band TEXT,
-                mode TEXT,
-                qsos INTEGER,
-                points INTEGER,
-                multipliers INTEGER,
-                FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
-            )
-        ''')
-
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS qth_info (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                contest_score_id INTEGER,
-                dxcc_country TEXT,
-                cq_zone TEXT,
-                iaru_zone TEXT,
-                arrl_section TEXT,
-                state_province TEXT,
-                grid6 TEXT,
-                FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
-            )
-        ''')
+        """Create the database tables if they don't exist."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS contest_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME,
+                    contest TEXT,
+                    callsign TEXT,
+                    power TEXT,
+                    assisted TEXT,
+                    transmitter TEXT,
+                    ops TEXT,
+                    bands TEXT,
+                    mode TEXT,
+                    overlay TEXT,
+                    club TEXT,
+                    section TEXT,
+                    score INTEGER,
+                    qsos INTEGER,
+                    multipliers INTEGER,
+                    points INTEGER
+                )
+            ''')
+            
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS band_breakdown (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    contest_score_id INTEGER,
+                    band TEXT,
+                    mode TEXT,
+                    qsos INTEGER,
+                    points INTEGER,
+                    multipliers INTEGER,
+                    FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
+                )
+            ''')
+    
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS qth_info (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    contest_score_id INTEGER,
+                    dxcc_country TEXT,
+                    cq_zone TEXT,
+                    iaru_zone TEXT,
+                    arrl_section TEXT,
+                    state_province TEXT,
+                    grid6 TEXT,
+                    FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
+                )
+            ''')
 
     def parse_xml_data(self, xml_data):
     """Parse XML data and return structured contest data."""
