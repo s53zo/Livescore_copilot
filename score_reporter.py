@@ -96,18 +96,18 @@ class ScoreReporter:
                                 WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
                     ) as rn
                 FROM contest_scores cs
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id  -- Changed to LEFT JOIN
                 WHERE cs.contest = ?
                 AND cs.power = (SELECT power FROM StationScore)
                 AND cs.assisted = (SELECT assisted FROM StationScore)
                 AND cs.callsign != (SELECT callsign FROM StationScore)
-                {filter_clause}
                 AND cs.timestamp = (
                     SELECT MAX(timestamp)
                     FROM contest_scores cs2
                     WHERE cs2.callsign = cs.callsign
                     AND cs2.contest = cs.contest
                 )
+                {filter_clause}
             )
             SELECT 
                 id,
@@ -135,14 +135,32 @@ class ScoreReporter:
         
         if filter_type and filter_value:
             if filter_type == 'dxcc':
-                filter_clause = "AND qi.dxcc_country = ?"
-                params.append(filter_value)
+                filter_clause = """
+                    AND (qi.dxcc_country = ? 
+                    OR (qi.dxcc_country IS NULL AND ? IN (
+                        SELECT dxcc_country FROM qth_info qi2 
+                        WHERE qi2.contest_score_id = cs.id
+                    )))
+                """
+                params.extend([filter_value, filter_value])
             elif filter_type == 'cq_zone':
-                filter_clause = "AND qi.cq_zone = ?"
-                params.append(filter_value)
+                filter_clause = """
+                    AND (CAST(qi.cq_zone AS TEXT) = ? 
+                    OR (qi.cq_zone IS NULL AND ? IN (
+                        SELECT CAST(cq_zone AS TEXT) FROM qth_info qi2 
+                        WHERE qi2.contest_score_id = cs.id
+                    )))
+                """
+                params.extend([filter_value, filter_value])
             elif filter_type == 'iaru_zone':
-                filter_clause = "AND qi.iaru_zone = ?"
-                params.append(filter_value)
+                filter_clause = """
+                    AND (CAST(qi.iaru_zone AS TEXT) = ? 
+                    OR (qi.iaru_zone IS NULL AND ? IN (
+                        SELECT CAST(iaru_zone AS TEXT) FROM qth_info qi2 
+                        WHERE qi2.contest_score_id = cs.id
+                    )))
+                """
+                params.extend([filter_value, filter_value])
         
         formatted_query = query.format(filter_clause=filter_clause)
         
