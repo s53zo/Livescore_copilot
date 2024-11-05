@@ -76,22 +76,97 @@ def index():
             iaru_zones = []
             
             if selected_contest:
-                # Fetch available callsigns, countries, and zones
-                cursor.execute(...)  # Existing SQL code to fetch callsigns, countries, CQ zones, and IARU zones
+                # Get callsigns for this contest only
+                logger.debug(f"Fetching callsigns for contest: {selected_contest}")
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    )
+                    SELECT cs.callsign
+                    FROM contest_scores cs
+                    JOIN LatestScores ls ON cs.callsign = ls.callsign 
+                        AND cs.timestamp = ls.max_ts
+                    WHERE cs.contest = ?
+                    ORDER BY cs.callsign
+                """, (selected_contest, selected_contest))
                 callsigns = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found callsigns: {len(callsigns)}")
                 
-                cursor.execute(...)  # Fetch countries
+                # Get available DXCC countries for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.dxcc_country
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.dxcc_country IS NOT NULL 
+                    AND qi.dxcc_country != ''
+                    ORDER BY qi.dxcc_country
+                """, (selected_contest, selected_contest))
                 countries = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found countries: {len(countries)}")
                 
-                cursor.execute(...)  # Fetch CQ zones
+                # Get available CQ zones for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.cq_zone
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.cq_zone IS NOT NULL 
+                    AND qi.cq_zone != ''
+                    ORDER BY CAST(qi.cq_zone AS INTEGER)
+                """, (selected_contest, selected_contest))
                 cq_zones = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found CQ zones: {len(cq_zones)}")
                 
-                cursor.execute(...)  # Fetch IARU zones
+                # Get available IARU zones for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.iaru_zone
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.iaru_zone IS NOT NULL 
+                    AND qi.iaru_zone != ''
+                    ORDER BY CAST(qi.iaru_zone AS INTEGER)
+                """, (selected_contest, selected_contest))
                 iaru_zones = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Found IARU zones: {len(iaru_zones)}")
+
         
         if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
