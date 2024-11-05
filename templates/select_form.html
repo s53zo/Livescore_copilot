@@ -5,6 +5,7 @@
     <title>Livescore Pilot</title>
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    {% raw %}
     <style>
         .step {
             margin-bottom: 25px;
@@ -30,6 +31,7 @@
             cursor: not-allowed;
         }
     </style>
+    {% endraw %}
 </head>
 <body>
     <div class="container">
@@ -119,7 +121,7 @@
         </form>
 
         <br><br>
-        <p>Code by Simon, S53ZO & Score data from competitors via Contest Score Distribution Network</p>
+        <p>Code by Simon, S53ZO, data from competitors via Contest Score Distribution Network</p>
     </div>
 
     <!-- Optional JavaScript -->
@@ -127,6 +129,7 @@
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
 
+    {% raw %}
     <script>
         document.getElementById('contest').addEventListener('change', function() {
             if (this.value) {
@@ -153,5 +156,6 @@
             document.getElementById('generateButton').disabled = !this.value;
         });
     </script>
+    {% endraw %}
 </body>
 </html>
