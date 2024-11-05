@@ -46,6 +46,75 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
+import logging
+
+# Ensure debug level logging is enabled
+logging.basicConfig(level=logging.DEBUG)
+
+def handle_request(request):
+    # Log the full request data received from the page
+    logging.debug("Request received: %s %s", request.method, request.path)
+    logging.debug("Request form data: %s", request.form)  # Logs all form data submitted
+    logging.debug("Request headers: %s", request.headers)  # Logs all headers for context
+
+    # Example: Parsing form data
+    contest = request.form.get('contest')
+    callsign = request.form.get('callsign')
+    filter_type = request.form.get('filter_type')
+    filter_value = request.form.get('filter_value')
+
+    logging.debug("Parsed data - Contest: %s, Callsign: %s, Filter Type: %s, Filter Value: %s", 
+                  contest, callsign, filter_type, filter_value)
+
+    # Construct the query
+    query = """
+        SELECT * FROM contest_scores 
+        WHERE contest = ? 
+        AND callsign = ?
+    """
+    params = [contest, callsign]
+
+    # Apply filter if provided
+    if filter_type and filter_value:
+        if filter_type == 'dxcc':
+            query += " AND dxcc_country = ?"
+        elif filter_type == 'cq_zone':
+            query += " AND cq_zone = ?"
+        elif filter_type == 'iaru_zone':
+            query += " AND iaru_zone = ?"
+        params.append(filter_value)
+
+    # Log the constructed query and parameters
+    logging.debug("Constructed SQL query: %s", query)
+    logging.debug("Query parameters: %s", params)
+
+    # Execute the query and log the response
+    try:
+        conn = get_db_connection()  # Assuming a function to connect to your database
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+
+        # Log the raw database response
+        logging.debug("Database response: %s", results)
+
+        # Close the connection
+        cursor.close()
+        conn.close()
+
+    except Exception as e:
+        logging.error("Error executing database query: %s", e)
+        return "Error: Unable to fetch data", 500
+
+    # Process results for response (if any processing is required)
+    # Log the final response format sent back to the client
+    response_data = process_results(results)  # Assuming a function that formats your results
+    logging.debug("Response to client: %s", response_data)
+
+    return response_data, 200
+
+
+
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
