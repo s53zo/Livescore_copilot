@@ -37,6 +37,10 @@ def main():
                       help='List all available contests')
     parser.add_argument('--stats', action='store_true',
                       help='Show database statistics')
+    parser.add_argument('--qth', action='store_true',
+                      help='Show QTH information for stations')
+    parser.add_argument('--qth-stats', action='store_true',
+                      help='Show QTH statistics')
 
     args = parser.parse_args()
 
@@ -47,6 +51,16 @@ def main():
         print("\nAvailable contests:")
         for contest in contests:
             print(contest)
+        return
+
+    if args.qth_stats:
+        stats = viewer.get_qth_statistics(args.contest)
+        viewer.display_utils.format_qth_statistics(stats)
+        return
+        
+    if args.qth:
+        data = viewer.get_qth_details(args.call, args.contest)
+        viewer.display_utils.format_qth_details(data)
         return
 
     if args.stats:
