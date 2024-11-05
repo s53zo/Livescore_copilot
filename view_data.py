@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 from contest_db_viewer import ContestDatabaseViewer
+from display_utils import format_qth_statistics, format_qth_details
 
 def main():
     parser = argparse.ArgumentParser(description='Contest Database Viewer')
@@ -53,19 +54,19 @@ def main():
             print(contest)
         return
 
+    if args.stats:
+        stats = viewer.get_contest_stats()
+        viewer.display_stats(stats)
+        return
+
     if args.qth_stats:
         stats = viewer.get_qth_statistics(args.contest)
-        viewer.display_utils.format_qth_statistics(stats)
+        format_qth_statistics(stats)
         return
         
     if args.qth:
         data = viewer.get_qth_details(args.call, args.contest)
-        viewer.display_utils.format_qth_details(data)
-        return
-
-    if args.stats:
-        stats = viewer.get_contest_stats()
-        viewer.display_stats(stats)
+        format_qth_details(data)
         return
 
     if args.bands or args.call:
@@ -78,3 +79,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
