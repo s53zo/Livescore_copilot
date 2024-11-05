@@ -31,8 +31,8 @@ class ScoreReporter:
             self.logger.error(f"Error loading template: {e}")
             return None
 
-    def get_station_details(self, callsign, contest):
-        """Get station details and nearby competitors"""
+    def get_station_details(self, callsign, contest, dxcc_country=None, cq_zone=None, iaru_zone=None):
+        """Get station details and nearby competitors, with optional filters for country and zones"""
         query = """
             WITH StationScore AS (
                 SELECT 
@@ -110,18 +110,23 @@ class ScoreReporter:
             )
             ORDER BY score DESC;
         """
+        params = [callsign, contest, contest]
+
+        if dxcc_country:
+            query += " AND qi.dxcc_country = ?"
+            params.append(dxcc_country)
+        if cq_zone:
+            query += " AND qi.cq_zone = ?"
+            params.append(cq_zone)
+        if iaru_zone:
+            query += " AND qi.iaru_zone = ?"
+            params.append(iaru_zone)
 
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query, (callsign, contest, contest))
-                stations = cursor.fetchall()
-                
-                if not stations:
-                    self.logger.error(f"No data found for {callsign} in {contest}")
-                    return None
-                
-                return stations
+                cursor.execute(query, params)
+                return cursor.fetchall()
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
             return None
