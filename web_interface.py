@@ -1,171 +1,116 @@
-from flask import Flask, render_template, request, redirect, url_for, abort
+#!/usr/bin/env python3
+from flask import Flask, render_template, request, redirect, url_for
 import sqlite3
-import re
+import os
 import logging
-from functools import wraps
+import sys
+import traceback
+from score_reporter import ScoreReporter
+from datetime import datetime
 
-class DatabaseConnection:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        
-    def __enter__(self):
-        self.conn = sqlite3.connect(self.db_path)
-        # Enable column access by name
-        self.conn.row_factory = sqlite3.Row
-        return self.conn
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.conn.close()
-
-class SecureDatabase:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        
-    def validate_input(self, value, pattern):
-        """Validate input matches expected pattern"""
-        if not value or not isinstance(value, str):
-            return False
-        return bool(re.match(pattern, value))
-        
-    def get_contests(self):
-        """Safely get list of contests"""
-        with DatabaseConnection(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT contest FROM contest_scores ORDER BY contest")
-            return [row['contest'] for row in cursor.fetchall()]
-            
-    def get_callsigns(self):
-        """Safely get list of callsigns"""
-        with DatabaseConnection(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT callsign FROM contest_scores ORDER BY callsign")
-            return [row['callsign'] for row in cursor.fetchall()]
-            
-    def get_station_details(self, callsign, contest):
-        """Get station details with SQL injection protection"""
-        # Input validation
-        if not self.validate_input(callsign, r'^[A-Z0-9]{3,10}$'):
-            logging.warning(f"Invalid callsign format attempted: {callsign}")
-            return None
-            
-        if not self.validate_input(contest, r'^[A-Za-z0-9\-_ ]{3,50}$'):
-            logging.warning(f"Invalid contest format attempted: {contest}")
-            return None
-            
-        query = """
-        WITH StationScore AS (
-            SELECT 
-                cs.id, 
-                cs.callsign, 
-                cs.score, 
-                cs.power, 
-                cs.assisted,
-                cs.timestamp, 
-                cs.qsos, 
-                cs.multipliers,
-                'current' as position,
-                1 as rn
-            FROM contest_scores cs
-            WHERE cs.callsign = ? 
-            AND cs.contest = ?
-            ORDER BY cs.timestamp DESC
-            LIMIT 1
-        ),
-        NearbyStations AS (
-            SELECT 
-                cs.id,
-                cs.callsign, 
-                cs.score, 
-                cs.power, 
-                cs.assisted,
-                cs.timestamp, 
-                cs.qsos, 
-                cs.multipliers,
-                CASE
-                    WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                    WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                END as position,
-                ROW_NUMBER() OVER (
-                    PARTITION BY 
-                        CASE
-                            WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                            WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                        END
-                    ORDER BY 
-                        CASE
-                            WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
-                        CASE
-                            WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
-                ) as rn
-            FROM contest_scores cs
-            WHERE cs.contest = ?
-            AND cs.power = (SELECT power FROM StationScore)
-            AND cs.assisted = (SELECT assisted FROM StationScore)
-            AND cs.callsign != (SELECT callsign FROM StationScore)
-            AND cs.timestamp = (
-                SELECT MAX(timestamp)
-                FROM contest_scores cs2
-                WHERE cs2.callsign = cs.callsign
-                AND cs2.contest = cs.contest
-            )
-        )
-        SELECT 
-            id,
-            callsign, 
-            score, 
-            power, 
-            assisted,
-            timestamp, 
-            qsos, 
-            multipliers,
-            position,
-            rn
-        FROM (
-            SELECT * FROM StationScore
-            UNION ALL
-            SELECT * FROM NearbyStations
-            WHERE (position = 'above' AND rn <= 2)
-            OR (position = 'below' AND rn <= 2)
-        )
-        ORDER BY score DESC;
-        """
-        
-        try:
-            with DatabaseConnection(self.db_path) as conn:
-                cursor = conn.cursor()
-                # Using parameterized query with parameters passed separately
-                cursor.execute(query, (callsign, contest, contest))
-                return cursor.fetchall()
-        except sqlite3.Error as e:
-            logging.error(f"Database error: {str(e)}")
-            return None
-
-# Update web_interface.py to use the secure database class
 app = Flask(__name__)
+
+# Set up detailed logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+    handlers=[
+        logging.FileHandler('/opt/livescore/logs/debug.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class Config:
+    DB_PATH = '/opt/livescore/contest_data.db'
+    OUTPUT_DIR = '/opt/livescore/reports'
+
+def get_db():
+    """Database connection with logging"""
+    logger.debug("Attempting database connection")
+    try:
+        conn = sqlite3.connect(Config.DB_PATH)
+        logger.debug("Database connection successful")
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection failed: {str(e)}")
+        raise
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
+    logger.debug(f"Request received: {request.method}")
+    logger.debug(f"Request form data: {request.form}")
+    logger.debug(f"Request headers: {request.headers}")
+
     try:
-        db = SecureDatabase('/opt/livescore/contest_data.db')
+        with get_db() as db:
+            cursor = db.cursor()
+            
+            # Get contests
+            logger.debug("Fetching contests")
+            cursor.execute("SELECT DISTINCT contest FROM contest_scores ORDER BY contest")
+            contests = [row[0] for row in cursor.fetchall()]
+            logger.debug(f"Found contests: {contests}")
+            
+            # Get callsigns
+            logger.debug("Fetching callsigns")
+            cursor.execute("SELECT DISTINCT callsign FROM contest_scores ORDER BY callsign")
+            callsigns = [row[0] for row in cursor.fetchall()]
+            logger.debug(f"Found callsigns: {callsigns}")
         
         if request.method == 'POST':
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
+            logger.info(f"POST request with callsign={callsign}, contest={contest}")
             
-            stations = db.get_station_details(callsign, contest)
-            if not stations:
-                return render_template('error.html', error="Invalid input or no data found"), 400
-                
+            # Create reporter instance
+            logger.debug("Creating ScoreReporter instance")
             reporter = ScoreReporter(Config.DB_PATH)
-            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-            if success:
-                return redirect('/reports/live.html')
-            return render_template('error.html', error="Failed to generate report"), 500
             
-        return render_template('select_form.html', 
-                             contests=db.get_contests(),
-                             callsigns=db.get_callsigns())
-                             
+            # Get station details
+            logger.debug("Getting station details")
+            stations = reporter.get_station_details(callsign, contest)
+            logger.debug(f"Station details result: {stations}")
+            
+            if stations:
+                logger.debug("Generating HTML report")
+                # Debug directory existence and permissions
+                logger.debug(f"Output directory exists: {os.path.exists(Config.OUTPUT_DIR)}")
+                logger.debug(f"Output directory permissions: {oct(os.stat(Config.OUTPUT_DIR).st_mode)[-3:]}")
+                
+                success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+                logger.debug(f"HTML generation result: {success}")
+                
+                if success:
+                    logger.info("Redirecting to report")
+                    return redirect('/reports/live.html')
+                else:
+                    logger.error("Failed to generate report")
+                    return "Failed to generate report", 500
+            else:
+                logger.warning("No stations found")
+                return "No data found", 404
+        
+        logger.debug("Rendering template")
+        return render_template('select_form.html', contests=contests, callsigns=callsigns)
+    
     except Exception as e:
-        logging.error(f"Error in index: {str(e)}")
-        return render_template('error.html', error="An error occurred"), 500
+        logger.error("Exception occurred:")
+        logger.error(traceback.format_exc())
+        return f"Error: {str(e)}", 500
+
+# Add error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    logger.error(f"404 error: {error}")
+    return render_template('error.html', error="Page not found"), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 error: {error}")
+    logger.error(traceback.format_exc())
+    return render_template('error.html', error="Internal server error"), 500
+
+if __name__ == '__main__':
+    logger.info("Starting application")
+    app.run(host='127.0.0.1', port=8089)
