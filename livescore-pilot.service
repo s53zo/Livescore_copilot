@@ -6,6 +6,7 @@ After=network.target
 User=root
 Group=root
 WorkingDirectory=/opt/livescore
+Environment="FLASK_SECRET_KEY=$(cat /opt/livescore/secret_key.txt)"
 ExecStart=/usr/local/bin/gunicorn -c gunicorn_config.py web_interface:app
 Restart=always
 
