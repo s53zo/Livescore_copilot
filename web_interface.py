@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, abort
+from flask import Flask, render_template, request, redirect, send_from_directory
 import sqlite3
 import os
 import logging
@@ -8,9 +8,9 @@ import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
 
-# Set up detailed logging before anything else
+# Set up detailed logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG level
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
         logging.FileHandler('/opt/livescore/logs/debug.log'),
@@ -54,8 +54,119 @@ def index():
 
     try:
         with get_db() as db:
-            # ... (keep existing database queries) ...
-
+            cursor = db.cursor()
+            
+            # Get contests
+            logger.debug("Fetching contests")
+            cursor.execute("""
+                SELECT DISTINCT contest 
+                FROM contest_scores 
+                ORDER BY contest
+            """)
+            contests = [row[0] for row in cursor.fetchall()]
+            logger.debug(f"Found contests: {contests}")
+            
+            # If contest is selected (either via POST or GET parameter)
+            selected_contest = request.form.get('contest') or request.args.get('contest')
+            logger.debug(f"Selected contest: {selected_contest}")
+            
+            callsigns = []
+            countries = []
+            cq_zones = []
+            iaru_zones = []
+            
+            if selected_contest:
+                # Get callsigns for this contest only
+                logger.debug(f"Fetching callsigns for contest: {selected_contest}")
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    )
+                    SELECT cs.callsign
+                    FROM contest_scores cs
+                    JOIN LatestScores ls ON cs.callsign = ls.callsign 
+                        AND cs.timestamp = ls.max_ts
+                    WHERE cs.contest = ?
+                    ORDER BY cs.callsign
+                """, (selected_contest, selected_contest))
+                callsigns = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Found callsigns: {len(callsigns)}")
+                
+                # Get available DXCC countries for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.dxcc_country
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.dxcc_country IS NOT NULL 
+                    AND qi.dxcc_country != ''
+                    ORDER BY qi.dxcc_country
+                """, (selected_contest, selected_contest))
+                countries = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Found countries: {len(countries)}")
+                
+                # Get available CQ zones for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.cq_zone
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.cq_zone IS NOT NULL 
+                    AND qi.cq_zone != ''
+                    ORDER BY CAST(qi.cq_zone AS INTEGER)
+                """, (selected_contest, selected_contest))
+                cq_zones = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Found CQ zones: {len(cq_zones)}")
+                
+                # Get available IARU zones for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.iaru_zone
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.iaru_zone IS NOT NULL 
+                    AND qi.iaru_zone != ''
+                    ORDER BY CAST(qi.iaru_zone AS INTEGER)
+                """, (selected_contest, selected_contest))
+                iaru_zones = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Found IARU zones: {len(iaru_zones)}")
+        
         if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
@@ -131,12 +242,6 @@ def live_report():
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
 
-# Add static files route if not already present
-@app.route('/static/<path:filename>')
-def static_files(filename):
-    return send_from_directory('static', filename)
-
-# Add error handlers if not already present
 @app.errorhandler(404)
 def not_found_error(error):
     logger.error(f"404 error: {error}")
@@ -148,23 +253,9 @@ def internal_error(error):
     logger.error(traceback.format_exc())
     return render_template('error.html', error="Internal server error"), 500
 
-# Only run the app if this file is run directly
 if __name__ == '__main__':
     logger.info("Starting development server")
     app.run(host='127.0.0.1', port=8089)
 else:
     # When running under gunicorn
     logger.info("Starting under gunicorn")
-
-# Add gunicorn error handlers
-def on_starting(server):
-    logger.info("Gunicorn starting up")
-
-def on_reload(server):
-    logger.info("Gunicorn reloading")
-
-def when_ready(server):
-    logger.info("Gunicorn ready")
-
-def on_exit(server):
-    logger.info("Gunicorn shutting down")
