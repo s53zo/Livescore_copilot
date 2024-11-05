@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Error - Livescore Pilot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .error {
+            color: red;
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid red;
+            border-radius: 4px;
+            background-color: #fff3f3;
+        }
+        .back-link {
+            margin-top: 20px;
+            display: block;
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Error</h1>
+    <div class="error">{{ error }}</div>
+    <a href="/livescore-pilot" class="back-link">← Return to form</a>
+</body>
+</html>
