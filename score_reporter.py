@@ -31,8 +31,6 @@ class ScoreReporter:
             self.logger.error(f"Error loading template: {e}")
             return None
 
-    # In score_reporter.py, replace the get_station_details method with this version:
-
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """
         Get station details and nearby competitors with optional DXCC/Zone filtering
@@ -96,7 +94,7 @@ class ScoreReporter:
                                 WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
                     ) as rn
                 FROM contest_scores cs
-                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id  -- Changed to LEFT JOIN
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ?
                 AND cs.power = (SELECT power FROM StationScore)
                 AND cs.assisted = (SELECT assisted FROM StationScore)
@@ -136,31 +134,21 @@ class ScoreReporter:
         if filter_type and filter_value:
             if filter_type == 'dxcc':
                 filter_clause = """
-                    AND (qi.dxcc_country = ? 
-                    OR (qi.dxcc_country IS NULL AND ? IN (
-                        SELECT dxcc_country FROM qth_info qi2 
-                        WHERE qi2.contest_score_id = cs.id
-                    )))
+                    AND qi.dxcc_country = ?
                 """
-                params.extend([filter_value, filter_value])
+                params.append(filter_value)
             elif filter_type == 'cq_zone':
+                # Cast both the database value and the input value to integers for comparison
                 filter_clause = """
-                    AND (CAST(qi.cq_zone AS TEXT) = ? 
-                    OR (qi.cq_zone IS NULL AND ? IN (
-                        SELECT CAST(cq_zone AS TEXT) FROM qth_info qi2 
-                        WHERE qi2.contest_score_id = cs.id
-                    )))
+                    AND CAST(qi.cq_zone AS INTEGER) = CAST(? AS INTEGER)
                 """
-                params.extend([filter_value, filter_value])
+                params.append(filter_value)
             elif filter_type == 'iaru_zone':
+                # Cast both the database value and the input value to integers for comparison
                 filter_clause = """
-                    AND (CAST(qi.iaru_zone AS TEXT) = ? 
-                    OR (qi.iaru_zone IS NULL AND ? IN (
-                        SELECT CAST(iaru_zone AS TEXT) FROM qth_info qi2 
-                        WHERE qi2.contest_score_id = cs.id
-                    )))
+                    AND CAST(qi.iaru_zone AS INTEGER) = CAST(? AS INTEGER)
                 """
-                params.extend([filter_value, filter_value])
+                params.append(filter_value)
         
         formatted_query = query.format(filter_clause=filter_clause)
         
@@ -177,6 +165,8 @@ class ScoreReporter:
                 return stations
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
+            self.logger.error(f"Query: {formatted_query}")
+            self.logger.error(f"Parameters: {params}")
             return None
 
     def get_total_qso_rate(self, station_id, callsign, contest):
