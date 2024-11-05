@@ -37,47 +37,7 @@ class ScoreReporter:
         """
         self.logger.debug(f"Starting get_station_details with filter_type={filter_type}, filter_value={filter_value}")
     
-        # Base query for ValidStations CTE - changes based on whether filtering is needed
-        if filter_type and filter_value:
-            valid_stations_cte = """
-                ValidStations AS (
-                    SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
-                           cs.timestamp, cs.qsos, cs.multipliers
-                    FROM contest_scores cs
-                    LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.contest = ?
-                    AND cs.power = (SELECT power FROM StationScore)
-                    AND cs.assisted = (SELECT assisted FROM StationScore)
-                    AND cs.callsign != (SELECT callsign FROM StationScore)
-                    {filter_clause}
-                    AND cs.timestamp = (
-                        SELECT MAX(timestamp)
-                        FROM contest_scores cs2
-                        WHERE cs2.callsign = cs.callsign
-                        AND cs2.contest = cs.contest
-                    )
-                )
-            """
-        else:
-            valid_stations_cte = """
-                ValidStations AS (
-                    SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
-                           cs.timestamp, cs.qsos, cs.multipliers
-                    FROM contest_scores cs
-                    WHERE cs.contest = ?
-                    AND cs.power = (SELECT power FROM StationScore)
-                    AND cs.assisted = (SELECT assisted FROM StationScore)
-                    AND cs.callsign != (SELECT callsign FROM StationScore)
-                    AND cs.timestamp = (
-                        SELECT MAX(timestamp)
-                        FROM contest_scores cs2
-                        WHERE cs2.callsign = cs.callsign
-                        AND cs2.contest = cs.contest
-                    )
-                )
-            """
-    
-        query = f"""
+        query = """
             WITH StationScore AS (
                 SELECT 
                     cs.id, 
@@ -88,9 +48,6 @@ class ScoreReporter:
                     cs.timestamp, 
                     cs.qsos, 
                     cs.multipliers,
-                    qi.dxcc_country,
-                    qi.cq_zone,
-                    qi.iaru_zone,
                     'current' as position,
                     1 as rn
                 FROM contest_scores cs
@@ -100,7 +57,21 @@ class ScoreReporter:
                 ORDER BY cs.timestamp DESC
                 LIMIT 1
             ),
-            {valid_stations_cte},
+            ValidStations AS (
+                SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
+                       cs.timestamp, cs.qsos, cs.multipliers
+                FROM contest_scores cs
+                WHERE cs.contest = ?
+                AND cs.power = (SELECT power FROM StationScore)
+                AND cs.assisted = (SELECT assisted FROM StationScore)
+                AND cs.callsign != (SELECT callsign FROM StationScore)
+                AND cs.timestamp = (
+                    SELECT MAX(timestamp)
+                    FROM contest_scores cs2
+                    WHERE cs2.callsign = cs.callsign
+                    AND cs2.contest = cs.contest
+                )
+            ),
             NearbyStations AS (
                 SELECT 
                     vs.id,
@@ -141,43 +112,62 @@ class ScoreReporter:
                 position,
                 rn
             FROM (
-                SELECT * FROM StationScore
+                SELECT 
+                    id,
+                    callsign, 
+                    score, 
+                    power, 
+                    assisted,
+                    timestamp, 
+                    qsos, 
+                    multipliers,
+                    position,
+                    rn
+                FROM StationScore
                 UNION ALL
-                SELECT * FROM NearbyStations
+                SELECT *
+                FROM NearbyStations
                 WHERE (position = 'above' AND rn <= 2)
                 OR (position = 'below' AND rn <= 2)
             )
             ORDER BY score DESC;
         """
         
-        params = [callsign, contest, contest]
-        filter_clause = ""
-        
+        # Build the filter clause for the JOIN if we're filtering
         if filter_type and filter_value:
-            try:
-                if filter_type == 'dxcc':
-                    filter_clause = "AND qi.dxcc_country = ?"
-                    params.append(filter_value)
-                    self.logger.debug(f"Applying DXCC filter: {filter_value}")
-                elif filter_type == 'cq_zone':
-                    filter_clause = "AND CAST(qi.cq_zone AS TEXT) = ?"
-                    params.append(str(filter_value))
-                    self.logger.debug(f"Applying CQ zone filter: {filter_value}")
-                elif filter_type == 'iaru_zone':
-                    filter_clause = "AND CAST(qi.iaru_zone AS TEXT) = ?"
-                    params.append(str(filter_value))
-                    self.logger.debug(f"Applying IARU zone filter: {filter_value}")
-            except ValueError as e:
-                self.logger.error(f"Error converting zone value: {filter_value} - {str(e)}")
-                return None
+            query = query.replace(
+                "FROM contest_scores cs",
+                """FROM contest_scores cs
+                JOIN qth_info qi ON qi.contest_score_id = cs.id"""
+            )
+            
+            if filter_type == 'dxcc':
+                query = query.replace(
+                    "WHERE cs.contest = ?",
+                    "WHERE cs.contest = ? AND qi.dxcc_country = ?"
+                )
+                params = [callsign, contest, contest, filter_value]
+            elif filter_type == 'cq_zone':
+                query = query.replace(
+                    "WHERE cs.contest = ?",
+                    "WHERE cs.contest = ? AND CAST(qi.cq_zone AS TEXT) = ?"
+                )
+                params = [callsign, contest, contest, str(filter_value)]
+            elif filter_type == 'iaru_zone':
+                query = query.replace(
+                    "WHERE cs.contest = ?",
+                    "WHERE cs.contest = ? AND CAST(qi.iaru_zone AS TEXT) = ?"
+                )
+                params = [callsign, contest, contest, str(filter_value)]
+        else:
+            params = [callsign, contest, contest]
         
-        formatted_query = query.format(filter_clause=filter_clause) if filter_type and filter_value else query
         self.logger.debug(f"Executing query with params: {params}")
         
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(formatted_query, params)
+                cursor.execute(query, params)
                 stations = cursor.fetchall()
                 
                 if not stations:
@@ -189,7 +179,7 @@ class ScoreReporter:
                 
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
-            self.logger.error(f"Query: {formatted_query}")
+            self.logger.error(f"Query: {query}")
             self.logger.error(f"Parameters: {params}")
             return None
 
