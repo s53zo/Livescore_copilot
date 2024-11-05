@@ -6,7 +6,6 @@ After=network.target
 User=root
 Group=root
 WorkingDirectory=/opt/livescore
-EnvironmentFile=/opt/livescore/livescore.env
 ExecStart=/usr/local/bin/gunicorn -c gunicorn_config.py web_interface:app
 Restart=always
 
