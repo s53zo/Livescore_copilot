@@ -1,97 +1,53 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Contest Progress Report</title>
-    <meta http-equiv="refresh" content="60">
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            color: #333;
-        }}
-        
-        h1 {{
-            color: #2c3e50;
-            margin-bottom: 10px;
-        }}
-        
-        .info {{
-            color: #7f8c8d;
-            margin-bottom: 20px;
-        }}
-        
-        .category-info {{
-            background-color: #f8f9fa;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }}
-        
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }}
-        
-        th, td {{
-            border: 1px solid #dee2e6;
-            padding: 8px 4px;
-            text-align: center;
-            font-size: 0.9em;
-        }}
-        
-        th {{
-            background-color: #f8f9fa;
-            font-weight: bold;
-            color: #2c3e50;
-        }}
-        
-        tr:nth-child(even) {{
-            background-color: #f8f9fa;
-        }}
-        
-        .highlight {{
-            background-color: #e8f5e9 !important;
-            font-weight: bold;
-        }}
-        
-        .highlight td {{
-            border-top: 2px solid #4caf50;
-            border-bottom: 2px solid #4caf50;
-        }}
-        
-        .timestamp {{
-            font-style: italic;
-            color: #7f8c8d;
-        }}
+# Add this new route in web_interface.py:
 
-        .band-data {{
-            white-space: nowrap;
-        }}
-    </style>
-</head>
-<body>
-    <h1>Contest Progress Report - {contest}</h1>
-    <p class="timestamp">Updated: {timestamp}</p>
-    <div class="category-info">
-        <strong>Category:</strong> Power: {power} | Assisted: {assisted}
-    </div>
-    <table>
-        <tr>
-            <th>Place</th>
-            <th>Call Sign</th>
-            <th>Score</th>
-            <th>160m</th>
-            <th>80m</th>
-            <th>40m</th>
-            <th>20m</th>
-            <th>15m</th>
-            <th>10m</th>
-            <th>Total<br>QSO/Mults</th>
-            <th>Last Update</th>
-        </tr>
-        {table_rows}
-    </table>
-</body>
-</html>
+@app.route('/reports/live.html')
+def show_report():
+    try:
+        # Get parameters from query string
+        callsign = request.args.get('callsign')
+        contest = request.args.get('contest')
+        filter_type = request.args.get('filter_type')
+        filter_value = request.args.get('filter_value')
+
+        if not (callsign and contest):
+            return render_template('error.html', error="Missing required parameters")
+
+        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
+
+        reporter = ScoreReporter(Config.DB_PATH)
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+
+        if stations:
+            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+            if success:
+                return send_from_directory(Config.OUTPUT_DIR, 'live.html')
+            else:
+                return render_template('error.html', error="Failed to generate report")
+        else:
+            return render_template('error.html', error="No data found for the selected criteria")
+
+    except Exception as e:
+        logger.error("Exception in show_report:")
+        logger.error(traceback.format_exc())
+        return render_template('error.html', error=f"Error: {str(e)}")
+
+# Modify the POST handling in the index route to redirect with parameters:
+if request.method == 'POST' and request.form.get('callsign'):
+    callsign = request.form.get('callsign')
+    contest = request.form.get('contest')
+    filter_type = request.form.get('filter_type')
+    filter_value = request.form.get('filter_value')
+    
+    # Build query parameters for redirect
+    params = {
+        'callsign': callsign,
+        'contest': contest
+    }
+    if filter_type and filter_value:
+        params['filter_type'] = filter_type
+        params['filter_value'] = filter_value
+    
+    # Redirect to the report with parameters
+    return redirect(url_for('show_report', **params))
+    
