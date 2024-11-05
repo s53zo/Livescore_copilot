@@ -17,148 +17,190 @@ class ContestDatabaseHandler:
         self.setup_database()
 
     def setup_database(self):
-        """Create the database tables if they don't exist."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS contest_scores (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME,
-                    contest TEXT,
-                    callsign TEXT,
-                    power TEXT,
-                    assisted TEXT,
-                    transmitter TEXT,
-                    ops TEXT,
-                    bands TEXT,
-                    mode TEXT,
-                    overlay TEXT,
-                    club TEXT,
-                    section TEXT,
-                    score INTEGER,
-                    qsos INTEGER,
-                    multipliers INTEGER,
-                    points INTEGER
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS band_breakdown (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    contest_score_id INTEGER,
-                    band TEXT,
-                    mode TEXT,
-                    qsos INTEGER,
-                    points INTEGER,
-                    multipliers INTEGER,
-                    FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
-                )
-            ''')
+    """Create the database tables if they don't exist."""
+    with sqlite3.connect(self.db_path) as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS contest_scores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME,
+                contest TEXT,
+                callsign TEXT,
+                power TEXT,
+                assisted TEXT,
+                transmitter TEXT,
+                ops TEXT,
+                bands TEXT,
+                mode TEXT,
+                overlay TEXT,
+                club TEXT,
+                section TEXT,
+                score INTEGER,
+                qsos INTEGER,
+                multipliers INTEGER,
+                points INTEGER
+            )
+        ''')
+        
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS band_breakdown (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contest_score_id INTEGER,
+                band TEXT,
+                mode TEXT,
+                qsos INTEGER,
+                points INTEGER,
+                multipliers INTEGER,
+                FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
+            )
+        ''')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS qth_info (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contest_score_id INTEGER,
+                dxcc_country TEXT,
+                cq_zone TEXT,
+                iaru_zone TEXT,
+                arrl_section TEXT,
+                state_province TEXT,
+                grid6 TEXT,
+                FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
+            )
+        ''')
 
     def parse_xml_data(self, xml_data):
-        """Parse XML data and return structured contest data."""
-        # Data should already be URL-decoded by this point
-        # Split the input into individual XML documents
-        xml_docs = re.findall(r'<\?xml.*?</dynamicresults>', xml_data, re.DOTALL)
-        
-        results = []
-        for xml_doc in xml_docs:
-            try:
-                root = ET.fromstring(xml_doc)
-                
-                # Extract basic contest data
-                contest_data = {
-                    'contest': root.findtext('contest', ''),
-                    'callsign': root.findtext('call', ''),
-                    'timestamp': root.findtext('timestamp', ''),
-                    'club': root.findtext('club', '').strip(),
-                    'section': root.find('.//qth/arrlsection').text if root.find('.//qth/arrlsection') is not None else '',
-                    'score': int(root.findtext('score', 0))
+    """Parse XML data and return structured contest data."""
+    xml_docs = re.findall(r'<\?xml.*?</dynamicresults>', xml_data, re.DOTALL)
+    
+    results = []
+    for xml_doc in xml_docs:
+        try:
+            root = ET.fromstring(xml_doc)
+            
+            # Extract basic contest data
+            contest_data = {
+                'contest': root.findtext('contest', ''),
+                'callsign': root.findtext('call', ''),
+                'timestamp': root.findtext('timestamp', ''),
+                'club': root.findtext('club', '').strip(),
+                'section': root.find('.//qth/arrlsection').text if root.find('.//qth/arrlsection') is not None else '',
+                'score': int(root.findtext('score', 0))
+            }
+            
+            # Extract class attributes
+            class_elem = root.find('class')
+            if class_elem is not None:
+                contest_data.update({
+                    'power': class_elem.get('power', ''),
+                    'assisted': class_elem.get('assisted', ''),
+                    'transmitter': class_elem.get('transmitter', ''),
+                    'ops': class_elem.get('ops', ''),
+                    'bands': class_elem.get('bands', ''),
+                    'mode': class_elem.get('mode', ''),
+                    'overlay': class_elem.get('overlay', '')
+                })
+            
+            # Extract QTH data
+            qth_elem = root.find('qth')
+            if qth_elem is not None:
+                contest_data['qth'] = {
+                    'dxcc_country': qth_elem.findtext('dxcccountry', ''),
+                    'cq_zone': qth_elem.findtext('cqzone', ''),
+                    'iaru_zone': qth_elem.findtext('iaruzone', ''),
+                    'arrl_section': qth_elem.findtext('arrlsection', ''),
+                    'state_province': qth_elem.findtext('stprvoth', ''),
+                    'grid6': qth_elem.findtext('grid6', '')
                 }
+            
+            # Extract breakdown totals
+            breakdown = root.find('breakdown')
+            if breakdown is not None:
+                contest_data['qsos'] = int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0))
+                contest_data['points'] = int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0))
+                contest_data['multipliers'] = int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0))
                 
-                # Extract class attributes
-                class_elem = root.find('class')
-                if class_elem is not None:
-                    contest_data.update({
-                        'power': class_elem.get('power', ''),
-                        'assisted': class_elem.get('assisted', ''),
-                        'transmitter': class_elem.get('transmitter', ''),
-                        'ops': class_elem.get('ops', ''),
-                        'bands': class_elem.get('bands', ''),
-                        'mode': class_elem.get('mode', ''),
-                        'overlay': class_elem.get('overlay', '')
-                    })
-                
-                # Extract breakdown totals
-                breakdown = root.find('breakdown')
-                if breakdown is not None:
-                    contest_data['qsos'] = int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0))
-                    contest_data['points'] = int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0))
-                    contest_data['multipliers'] = int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0))
-                    
-                    # Extract per-band breakdown
-                    bands = ['160', '80', '40', '20', '15', '10']
-                    contest_data['band_breakdown'] = []
-                    for band in bands:
-                        band_data = {
-                            'band': band,
-                            'mode': 'ALL',
-                            'qsos': int(breakdown.findtext(f'qso[@band="{band}"][@mode="ALL"]', 0)),
-                            'points': int(breakdown.findtext(f'point[@band="{band}"][@mode="ALL"]', 0)),
-                            'multipliers': int(breakdown.findtext(f'mult[@band="{band}"][@mode="ALL"]', 0))
-                        }
-                        if band_data['qsos'] > 0:
-                            contest_data['band_breakdown'].append(band_data)
-                
-                results.append(contest_data)
-                logging.debug(f"Successfully parsed data for {contest_data['callsign']}")
-            except ET.ParseError as e:
-                logging.error(f"Error parsing XML: {e}")
-            except Exception as e:
-                logging.error(f"Error processing data: {e}")
-                
-        return results
+                # Extract per-band breakdown
+                bands = ['160', '80', '40', '20', '15', '10']
+                contest_data['band_breakdown'] = []
+                for band in bands:
+                    band_data = {
+                        'band': band,
+                        'mode': 'ALL',
+                        'qsos': int(breakdown.findtext(f'qso[@band="{band}"][@mode="ALL"]', 0)),
+                        'points': int(breakdown.findtext(f'point[@band="{band}"][@mode="ALL"]', 0)),
+                        'multipliers': int(breakdown.findtext(f'mult[@band="{band}"][@mode="ALL"]', 0))
+                    }
+                    if band_data['qsos'] > 0:
+                        contest_data['band_breakdown'].append(band_data)
+            
+            results.append(contest_data)
+            logging.debug(f"Successfully parsed data for {contest_data['callsign']}")
+        except ET.ParseError as e:
+            logging.error(f"Error parsing XML: {e}")
+        except Exception as e:
+            logging.error(f"Error processing data: {e}")
+            
+    return results
 
     def store_data(self, contest_data):
-        """Store contest data in the database."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            for data in contest_data:
-                try:
-                    # Insert main contest data
+    """Store contest data in the database."""
+    with sqlite3.connect(self.db_path) as conn:
+        cursor = conn.cursor()
+        
+        for data in contest_data:
+            try:
+                # Insert main contest data
+                cursor.execute('''
+                    INSERT INTO contest_scores (
+                        timestamp, contest, callsign, power, assisted, transmitter,
+                        ops, bands, mode, overlay, club, section, score, qsos,
+                        multipliers, points
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    data['timestamp'], data['contest'], data['callsign'],
+                    data.get('power', ''), data.get('assisted', ''),
+                    data.get('transmitter', ''), data.get('ops', ''),
+                    data.get('bands', ''), data.get('mode', ''),
+                    data.get('overlay', ''), data['club'], data['section'],
+                    data['score'], data.get('qsos', 0), data.get('multipliers', 0),
+                    data.get('points', 0)
+                ))
+                
+                contest_score_id = cursor.lastrowid
+                logging.debug(f"Stored main contest data for {data['callsign']}, ID: {contest_score_id}")
+                
+                # Store QTH data if available
+                if 'qth' in data:
                     cursor.execute('''
-                        INSERT INTO contest_scores (
-                            timestamp, contest, callsign, power, assisted, transmitter,
-                            ops, bands, mode, overlay, club, section, score, qsos,
-                            multipliers, points
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO qth_info (
+                            contest_score_id, dxcc_country, cq_zone, iaru_zone,
+                            arrl_section, state_province, grid6
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     ''', (
-                        data['timestamp'], data['contest'], data['callsign'],
-                        data.get('power', ''), data.get('assisted', ''),
-                        data.get('transmitter', ''), data.get('ops', ''),
-                        data.get('bands', ''), data.get('mode', ''),
-                        data.get('overlay', ''), data['club'], data['section'],
-                        data['score'], data.get('qsos', 0), data.get('multipliers', 0),
-                        data.get('points', 0)
+                        contest_score_id,
+                        data['qth'].get('dxcc_country', ''),
+                        data['qth'].get('cq_zone', ''),
+                        data['qth'].get('iaru_zone', ''),
+                        data['qth'].get('arrl_section', ''),
+                        data['qth'].get('state_province', ''),
+                        data['qth'].get('grid6', '')
                     ))
-                    
-                    contest_score_id = cursor.lastrowid
-                    logging.debug(f"Stored main contest data for {data['callsign']}, ID: {contest_score_id}")
-                    
-                    # Insert band breakdown data
-                    for band_data in data.get('band_breakdown', []):
-                        cursor.execute('''
-                            INSERT INTO band_breakdown (
-                                contest_score_id, band, mode, qsos, points, multipliers
-                            ) VALUES (?, ?, ?, ?, ?, ?)
-                        ''', (
-                            contest_score_id, band_data['band'], band_data['mode'],
-                            band_data['qsos'], band_data['points'],
-                            band_data['multipliers']
-                        ))
-                        logging.debug(f"Stored band data for {data['callsign']}, band: {band_data['band']}")
-                except Exception as e:
-                    logging.error(f"Error storing data for {data['callsign']}: {e}")
+                    logging.debug(f"Stored QTH data for {data['callsign']}")
+                
+                # Insert band breakdown data
+                for band_data in data.get('band_breakdown', []):
+                    cursor.execute('''
+                        INSERT INTO band_breakdown (
+                            contest_score_id, band, mode, qsos, points, multipliers
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (
+                        contest_score_id, band_data['band'], band_data['mode'],
+                        band_data['qsos'], band_data['points'],
+                        band_data['multipliers']
+                    ))
+                    logging.debug(f"Stored band data for {data['callsign']}, band: {band_data['band']}")
+            except Exception as e:
+                logging.error(f"Error storing data for {data['callsign']}: {e}")
 
     def cleanup_old_data(self, days=3):
         """Remove data older than specified number of days."""
