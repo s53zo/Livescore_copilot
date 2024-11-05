@@ -325,16 +325,16 @@ class ScoreReporter:
         rate_str = f"{rate:+d}" if rate != 0 else "0"
         return f"{qsos}/{mults} ({rate_str})"
 
-    def generate_html(self, callsign, contest, stations, output_dir):
+    def generate_html(self, callsign, contest, stations, output_dir, filter_type=None, filter_value=None):
         """Generate HTML report"""
         if not stations:
             self.logger.error("No station data available")
             return False
-
+    
         template = self.load_template()
         if not template:
             return False
-
+    
         # Generate table rows
         table_rows = []
         for i, station in enumerate(stations, 1):
@@ -368,16 +368,26 @@ class ScoreReporter:
                 <td>{ts}</td>
             </tr>"""
             table_rows.append(row)
-
+    
+        # Prepare filter display text
+        if filter_type and filter_value:
+            filter_display = f"| Filtered by: {filter_type.upper()}: {filter_value}"
+        else:
+            filter_display = ""
+    
         # Format HTML
         html_content = template.format(
             contest=contest,
+            callsign=callsign,
             timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             power=stations[0][3],
             assisted=stations[0][4],
-            table_rows='\n'.join(table_rows)
+            table_rows='\n'.join(table_rows),
+            filter_type=filter_type or '',
+            filter_value=filter_value or '',
+            filter_display=filter_display
         )
-
+    
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
