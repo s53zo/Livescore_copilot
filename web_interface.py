@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, abort
 import sqlite3
 import os
 import logging
@@ -54,117 +54,7 @@ def index():
 
     try:
         with get_db() as db:
-            cursor = db.cursor()
-            
-            # Get contests
-            logger.debug("Fetching contests")
-            cursor.execute("""
-                SELECT DISTINCT contest 
-                FROM contest_scores 
-                ORDER BY contest
-            """)
-            contests = [row[0] for row in cursor.fetchall()]
-            logger.debug(f"Found contests: {contests}")
-            
-            # If contest is selected (either via POST or GET parameter)
-            selected_contest = request.form.get('contest') or request.args.get('contest')
-            logger.debug(f"Selected contest: {selected_contest}")
-            
-            callsigns = []
-            countries = []
-            cq_zones = []
-            iaru_zones = []
-            
-            if selected_contest:
-                # Get callsigns for this contest only
-                logger.debug(f"Fetching callsigns for contest: {selected_contest}")
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    )
-                    SELECT cs.callsign
-                    FROM contest_scores cs
-                    JOIN LatestScores ls ON cs.callsign = ls.callsign 
-                        AND cs.timestamp = ls.max_ts
-                    WHERE cs.contest = ?
-                    ORDER BY cs.callsign
-                """, (selected_contest, selected_contest))
-                callsigns = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found callsigns: {len(callsigns)}")
-                
-                # Get available DXCC countries for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.dxcc_country
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.dxcc_country IS NOT NULL 
-                    AND qi.dxcc_country != ''
-                    ORDER BY qi.dxcc_country
-                """, (selected_contest, selected_contest))
-                countries = [row[0] for row in cursor.fetchall()]
-                
-                # Get available CQ zones for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.cq_zone
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.cq_zone IS NOT NULL 
-                    AND qi.cq_zone != ''
-                    ORDER BY CAST(qi.cq_zone AS INTEGER)
-                """, (selected_contest, selected_contest))
-                cq_zones = [row[0] for row in cursor.fetchall()]
-                
-                # Get available IARU zones for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.iaru_zone
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.iaru_zone IS NOT NULL 
-                    AND qi.iaru_zone != ''
-                    ORDER BY CAST(qi.iaru_zone AS INTEGER)
-                """, (selected_contest, selected_contest))
-                iaru_zones = [row[0] for row in cursor.fetchall()]
-        
-        # In the POST handling section of the index route:
+            # ... (keep existing database queries) ...
 
         if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
@@ -182,23 +72,19 @@ def index():
                 success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
                                               filter_type=filter_type, filter_value=filter_value)
                 if success:
-                    # Build query parameters for redirect
-                    params = {
-                        'callsign': callsign,
-                        'contest': contest
-                    }
+                    # Build query parameters
+                    query_params = f"?callsign={callsign}&contest={contest}"
                     if filter_type and filter_value:
-                        params['filter_type'] = filter_type
-                        params['filter_value'] = filter_value
+                        query_params += f"&filter_type={filter_type}&filter_value={filter_value}"
                     
-                    # Redirect to the report with parameters
-                    return redirect(url_for('show_report', **params))
+                    # Redirect to the report
+                    return redirect(f'/reports/live.html{query_params}')
                 else:
                     return render_template('error.html', error="Failed to generate report")
             else:
                 return render_template('error.html', error="No data found for the selected criteria")
         
-        logger.debug("Rendering template with data")
+        logger.debug("Rendering template")
         return render_template('select_form.html', 
                              contests=contests,
                              selected_contest=selected_contest,
@@ -212,7 +98,45 @@ def index():
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
 
-# Add error handlers
+@app.route('/reports/live.html')
+def live_report():
+    try:
+        # Get parameters from query string
+        callsign = request.args.get('callsign')
+        contest = request.args.get('contest')
+        filter_type = request.args.get('filter_type')
+        filter_value = request.args.get('filter_value')
+
+        if not (callsign and contest):
+            return render_template('error.html', error="Missing required parameters")
+
+        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
+
+        reporter = ScoreReporter(Config.DB_PATH)
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+
+        if stations:
+            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
+                                          filter_type=filter_type, filter_value=filter_value)
+            if success:
+                return send_from_directory(Config.OUTPUT_DIR, 'live.html')
+            else:
+                return render_template('error.html', error="Failed to generate report")
+        else:
+            return render_template('error.html', error="No data found for the selected criteria")
+
+    except Exception as e:
+        logger.error("Exception in live_report:")
+        logger.error(traceback.format_exc())
+        return render_template('error.html', error=f"Error: {str(e)}")
+
+# Add static files route if not already present
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory('static', filename)
+
+# Add error handlers if not already present
 @app.errorhandler(404)
 def not_found_error(error):
     logger.error(f"404 error: {error}")
