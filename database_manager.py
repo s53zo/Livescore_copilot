@@ -73,6 +73,9 @@ class DatabaseManager:
                 
                 print("Reindexing band_breakdown table...")
                 conn.execute("REINDEX band_breakdown")
+
+                print("Reindexing qth_info table...")
+                conn.execute("REINDEX qth_info")
                 
             print("\nAll indexes rebuilt successfully!")
             
