@@ -3,12 +3,11 @@ Description=Livescore Pilot Gunicorn Service
 After=network.target
 
 [Service]
-# Use actual username and group from your system
 User=root
 Group=root
 WorkingDirectory=/opt/livescore
-Environment="PATH=/opt/livescore/venv/bin"
-ExecStart=/opt/livescore/venv/bin/gunicorn -c gunicorn_config.py web_interface:app
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/local/bin/gunicorn --config /opt/livescore/gunicorn_config.py web_interface:app
 Restart=always
 RestartSec=5
 
