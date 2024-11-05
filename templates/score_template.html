@@ -1,53 +1,201 @@
-# Add this new route in web_interface.py:
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contest Progress Report - {contest}</title>
+    <script>
+        function refreshPage() {{
+            const params = {{
+                callsign: '{callsign}',
+                contest: '{contest}'
+            }};
+            if ('{filter_type}') {{
+                params.filter_type = '{filter_type}';
+                params.filter_value = '{filter_value}';
+            }}
+            
+            const query = new URLSearchParams(params).toString();
+            window.location.href = '/reports/live.html?' + query;
+        }}
+        
+        setInterval(refreshPage, 300000);
 
-@app.route('/reports/live.html')
-def show_report():
-    try:
-        # Get parameters from query string
-        callsign = request.args.get('callsign')
-        contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type')
-        filter_value = request.args.get('filter_value')
+        function updateCountdown() {{
+            const countdownElement = document.getElementById('countdown');
+            let minutes = 4;
+            let seconds = 59;
 
-        if not (callsign and contest):
-            return render_template('error.html', error="Missing required parameters")
+            function pad(num) {{
+                return num.toString().padStart(2, '0');
+            }}
 
-        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
+            const timer = setInterval(() => {{
+                if (minutes === 0 && seconds === 0) {{
+                    clearInterval(timer);
+                    return;
+                }}
 
-        reporter = ScoreReporter(Config.DB_PATH)
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+                if (seconds === 0) {{
+                    minutes--;
+                    seconds = 59;
+                }} else {{
+                    seconds--;
+                }}
 
-        if stations:
-            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-            if success:
-                return send_from_directory(Config.OUTPUT_DIR, 'live.html')
-            else:
-                return render_template('error.html', error="Failed to generate report")
-        else:
-            return render_template('error.html', error="No data found for the selected criteria")
+                countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
+            }}, 1000);
+        }}
 
-    except Exception as e:
-        logger.error("Exception in show_report:")
-        logger.error(traceback.format_exc())
-        return render_template('error.html', error=f"Error: {str(e)}")
+        // Start the countdown when page loads
+        document.addEventListener('DOMContentLoaded', updateCountdown);
+    </script>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            color: #333;
+            padding-bottom: 40px;
+        }}
+        
+        h1 {{
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }}
+        
+        .info {{
+            color: #7f8c8d;
+            margin-bottom: 20px;
+        }}
+        
+        .category-info {{
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }}
+        
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }}
+        
+        th, td {{
+            border: 1px solid #dee2e6;
+            padding: 8px 4px;
+            text-align: center;
+            font-size: 0.9em;
+        }}
+        
+        th {{
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #2c3e50;
+        }}
+        
+        tr:nth-child(even) {{
+            background-color: #f8f9fa;
+        }}
+        
+        .highlight {{
+            background-color: #e8f5e9 !important;
+            font-weight: bold;
+        }}
+        
+        .highlight td {{
+            border-top: 2px solid #4caf50;
+            border-bottom: 2px solid #4caf50;
+        }}
+        
+        .timestamp {{
+            font-style: italic;
+            color: #7f8c8d;
+            margin-bottom: 15px;
+        }}
 
-# Modify the POST handling in the index route to redirect with parameters:
-if request.method == 'POST' and request.form.get('callsign'):
-    callsign = request.form.get('callsign')
-    contest = request.form.get('contest')
-    filter_type = request.form.get('filter_type')
-    filter_value = request.form.get('filter_value')
-    
-    # Build query parameters for redirect
-    params = {
-        'callsign': callsign,
-        'contest': contest
-    }
-    if filter_type and filter_value:
-        params['filter_type'] = filter_type
-        params['filter_value'] = filter_value
-    
-    # Redirect to the report with parameters
-    return redirect(url_for('show_report', **params))
-    
+        .band-data {{
+            white-space: nowrap;
+        }}
+
+        .refresh-info {{
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #4caf50;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }}
+
+        #countdown {{
+            font-weight: bold;
+        }}
+
+        .filter-info {{
+            color: #4caf50;
+            font-weight: normal;
+            margin-left: 10px;
+        }}
+
+        .footer {{
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #f8f9fa;
+            padding: 10px 20px;
+            text-align: center;
+            font-size: 0.8em;
+            color: #666;
+            border-top: 1px solid #dee2e6;
+        }}
+
+        @media print {{
+            .refresh-info, .footer {{
+                display: none;
+            }}
+            body {{
+                padding-bottom: 0;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="refresh-info">
+        Next refresh in <span id="countdown">5:00</span>
+    </div>
+
+    <h1>Contest Progress Report - {contest}</h1>
+    <p class="timestamp">
+        Updated: {timestamp}<br>
+        Monitoring: {callsign} 
+        <span class="filter-info">{filter_display}</span>
+    </p>
+    <div class="category-info">
+        <strong>Category:</strong> Power: {power} | Assisted: {assisted}
+    </div>
+    <table>
+        <tr>
+            <th>Place</th>
+            <th>Call Sign</th>
+            <th>Score</th>
+            <th>160m</th>
+            <th>80m</th>
+            <th>40m</th>
+            <th>20m</th>
+            <th>15m</th>
+            <th>10m</th>
+            <th>Total<br>QSO/Mults</th>
+            <th>Last Update</th>
+        </tr>
+        {table_rows}
+    </table>
+
+    <div class="footer">
+        Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network
+    </div>
+</body>
+</html>
