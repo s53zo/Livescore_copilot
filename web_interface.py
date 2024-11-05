@@ -57,7 +57,17 @@ def index():
             cursor.execute("SELECT DISTINCT callsign FROM contest_scores ORDER BY callsign")
             callsigns = [row[0] for row in cursor.fetchall()]
             logger.debug(f"Found callsigns: {callsigns}")
-        
+
+            cursor.execute("SELECT DISTINCT dxcc_country FROM qth_info WHERE dxcc_country IS NOT NULL")
+            dxcc_countries = [row[0] for row in cursor.fetchall()]
+            
+            cursor.execute("SELECT DISTINCT cq_zone FROM qth_info WHERE cq_zone IS NOT NULL")
+            cq_zones = [row[0] for row in cursor.fetchall()]
+            
+            cursor.execute("SELECT DISTINCT iaru_zone FROM qth_info WHERE iaru_zone IS NOT NULL")
+            iaru_zones = [row[0] for row in cursor.fetchall()]
+
+                  
         if request.method == 'POST':
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
@@ -92,7 +102,7 @@ def index():
                 return "No data found", 404
         
         logger.debug("Rendering template")
-        return render_template('select_form.html', contests=contests, callsigns=callsigns)
+        return render_template('select_form.html', contests=contests, callsigns=callsigns, dxcc_countries=dxcc_countries, cq_zones=cq_zones, iaru_zones=iaru_zones)
     
     except Exception as e:
         logger.error("Exception occurred:")
