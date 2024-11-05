@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # Set up detailed logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
         logging.FileHandler('/opt/livescore/logs/debug.log'),
