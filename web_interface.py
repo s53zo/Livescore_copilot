@@ -15,8 +15,8 @@ app = Flask(__name__)
 # Set up secure headers
 talisman = Talisman(
     app,
-    force_https=True,
-    strict_transport_security=True,
+    force_https=False,  # Changed to False
+    session_cookie_secure=False,  # Changed to False
     content_security_policy={
         'default-src': "'self'",
         'style-src': "'self' 'unsafe-inline'",
