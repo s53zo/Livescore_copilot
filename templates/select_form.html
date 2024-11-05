@@ -25,6 +25,10 @@
             border-radius: 4px;
             box-sizing: border-box;
         }
+        select:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+        }
         button {
             background-color: #4CAF50;
             color: white;
@@ -35,6 +39,10 @@
         }
         button:hover {
             background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
         }
         .filter-section {
             border: 1px solid #eee;
@@ -50,83 +58,113 @@
         .hidden {
             display: none;
         }
+        .step {
+            margin-bottom: 25px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        .step h2 {
+            margin-top: 0;
+            color: #4CAF50;
+            font-size: 1.2em;
+        }
+        .disabled-step {
+            opacity: 0.5;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
     <h1>Livescore Pilot</h1>
-    <br>Online tool to follow your progress on the Contest Livescores.<br>
-    Select your or any other callsign, a contest and you will see your progress compared to the nearby competition.<br><br>
+    <p>Online tool to follow your progress on the Contest Livescores.</p>
     
-    <form method="POST">
-        <div class="form-group">
-            <label for="callsign">Select Callsign:</label>
-            <select name="callsign" id="callsign" required>
-                <option value="">-- Select Callsign --</option>
-                {% for callsign in callsigns %}
-                <option value="{{ callsign }}">{{ callsign }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        
-        <div class="form-group">
-            <label for="contest">Select Contest:</label>
-            <select name="contest" id="contest" required>
-                <option value="">-- Select Contest --</option>
-                {% for contest in contests %}
-                <option value="{{ contest }}">{{ contest }}</option>
-                {% endfor %}
-            </select>
-        </div>
-
-        <div class="filter-section">
-            <h3>Filter Options</h3>
+    <form method="POST" id="scoreForm">
+        <div class="step" id="step1">
+            <h2>Step 1: Select Contest</h2>
             <div class="form-group">
-                <label for="filter_type">Filter By:</label>
-                <select name="filter_type" id="filter_type">
-                    <option value="">-- No Filter --</option>
-                    <option value="dxcc">DXCC Country</option>
-                    <option value="cq_zone">CQ Zone</option>
-                    <option value="iaru_zone">IARU Zone</option>
-                </select>
-            </div>
-
-            <div class="form-group hidden" id="dxcc_filter">
-                <label for="dxcc_value">Select Country:</label>
-                <select name="filter_value" id="dxcc_value">
-                    <option value="">-- Select Country --</option>
-                    {% for country in countries %}
-                    <option value="{{ country }}">{{ country }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-group hidden" id="cq_zone_filter">
-                <label for="cq_zone_value">Select CQ Zone:</label>
-                <select name="filter_value" id="cq_zone_value">
-                    <option value="">-- Select CQ Zone --</option>
-                    {% for zone in cq_zones %}
-                    <option value="{{ zone }}">{{ zone }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-group hidden" id="iaru_zone_filter">
-                <label for="iaru_zone_value">Select IARU Zone:</label>
-                <select name="filter_value" id="iaru_zone_value">
-                    <option value="">-- Select IARU Zone --</option>
-                    {% for zone in iaru_zones %}
-                    <option value="{{ zone }}">{{ zone }}</option>
+                <label for="contest">Choose a Contest:</label>
+                <select name="contest" id="contest" required onchange="this.form.submit()">
+                    <option value="">-- Select Contest --</option>
+                    {% for contest in contests %}
+                    <option value="{{ contest }}" {% if selected_contest == contest %}selected{% endif %}>{{ contest }}</option>
                     {% endfor %}
                 </select>
             </div>
         </div>
+
+        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step2">
+            <h2>Step 2: Select Callsign</h2>
+            <div class="form-group">
+                <label for="callsign">Choose a Callsign:</label>
+                <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required>
+                    <option value="">-- Select Callsign --</option>
+                    {% for callsign in callsigns %}
+                    <option value="{{ callsign }}">{{ callsign }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step3">
+            <h2>Step 3: Apply Filters (Optional)</h2>
+            <div class="filter-section">
+                <div class="form-group">
+                    <label for="filter_type">Filter By:</label>
+                    <select name="filter_type" id="filter_type" {% if not selected_contest %}disabled{% endif %}>
+                        <option value="">-- No Filter --</option>
+                        <option value="dxcc">DXCC Country</option>
+                        <option value="cq_zone">CQ Zone</option>
+                        <option value="iaru_zone">IARU Zone</option>
+                    </select>
+                </div>
+
+                <div class="form-group hidden" id="dxcc_filter">
+                    <label for="dxcc_value">Select Country:</label>
+                    <select name="filter_value" id="dxcc_value">
+                        <option value="">-- Select Country --</option>
+                        {% for country in countries %}
+                        <option value="{{ country }}">{{ country }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group hidden" id="cq_zone_filter">
+                    <label for="cq_zone_value">Select CQ Zone:</label>
+                    <select name="filter_value" id="cq_zone_value">
+                        <option value="">-- Select CQ Zone --</option>
+                        {% for zone in cq_zones %}
+                        <option value="{{ zone }}">{{ zone }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group hidden" id="iaru_zone_filter">
+                    <label for="iaru_zone_value">Select IARU Zone:</label>
+                    <select name="filter_value" id="iaru_zone_value">
+                        <option value="">-- Select IARU Zone --</option>
+                        {% for zone in iaru_zones %}
+                        <option value="{{ zone }}">{{ zone }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
         
-        <button type="submit">Generate Report</button>
+        <button type="submit" id="generateButton" {% if not selected_contest %}disabled{% endif %}>Generate Report</button>
     </form>
     
     <br><br>Code by Simon, S53ZO, data from competitors via Contest score distribution network
 
     <script>
+        document.getElementById('contest').addEventListener('change', function() {
+            if (this.value) {
+                // Submit form to update callsign list
+                this.form.submit();
+            }
+        });
+
         document.getElementById('filter_type').addEventListener('change', function() {
             // Hide all filter value selects
             document.querySelectorAll('#dxcc_filter, #cq_zone_filter, #iaru_zone_filter').forEach(el => {
@@ -142,6 +180,11 @@
             document.querySelectorAll('select[name="filter_value"]').forEach(select => {
                 select.value = '';
             });
+        });
+
+        // Enable/disable generate button based on required selections
+        document.getElementById('callsign').addEventListener('change', function() {
+            document.getElementById('generateButton').disabled = !this.value;
         });
     </script>
 </body>
