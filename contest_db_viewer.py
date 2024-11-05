@@ -303,7 +303,118 @@ class ContestDatabaseViewer:
             self.logger.debug(f"Retrieved {len(results)} band breakdown records")
             return results
     
+    def get_qth_details(self, callsign=None, contest=None):
+        """Get QTH details for stations"""
+        query = """
+            WITH latest_scores AS (
+                SELECT cs.id, cs.callsign, cs.contest, cs.timestamp
+                FROM contest_scores cs
+                INNER JOIN (
+                    SELECT callsign, contest, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    GROUP BY callsign, contest
+                ) latest ON cs.callsign = latest.callsign 
+                    AND cs.contest = latest.contest
+                    AND cs.timestamp = latest.max_ts
+            )
+            SELECT DISTINCT
+                cs.callsign,
+                cs.contest,
+                cs.timestamp,
+                qi.dxcc_country,
+                qi.cq_zone,
+                qi.iaru_zone,
+                qi.arrl_section,
+                qi.state_province,
+                qi.grid6
+            FROM contest_scores cs
+            JOIN latest_scores ls ON cs.id = ls.id
+            LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+            WHERE 1=1
+        """
+        
+        params = []
+        if callsign:
+            query += " AND cs.callsign = ?"
+            params.append(callsign)
+        if contest:
+            query += " AND cs.contest = ?"
+            params.append(contest)
+        
+        query += " ORDER BY cs.callsign, cs.contest"
+        
+        self.logger.debug(f"Executing QTH query: {query}")
+        self.logger.debug(f"Query parameters: {params}")
+        
+        with self.connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            self.logger.debug(f"Retrieved {len(results)} QTH records")
+            return results
     
+    def get_qth_statistics(self, contest=None):
+        """Get statistics about QTH distribution"""
+        query = """
+            WITH latest_scores AS (
+                SELECT cs.id, cs.callsign, cs.contest
+                FROM contest_scores cs
+                INNER JOIN (
+                    SELECT callsign, contest, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    GROUP BY callsign, contest
+                ) latest ON cs.callsign = latest.callsign 
+                    AND cs.contest = latest.contest
+                    AND cs.timestamp = latest.max_ts
+                WHERE 1=1
+                {contest_filter}
+            )
+            SELECT
+                'DXCC Countries' as category,
+                COUNT(DISTINCT qi.dxcc_country) as unique_count,
+                GROUP_CONCAT(DISTINCT qi.dxcc_country) as items
+            FROM latest_scores ls
+            JOIN qth_info qi ON qi.contest_score_id = ls.id
+            WHERE qi.dxcc_country IS NOT NULL
+            UNION ALL
+            SELECT 
+                'CQ Zones' as category,
+                COUNT(DISTINCT qi.cq_zone) as unique_count,
+                GROUP_CONCAT(DISTINCT qi.cq_zone) as items
+            FROM latest_scores ls
+            JOIN qth_info qi ON qi.contest_score_id = ls.id
+            WHERE qi.cq_zone IS NOT NULL
+            UNION ALL
+            SELECT 
+                'ARRL Sections' as category,
+                COUNT(DISTINCT qi.arrl_section) as unique_count,
+                GROUP_CONCAT(DISTINCT qi.arrl_section) as items
+            FROM latest_scores ls
+            JOIN qth_info qi ON qi.contest_score_id = ls.id
+            WHERE qi.arrl_section IS NOT NULL
+            UNION ALL
+            SELECT 
+                'States/Provinces' as category,
+                COUNT(DISTINCT qi.state_province) as unique_count,
+                GROUP_CONCAT(DISTINCT qi.state_province) as items
+            FROM latest_scores ls
+            JOIN qth_info qi ON qi.contest_score_id = ls.id
+            WHERE qi.state_province IS NOT NULL
+        """
+        
+        contest_where = ""
+        params = []
+        if contest:
+            contest_where = "AND cs.contest = ?"
+            params.append(contest)
+        
+        formatted_query = query.format(contest_filter=contest_where)
+        
+        with self.connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(formatted_query, params)
+            return cursor.fetchall()
+        
     def display_stats(self, stats):
         format_band_stats(stats)
 
