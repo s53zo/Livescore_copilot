@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, send_from_directory
+from flask import Flask, render_template, request, redirect, send_from_directory, jsonify
 import sqlite3
 import os
 import logging
@@ -45,11 +45,6 @@ def get_db():
         logger.error(f"Database connection failed: {str(e)}")
         logger.error(traceback.format_exc())
         raise
-
-import logging
-
-# Ensure debug level logging is enabled
-logging.basicConfig(level=logging.DEBUG)
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
