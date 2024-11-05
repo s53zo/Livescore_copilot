@@ -32,104 +32,111 @@ class ScoreReporter:
             return None
 
     def get_station_details(self, callsign, contest, dxcc_country=None, cq_zone=None, iaru_zone=None):
-        """Get station details and nearby competitors, with optional filters for country and zones"""
-        query = """
-            WITH StationScore AS (
-                SELECT 
-                    cs.id, 
-                    cs.callsign, 
-                    cs.score, 
-                    cs.power, 
-                    cs.assisted,
-                    cs.timestamp, 
-                    cs.qsos, 
-                    cs.multipliers,
-                    'current' as position,
-                    1 as rn
-                FROM contest_scores cs
-                WHERE cs.callsign = ? 
-                AND cs.contest = ?
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
-            ),
-            NearbyStations AS (
-                SELECT 
-                    cs.id,
-                    cs.callsign, 
-                    cs.score, 
-                    cs.power, 
-                    cs.assisted,
-                    cs.timestamp, 
-                    cs.qsos, 
-                    cs.multipliers,
-                    CASE
-                        WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                        WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY 
-                            CASE
-                                WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
-                                WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
-                            END
-                        ORDER BY 
-                            CASE
-                                WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
-                            CASE
-                                WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
-                    ) as rn
-                FROM contest_scores cs
-                WHERE cs.contest = ?
-                AND cs.power = (SELECT power FROM StationScore)
-                AND cs.assisted = (SELECT assisted FROM StationScore)
-                AND cs.callsign != (SELECT callsign FROM StationScore)
-                AND cs.timestamp = (
-                    SELECT MAX(timestamp)
-                    FROM contest_scores cs2
-                    WHERE cs2.callsign = cs.callsign
-                    AND cs2.contest = cs.contest
-                )
-            )
+    """Get station details and nearby competitors, with optional filters for country and zones."""
+    query = """
+        WITH StationScore AS (
             SELECT 
-                id,
-                callsign, 
-                score, 
-                power, 
-                assisted,
-                timestamp, 
-                qsos, 
-                multipliers,
-                position,
-                rn
-            FROM (
-                SELECT * FROM StationScore
-                UNION ALL
-                SELECT * FROM NearbyStations
-                WHERE (position = 'above' AND rn <= 2)
-                OR (position = 'below' AND rn <= 2)
+                cs.id, 
+                cs.callsign, 
+                cs.score, 
+                cs.power, 
+                cs.assisted,
+                cs.timestamp, 
+                cs.qsos, 
+                cs.multipliers,
+                'current' as position,
+                1 as rn
+            FROM contest_scores cs
+            LEFT JOIN qth_info qi ON cs.id = qi.contest_score_id
+            WHERE cs.callsign = ? 
+            AND cs.contest = ?
+            ORDER BY cs.timestamp DESC
+            LIMIT 1
+        ),
+        NearbyStations AS (
+            SELECT 
+                cs.id,
+                cs.callsign, 
+                cs.score, 
+                cs.power, 
+                cs.assisted,
+                cs.timestamp, 
+                cs.qsos, 
+                cs.multipliers,
+                CASE
+                    WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                    WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                END as position,
+                ROW_NUMBER() OVER (
+                    PARTITION BY 
+                        CASE
+                            WHEN cs.score > (SELECT score FROM StationScore) THEN 'above'
+                            WHEN cs.score < (SELECT score FROM StationScore) THEN 'below'
+                        END
+                    ORDER BY 
+                        CASE
+                            WHEN cs.score > (SELECT score FROM StationScore) THEN score END ASC,
+                        CASE
+                            WHEN cs.score < (SELECT score FROM StationScore) THEN score END DESC
+                ) as rn
+            FROM contest_scores cs
+            LEFT JOIN qth_info qi ON cs.id = qi.contest_score_id
+            WHERE cs.contest = ?
+            AND cs.power = (SELECT power FROM StationScore)
+            AND cs.assisted = (SELECT assisted FROM StationScore)
+            AND cs.callsign != (SELECT callsign FROM StationScore)
+            AND cs.timestamp = (
+                SELECT MAX(timestamp)
+                FROM contest_scores cs2
+                WHERE cs2.callsign = cs.callsign
+                AND cs2.contest = cs.contest
             )
-            ORDER BY score DESC;
-        """
-        params = [callsign, contest, contest]
+    """
 
-        if dxcc_country:
-            query += " AND qi.dxcc_country = ?"
-            params.append(dxcc_country)
-        if cq_zone:
-            query += " AND qi.cq_zone = ?"
-            params.append(cq_zone)
-        if iaru_zone:
-            query += " AND qi.iaru_zone = ?"
-            params.append(iaru_zone)
+    # Add filtering conditions for dxcc_country, cq_zone, and iaru_zone
+    params = [callsign, contest, contest]
+    if dxcc_country:
+        query += " AND qi.dxcc_country = ?"
+        params.append(dxcc_country)
+    if cq_zone:
+        query += " AND qi.cq_zone = ?"
+        params.append(cq_zone)
+    if iaru_zone:
+        query += " AND qi.iaru_zone = ?"
+        params.append(iaru_zone)
 
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, params)
-                return cursor.fetchall()
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error: {e}")
-            return None
+    # Close the NearbyStations CTE and the final SELECT
+    query += """
+        )
+        SELECT 
+            id,
+            callsign, 
+            score, 
+            power, 
+            assisted,
+            timestamp, 
+            qsos, 
+            multipliers,
+            position,
+            rn
+        FROM (
+            SELECT * FROM StationScore
+            UNION ALL
+            SELECT * FROM NearbyStations
+            WHERE (position = 'above' AND rn <= 2)
+            OR (position = 'below' AND rn <= 2)
+        )
+        ORDER BY score DESC;
+    """
+
+    try:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return cursor.fetchall()
+    except sqlite3.Error as e:
+        self.logger.error(f"Database error: {e}")
+        return None
 
     def get_total_qso_rate(self, station_id, callsign, contest):
         """Calculate total QSO rate over specified time period"""
