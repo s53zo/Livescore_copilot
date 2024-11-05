@@ -1,0 +1,13 @@
+[Unit]
+Description=Livescore Pilot Gunicorn Service
+After=network.target
+
+[Service]
+User=your-user
+Group=your-user
+WorkingDirectory=/opt/livescore
+Environment="PATH=/opt/livescore/venv/bin"
+ExecStart=/opt/livescore/venv/bin/gunicorn -c gunicorn_config.py web_interface:app
+
+[Install]
+WantedBy=multi-user.target
