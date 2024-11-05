@@ -71,7 +71,9 @@ def index():
         if request.method == 'POST':
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
-            logger.info(f"POST request with callsign={callsign}, contest={contest}")
+            dxcc_country = request.form.get('dxcc_country')
+            cq_zone = request.form.get('cq_zone')
+            iaru_zone = request.form.get('iaru_zone')
             
             # Create reporter instance
             logger.debug("Creating ScoreReporter instance")
