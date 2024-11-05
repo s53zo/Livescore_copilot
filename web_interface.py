@@ -164,6 +164,8 @@ def index():
                 """, (selected_contest, selected_contest))
                 iaru_zones = [row[0] for row in cursor.fetchall()]
         
+        # In the POST handling section of the index route:
+
         if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
@@ -177,15 +179,23 @@ def index():
             stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
             
             if stations:
-                success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+                success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
+                                              filter_type=filter_type, filter_value=filter_value)
                 if success:
-                    logger.info("Report generated successfully")
-                    return redirect('/reports/live.html')
+                    # Build query parameters for redirect
+                    params = {
+                        'callsign': callsign,
+                        'contest': contest
+                    }
+                    if filter_type and filter_value:
+                        params['filter_type'] = filter_type
+                        params['filter_value'] = filter_value
+                    
+                    # Redirect to the report with parameters
+                    return redirect(url_for('show_report', **params))
                 else:
-                    logger.error("Failed to generate report")
                     return render_template('error.html', error="Failed to generate report")
             else:
-                logger.warning("No stations found")
                 return render_template('error.html', error="No data found for the selected criteria")
         
         logger.debug("Rendering template with data")
