@@ -21,6 +21,9 @@
             width: 100%;
             padding: 8px;
             margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
         }
         button {
             background-color: #4CAF50;
@@ -33,12 +36,27 @@
         button:hover {
             background-color: #45a049;
         }
+        .filter-section {
+            border: 1px solid #eee;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .filter-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <h1>Livescore Pilot</h1>
     <br>Online tool to follow your progress on the Contest Livescores.<br>
-    Select your or any other callsing, a contest and you will see you progress compared to the nearby competition.<br><br>
+    Select your or any other callsign, a contest and you will see your progress compared to the nearby competition.<br><br>
+    
     <form method="POST">
         <div class="form-group">
             <label for="callsign">Select Callsign:</label>
@@ -59,39 +77,72 @@
                 {% endfor %}
             </select>
         </div>
-        <br>You can also select (one of):<br><br>
-        <div class="form-group">
-        <label for="dxcc_country">Filter by DXCC Country:</label>
-        <select name="dxcc_country" id="dxcc_country">
-            <option value="">-- Select Country --</option>
-            {% for country in dxcc_countries %}
-            <option value="{{ country }}">{{ country }}</option>
-            {% endfor %}
-        </select>
-        </div>
-        or
-        <div class="form-group">
-            <label for="cq_zone">Filter by CQ Zone:</label>
-            <select name="cq_zone" id="cq_zone">
-                <option value="">-- Select CQ Zone --</option>
-                {% for zone in cq_zones %}
-                <option value="{{ zone }}">{{ zone }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        or
-        <div class="form-group">
-            <label for="iaru_zone">Filter by IARU Zone:</label>
-            <select name="iaru_zone" id="iaru_zone">
-                <option value="">-- Select IARU Zone --</option>
-                {% for zone in iaru_zones %}
-                <option value="{{ zone }}">{{ zone }}</option>
-                {% endfor %}
-            </select>
+
+        <div class="filter-section">
+            <h3>Filter Options</h3>
+            <div class="form-group">
+                <label for="filter_type">Filter By:</label>
+                <select name="filter_type" id="filter_type">
+                    <option value="">-- No Filter --</option>
+                    <option value="dxcc">DXCC Country</option>
+                    <option value="cq_zone">CQ Zone</option>
+                    <option value="iaru_zone">IARU Zone</option>
+                </select>
+            </div>
+
+            <div class="form-group hidden" id="dxcc_filter">
+                <label for="dxcc_value">Select Country:</label>
+                <select name="filter_value" id="dxcc_value">
+                    <option value="">-- Select Country --</option>
+                    {% for country in countries %}
+                    <option value="{{ country }}">{{ country }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group hidden" id="cq_zone_filter">
+                <label for="cq_zone_value">Select CQ Zone:</label>
+                <select name="filter_value" id="cq_zone_value">
+                    <option value="">-- Select CQ Zone --</option>
+                    {% for zone in cq_zones %}
+                    <option value="{{ zone }}">{{ zone }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group hidden" id="iaru_zone_filter">
+                <label for="iaru_zone_value">Select IARU Zone:</label>
+                <select name="filter_value" id="iaru_zone_value">
+                    <option value="">-- Select IARU Zone --</option>
+                    {% for zone in iaru_zones %}
+                    <option value="{{ zone }}">{{ zone }}</option>
+                    {% endfor %}
+                </select>
+            </div>
         </div>
         
-        <button type="SUBMIT">Generate Report</button>
+        <button type="submit">Generate Report</button>
     </form>
-    <br><br>Code by Simon, S53ZO, data from competitors via Contest score distribution network.
+    
+    <br><br>Code by Simon, S53ZO, data from competitors via Contest score distribution network
+
+    <script>
+        document.getElementById('filter_type').addEventListener('change', function() {
+            // Hide all filter value selects
+            document.querySelectorAll('#dxcc_filter, #cq_zone_filter, #iaru_zone_filter').forEach(el => {
+                el.classList.add('hidden');
+            });
+            
+            // Show the selected filter's value select
+            if (this.value) {
+                document.getElementById(this.value + '_filter').classList.remove('hidden');
+            }
+
+            // Clear all filter values when changing filter type
+            document.querySelectorAll('select[name="filter_value"]').forEach(select => {
+                select.value = '';
+            });
+        });
+    </script>
 </body>
 </html>
