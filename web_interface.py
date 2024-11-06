@@ -317,7 +317,10 @@ def live_report():
                                           filter_value=filter_value,
                                           category_filter=category_filter)
             if success:
-                return send_from_directory(Config.OUTPUT_DIR, 'live.html')
+                # We need to generate a new report each time
+                response = send_from_directory(Config.OUTPUT_DIR, 'live.html')
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                return response
             else:
                 return render_template('error.html', error="Failed to generate report")
         else:
