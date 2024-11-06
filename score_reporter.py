@@ -297,7 +297,7 @@ class ScoreReporter:
                 
                 if previous_data:
                     prev_timestamp = datetime.strptime(previous_data[0][2], '%Y-%m-%d %H:%M:%S')
-                    minutes_diff = (datetime.now() - prev_timestamp).total_seconds() / 60
+                    minutes_diff = (datetime.utcnow() - prev_timestamp).total_seconds() / 60
     
                     # Create dict of previous band QSOs
                     prev_bands = {row[0]: row[1] for row in previous_data}
@@ -400,7 +400,7 @@ class ScoreReporter:
         html_content = template.format(
             contest=contest,
             callsign=callsign,
-            timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
             power=stations[0][3],
             assisted=stations[0][4],
             table_rows='\n'.join(table_rows),
