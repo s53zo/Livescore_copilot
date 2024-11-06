@@ -296,7 +296,7 @@ def live_report():
         contest = request.args.get('contest')
         filter_type = request.args.get('filter_type')
         filter_value = request.args.get('filter_value')
-        category_filter = request.args.get('category_filter', 'same')
+        category_filter = request.args.get('category_filter', 'same')  # Default to 'same'
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
@@ -306,13 +306,15 @@ def live_report():
                    f"category_filter={category_filter}")
 
         reporter = ScoreReporter(Config.DB_PATH)
-        stations = reporter.get_station_details(callsign, contest, filter_type=filter_type, 
+        stations = reporter.get_station_details(callsign, contest, 
+                                             filter_type=filter_type,
                                              filter_value=filter_value,
                                              category_filter=category_filter)
 
         if stations:
-            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
-                                          filter_type=filter_type, filter_value=filter_value,
+            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR,
+                                          filter_type=filter_type,
+                                          filter_value=filter_value,
                                           category_filter=category_filter)
             if success:
                 return send_from_directory(Config.OUTPUT_DIR, 'live.html')
