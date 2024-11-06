@@ -35,8 +35,55 @@ class ScoreReporter:
         """
         Get station details and nearby competitors with optional filtering
         """
-        self.logger.debug(f"Starting get_station_details with filter_type={filter_type}, filter_value={filter_value}, category_filter={category_filter}")
-    
+        self.logger.debug(f"get_station_details called with: callsign={callsign}, contest={contest}")
+        self.logger.debug(f"Filters: type={filter_type}, value={filter_value}, category={category_filter}")
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # First verify the station exists
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT COUNT(*), MAX(timestamp)
+                    FROM contest_scores
+                    WHERE callsign = ? AND contest = ?
+                """, (callsign, contest))
+                count, last_update = cursor.fetchone()
+                self.logger.debug(f"Initial check: Found {count} records, last update: {last_update}")
+                
+                if count == 0:
+                    self.logger.error(f"No records found for {callsign} in {contest}")
+                    return None
+                
+                # Execute the main query with extra logging
+                self.logger.debug("Executing main query...")
+                cursor.execute(formatted_query, params)
+                stations = cursor.fetchall()
+                
+                if not stations:
+                    self.logger.error("Main query returned no results")
+                    # Log the actual SQL for debugging
+                    self.logger.debug("Query used:")
+                    self.logger.debug(formatted_query)
+                    self.logger.debug("Parameters:")
+                    self.logger.debug(params)
+                    return None
+                
+                self.logger.debug(f"Found {len(stations)} stations")
+                for station in stations:
+                    self.logger.debug(f"Station: {station}")
+                
+                return stations
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error: {e}")
+            self.logger.error(f"Query: {formatted_query}")
+            self.logger.error(f"Parameters: {params}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Unexpected error: {e}")
+            self.logger.error(traceback.format_exc())
+            return None
+        
         # Base query structure
         query = """
             WITH StationScore AS (
