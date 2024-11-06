@@ -77,8 +77,7 @@ def index():
             iaru_zones = []
             
             if selected_contest:
-            #if selected_contest:
-                # Fetch callsigns with QSO count for the selected contest
+                # Fetch callsigns with QSO count specifically for the selected contest
                 logger.debug(f"Fetching callsigns with QSO count for contest: {selected_contest}")
                 cursor.execute("""
                     SELECT callsign, COUNT(*) AS qso_count
@@ -88,7 +87,8 @@ def index():
                     ORDER BY callsign
                 """, (selected_contest,))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-                logger.debug(f"Found callsigns with QSO counts: {callsigns}")
+                logger.debug(f"Found callsigns with QSO counts for selected contest '{selected_contest}': {callsigns}")
+
     
                 # Get callsigns for this contest only
                 #logger.debug(f"Fetching callsigns for contest: {selected_contest}")
