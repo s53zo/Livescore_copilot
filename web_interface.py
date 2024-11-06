@@ -187,46 +187,90 @@ def index():
                     ORDER BY CAST(qi.iaru_zone AS INTEGER)
                 """, (selected_contest, selected_contest))
                 iaru_zones = [row[0] for row in cursor.fetchall()]
-        
-        if request.method == 'POST' and request.form.get('callsign'):
-            callsign = request.form.get('callsign')
-            contest = request.form.get('contest')
-            filter_type = request.form.get('filter_type')
-            category_filter = request.form.get('category_filter', 'same')  # 'same' or 'all'
-            
-            # Select only the last non-empty filter_value
-            filter_values = request.form.getlist('filter_value')
-            filter_value = next((fv for fv in reversed(filter_values) if fv), None)
 
-            # Validate filter inputs
-            if filter_type and not filter_value:
-                return render_template('error.html', 
-                                     error="Filter type selected but no value provided")
-        
-            logger.info(f"Processing report request: callsign={callsign}, contest={contest}, "
-                       f"filter_type={filter_type}, filter_value={filter_value}, "
-                       f"category_filter={category_filter}")
+            if request.method == 'POST' and request.form.get('callsign'):
+                callsign = request.form.get('callsign')
+                contest = request.form.get('contest')
+                filter_type = request.form.get('filter_type')
+                category_filter = request.form.get('category_filter', 'same')
+                
+                logger.debug(f"Processing form submission for {callsign} in {contest}")
+                logger.debug(f"Category filter: {category_filter}")
+                
+                # First, verify the data exists in the database
+                cursor.execute("""
+                    SELECT COUNT(*), MAX(timestamp)
+                    FROM contest_scores
+                    WHERE callsign = ? AND contest = ?
+                """, (callsign, contest))
+                count, last_update = cursor.fetchone()
+                logger.debug(f"Found {count} records for {callsign} in {contest}")
+                logger.debug(f"Last update: {last_update}")
+                
+                if count == 0:
+                    return render_template('error.html', 
+                                        error=f"No records found in database for {callsign} in {contest}")
+                
+                # Get category information
+                cursor.execute("""
+                    SELECT power, assisted 
+                    FROM contest_scores 
+                    WHERE callsign = ? AND contest = ?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (callsign, contest))
+                power, assisted = cursor.fetchone()
+                logger.debug(f"Station category - Power: {power}, Assisted: {assisted}")
+                
+                # Select only the last non-empty filter_value
+                filter_values = request.form.getlist('filter_value')
+                filter_value = next((fv for fv in reversed(filter_values) if fv), None)
+
+                # Validate filter inputs
+                if filter_type and not filter_value:
+                    return render_template('error.html', 
+                                        error="Filter type selected but no value provided")
             
-            reporter = ScoreReporter(Config.DB_PATH)
-            stations = reporter.get_station_details(callsign, contest, filter_type, filter_value, 
-                                                 category_filter=category_filter)
-            
-            if stations:
-                success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
-                                              filter_type=filter_type, filter_value=filter_value)
-                if success:
-                    query_params = [f"callsign={callsign}", f"contest={contest}"]
-                    if filter_type and filter_value:
-                        query_params.extend([f"filter_type={filter_type}", 
-                                          f"filter_value={filter_value}"])
-                    if category_filter:
-                        query_params.append(f"category_filter={category_filter}")
-                    
-                    return redirect(f'/reports/live.html?{"&".join(query_params)}')
+                logger.info(f"Processing report request: callsign={callsign}, contest={contest}, "
+                          f"filter_type={filter_type}, filter_value={filter_value}, "
+                          f"category_filter={category_filter}")
+                
+                reporter = ScoreReporter(Config.DB_PATH)
+                stations = reporter.get_station_details(callsign, contest, filter_type=filter_type, 
+                                                     filter_value=filter_value,
+                                                     category_filter=category_filter)
+                
+                if stations:
+                    logger.debug(f"Found {len(stations)} stations to display")
+                    success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR,
+                                                  filter_type=filter_type, 
+                                                  filter_value=filter_value, 
+                                                  category_filter=category_filter)
+                    if success:
+                        query_params = [f"callsign={callsign}", f"contest={contest}"]
+                        if filter_type and filter_value:
+                            query_params.extend([f"filter_type={filter_type}", 
+                                              f"filter_value={filter_value}"])
+                        if category_filter:
+                            query_params.append(f"category_filter={category_filter}")
+                        
+                        return redirect(f'/reports/live.html?{"&".join(query_params)}')
+                    else:
+                        return render_template('error.html', error="Failed to generate report")
                 else:
-                    return render_template('error.html', error="Failed to generate report")
-            else:
-                return render_template('error.html', error="No data found for the selected criteria")
+                    logger.error(f"No stations returned for {callsign} in {contest}")
+                    # Get the list of available contests and callsigns for debugging
+                    cursor.execute("""
+                        SELECT DISTINCT contest, callsign 
+                        FROM contest_scores 
+                        ORDER BY contest, callsign
+                    """)
+                    available = cursor.fetchall()
+                    logger.debug("Available contest/callsign combinations:")
+                    for c, call in available:
+                        logger.debug(f"{c}: {call}")
+                    
+                    return render_template('error.html', 
+                                        error="No data found for the selected criteria")
         
         logger.debug("Rendering template")
         return render_template('select_form.html', 
@@ -262,12 +306,14 @@ def live_report():
                    f"category_filter={category_filter}")
 
         reporter = ScoreReporter(Config.DB_PATH)
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value,
+        stations = reporter.get_station_details(callsign, contest, filter_type=filter_type, 
+                                             filter_value=filter_value,
                                              category_filter=category_filter)
 
         if stations:
             success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
-                                          filter_type=filter_type, filter_value=filter_value)
+                                          filter_type=filter_type, filter_value=filter_value,
+                                          category_filter=category_filter)
             if success:
                 return send_from_directory(Config.OUTPUT_DIR, 'live.html')
             else:
@@ -297,4 +343,3 @@ if __name__ == '__main__':
 else:
     # When running under gunicorn
     logger.info("Starting under gunicorn")
-
