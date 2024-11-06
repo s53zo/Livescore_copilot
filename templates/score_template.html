@@ -4,16 +4,7 @@
     <title>Contest Progress Report - {{{{ contest }}}}</title>
     <script>
         function refreshPage() {{
-            const params = new URLSearchParams();
-            params.set('callsign', '{{{{ callsign }}}}');
-            params.set('contest', '{{{{ contest }}}}');
-            params.set('category_filter', '{{{{ category_filter }}}}');
-            
-            if ('{{{{ filter_type }}}}') {{
-                params.set('filter_type', '{{{{ filter_type }}}}');
-                params.set('filter_value', '{{{{ filter_value }}}}');
-            }}
-            
+            const params = new URLSearchParams(window.location.search);
             window.location.href = '/reports/live.html?' + params.toString();
         }}
         
@@ -60,8 +51,24 @@
             }}, 1000);
         }}
 
+        function toggleCategory() {{
+            const currentUrl = new URL(window.location.href);
+            const currentFilter = currentUrl.searchParams.get('category_filter') || 'same';
+            // Toggle the value
+            const newFilter = currentFilter === 'all' ? 'same' : 'all';
+            currentUrl.searchParams.set('category_filter', newFilter);
+            window.location.href = currentUrl.toString();
+        }}
+
         document.addEventListener('DOMContentLoaded', () => {{
             updateCountdown();
+            
+            // Set initial toggle state
+            const categorySwitch = document.getElementById('categorySwitch');
+            if (categorySwitch) {{
+                const urlParams = new URLSearchParams(window.location.search);
+                categorySwitch.checked = urlParams.get('category_filter') === 'all';
+            }}
             
             // Add hover effect for rate details
             document.querySelectorAll('.rate-cell').forEach(cell => {{
@@ -76,13 +83,6 @@
                 }}
             }});
         }});
-
-        function toggleCategory() {{
-            const newFilter = document.getElementById('categorySwitch').checked ? 'all' : 'same';
-            const currentUrl = new URL(window.location.href);
-            currentUrl.searchParams.set('category_filter', newFilter);
-            window.location.href = currentUrl.toString();
-        }}
     </script>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; padding-bottom: 40px; }}
@@ -119,6 +119,10 @@
     </style>
 </head>
 <body>
+    <div class="refresh-info">
+        Next update in <span id="countdown">5:00</span>
+    </div>
+
     <h1>Contest Progress Report - {contest}</h1>
     <p class="timestamp">
         Updated: {timestamp}<br>
