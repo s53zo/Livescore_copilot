@@ -56,29 +56,23 @@ def index():
         with get_db() as db:
             cursor = db.cursor()
             
-            # Get contests with the count of unique active stations (callsigns)
-            logger.debug("Fetching contests with active station counts")
+            # Fetch contests as before
             cursor.execute("""
-                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
-                FROM contest_scores
-                GROUP BY contest
+                SELECT DISTINCT contest 
+                FROM contest_scores 
                 ORDER BY contest
             """)
-            contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Found contests with station counts: {contests}")
+            contests = [row[0] for row in cursor.fetchall()]
+            logger.debug(f"Found contests: {contests}")
             
-            # If contest is selected (either via POST or GET parameter)
             selected_contest = request.form.get('contest') or request.args.get('contest')
             logger.debug(f"Selected contest: {selected_contest}")
             
             callsigns = []
-            countries = []
-            cq_zones = []
-            iaru_zones = []
+            selected_category = None
             
             if selected_contest:
-                # Fetch callsigns with QSO count specifically for the selected contest
-                logger.debug(f"Fetching callsigns with QSO count for contest: {selected_contest}")
+                # Fetch callsigns with QSO count for the selected contest
                 cursor.execute("""
                     WITH LatestScores AS (
                         SELECT callsign, MAX(timestamp) as max_ts
@@ -94,82 +88,8 @@ def index():
                     GROUP BY cs.callsign
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
-                
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
                 logger.debug(f"Found callsigns with QSO counts for selected contest '{selected_contest}': {callsigns}")
-             
-                # Get available DXCC countries for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.dxcc_country
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.dxcc_country IS NOT NULL 
-                    AND qi.dxcc_country != ''
-                    ORDER BY qi.dxcc_country
-                """, (selected_contest, selected_contest))
-                countries = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found countries: {len(countries)}")
-                
-                # Get available CQ zones for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.cq_zone
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.cq_zone IS NOT NULL 
-                    AND qi.cq_zone != ''
-                    ORDER BY CAST(qi.cq_zone AS INTEGER)
-                """, (selected_contest, selected_contest))
-                cq_zones = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found CQ zones: {len(cq_zones)}")
-                
-                # Get available IARU zones for this contest
-                cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT cs.id
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
-                        WHERE cs.contest = ?
-                    )
-                    SELECT DISTINCT qi.iaru_zone
-                    FROM qth_info qi
-                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
-                    WHERE qi.iaru_zone IS NOT NULL 
-                    AND qi.iaru_zone != ''
-                    ORDER BY CAST(qi.iaru_zone AS INTEGER)
-                """, (selected_contest, selected_contest))
-                iaru_zones = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found IARU zones: {len(iaru_zones)}")
-
         
         if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
@@ -177,12 +97,9 @@ def index():
             filter_type = request.form.get('filter_type')
             filter_value = request.form.get('filter_value')
             category_scope = request.form.get('category_scope')
-        
-            selected_category = None  # Initialize selected category as None
-        
+
             # If "Selected Callsign's Category Only" is chosen, fetch the category of the selected callsign
             if category_scope == 'selected':
-                logger.debug(f"Fetching category for selected callsign: {callsign}")
                 cursor.execute("""
                     SELECT category
                     FROM contest_scores
@@ -195,41 +112,42 @@ def index():
                     selected_category = category_result[0]
                     logger.debug(f"Selected callsign's category: {selected_category}")
                 else:
+                    selected_category = None
                     logger.warning("Selected callsign's category not found")
-        
+
             # Fetch stations based on the selected category scope
             if category_scope == 'selected' and selected_category:
-                logger.debug("Fetching report data for selected category only")
                 cursor.execute("""
                     SELECT * FROM contest_scores
                     WHERE contest = ? AND category = ?
                 """, (contest, selected_category))
             else:
-                # Fetch report data for all categories
-                logger.debug("Fetching report data for all categories")
                 cursor.execute("""
                     SELECT * FROM contest_scores
                     WHERE contest = ?
                 """, (contest,))
-        
+
             stations = cursor.fetchall()
             logger.debug(f"Fetched stations for report: {stations}")
-        
+
             # Render template with additional context
             return render_template('select_form.html', 
                                    contests=contests,
                                    selected_contest=selected_contest,
                                    callsigns=callsigns,
-                                   countries=countries,
-                                   cq_zones=cq_zones,
-                                   iaru_zones=iaru_zones,
                                    selected_category=selected_category)  # Pass the selected category
-    
+
+        # If GET request or other conditions, render template as a default return
+        return render_template('select_form.html', 
+                               contests=contests,
+                               selected_contest=selected_contest,
+                               callsigns=callsigns,
+                               selected_category=selected_category)
+
     except Exception as e:
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
-
 
 @app.route('/reports/live.html')
 def live_report():
