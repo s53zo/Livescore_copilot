@@ -35,7 +35,7 @@ def calculate_rates(db_path, callsign, contest):
                 print(f"No recent records found for {callsign} in {contest} in the last hour")
                 return
 
-            now = datetime.now()
+            now = datetime.utcnow()
             hour_ago = now - timedelta(hours=1)
             quarter_ago = now - timedelta(minutes=15)
 
