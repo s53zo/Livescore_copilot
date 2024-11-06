@@ -100,12 +100,18 @@ def index():
                 # Fetch callsigns with QSO count for the selected contest
                 logger.debug(f"Fetching callsigns with QSO count for contest: {selected_contest}")
                 cursor.execute("""
-                    SELECT callsign, COUNT(*) AS qso_count
-                    FROM contest_scores
-                    WHERE contest = ?
-                    GROUP BY callsign
-                    ORDER BY callsign
-                """, (selected_contest,))
+                    SELECT cs.callsign, cs.qsos AS qso_count
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.timestamp = latest.max_ts
+                    WHERE cs.contest = ?
+                    ORDER BY cs.callsign
+                """, (selected_contest, selected_contest))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
                 
                 # If callsign is selected, get its category
