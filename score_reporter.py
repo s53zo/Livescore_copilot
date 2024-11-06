@@ -31,13 +31,13 @@ class ScoreReporter:
             self.logger.error(f"Error loading template: {e}")
             return None
 
-    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
+    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None, category_filter='same'):
         """
         Get station details and nearby competitors with optional filtering
         """
-        self.logger.debug(f"Starting get_station_details with filter_type={filter_type}, filter_value={filter_value}")
+        self.logger.debug(f"Starting get_station_details with filter_type={filter_type}, filter_value={filter_value}, category_filter={category_filter}")
     
-        # Base query structure
+        # Base query structure with category filtering
         query = """
             WITH StationScore AS (
                 SELECT 
@@ -85,8 +85,8 @@ class ScoreReporter:
                     ls.qsos, 
                     ls.multipliers
                 FROM LatestScores ls, StationScore ss
-                WHERE ls.power = ss.power
-                AND ls.assisted = ss.assisted
+                WHERE 1=1
+                {category_clause}
                 AND ls.callsign != ss.callsign
             ),
             NearbyStations AS (
@@ -140,53 +140,24 @@ class ScoreReporter:
         
         params = [callsign, contest, contest, contest]
         filter_clause = ""
+        category_clause = ""
         
-        # Check for both filter_type and non-empty filter_value
+        # Add category filtering if requested
+        if category_filter == 'same':
+            category_clause = """
+                AND ls.power = ss.power
+                AND ls.assisted = ss.assisted
+            """
+        
+        # Add location filtering if specified
         if filter_type and filter_value and str(filter_value).strip():
             self.logger.debug(f"Applying filter: {filter_type}={filter_value}")
             
             if filter_type == 'dxcc':
                 filter_clause = "AND qi.dxcc_country = ?"
                 params.append(filter_value.strip())
-                self.logger.debug(f"Added DXCC filter: {filter_value.strip()}")
-                
-            elif filter_type == 'cq_zone':
-                filter_clause = "AND CAST(qi.cq_zone AS TEXT) = ?"
-                params.append(str(filter_value).strip())
-                self.logger.debug(f"Added CQ zone filter: {filter_value.strip()}")
-                
-            elif filter_type == 'iaru_zone':
-                filter_clause = "AND CAST(qi.iaru_zone AS TEXT) = ?"
-                params.append(str(filter_value).strip())
-                self.logger.debug(f"Added IARU zone filter: {filter_value.strip()}")
-        else:
-            self.logger.debug("No filter applied (missing or empty filter value)")
-        
-        formatted_query = query.format(filter_clause=filter_clause)
-        self.logger.debug(f"Executing query with params: {params}")
-        self.logger.debug(f"Filter clause: {filter_clause}")
-        
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(formatted_query, params)
-                stations = cursor.fetchall()
-                
-                if not stations:
-                    self.logger.error(f"No data found for {callsign} in {contest} with filter {filter_type}={filter_value}")
-                    return None
-                
-                self.logger.debug(f"Found {len(stations)} matching stations")
-                for station in stations:
-                    self.logger.debug(f"Matched station: {station[1]}")  # Log callsign
-                return stations
-                
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error: {e}")
-            self.logger.error(f"Query: {formatted_query}")
-            self.logger.error(f"Parameters: {params}")
-            return None
-
+            elif filter_type == 'cq_zone
+            
     def get_total_qso_rate(self, station_id, callsign, contest):
         """Calculate total QSO rate over specified time period"""
         query = """
