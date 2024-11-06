@@ -111,6 +111,24 @@
             </div>
         </div>
 
+        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step2_5">
+            <h2>Step 2.5: Category Selection</h2>
+            <div class="form-group">
+                <label>Choose Report Scope:</label>
+                <div>
+                    <input type="radio" id="all_categories" name="category_scope" value="all" checked>
+                    <label for="all_categories">All Categories</label>
+                </div>
+                <div>
+                    <input type="radio" id="selected_category" name="category_scope" value="selected">
+                    <label for="selected_category">Selected Callsign's Category Only</label>
+                    {% if selected_category %}
+                        <span>(Category: {{ selected_category }})</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
         <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step3">
             <h2>Step 3: Apply Filters (Optional)</h2>
             <div class="filter-section">
