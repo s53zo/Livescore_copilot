@@ -149,11 +149,11 @@
                     
                     <div class="radio-group">
                         <label>
-                            <input type="radio" name="category_filter" value="same" checked>
+                            <input type="radio" name="category_filter" value="same" {% if category_filter != 'all' %}checked{% endif %}>
                             Show only stations in this category
                         </label>
                         <label>
-                            <input type="radio" name="category_filter" value="all">
+                            <input type="radio" name="category_filter" value="all" {% if category_filter == 'all' %}checked{% endif %}>
                             Show all categories
                         </label>
                     </div>
@@ -233,9 +233,6 @@
             
             // Enable/disable generate button based on selection
             generateButton.disabled = !callsignSelect.value;
-            
-            // If you want to refresh category info via AJAX when callsign changes,
-            // you can add that functionality here
         }
 
         // Initial setup
