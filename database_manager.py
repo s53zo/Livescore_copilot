@@ -9,42 +9,42 @@ class DatabaseManager:
         self.db_path = db_path
 
     def explain_query(self, query):
-    """Analyze and explain query execution plan"""
-    try:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # First get the explain plan
-            print("\nExecution Plan:")
-            cursor.execute(f"EXPLAIN QUERY PLAN {query}")
-            plan_rows = cursor.fetchall()
-            for row in plan_rows:
-                print(f"id: {row[0]}, parent: {row[1]}, notused: {row[2]}, detail: {row[3]}")
-            
-            # Then run the query with actual execution statistics
-            print("\nQuery Statistics:")
-            cursor.execute(f"EXPLAIN {query}")
-            stats_rows = cursor.fetchall()
-            for row in stats_rows:
-                print(row[0])
-            
-            # Execute the query to show results
-            print("\nQuery Results:")
-            cursor.execute(query)
-            results = cursor.fetchall()
-            if results:
-                print(f"Found {len(results)} rows")
-                # Display first few results
-                for row in results[:5]:
-                    print(row)
-                if len(results) > 5:
-                    print("...")
-            else:
-                print("No results found")
+        """Analyze and explain query execution plan"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
                 
-    except sqlite3.Error as e:
-        print(f"Error analyzing query: {e}", file=sys.stderr)
-        sys.exit(1)
+                # First get the explain plan
+                print("\nExecution Plan:")
+                cursor.execute(f"EXPLAIN QUERY PLAN {query}")
+                plan_rows = cursor.fetchall()
+                for row in plan_rows:
+                    print(f"id: {row[0]}, parent: {row[1]}, notused: {row[2]}, detail: {row[3]}")
+                
+                # Then run the query with actual execution statistics
+                print("\nQuery Statistics:")
+                cursor.execute(f"EXPLAIN {query}")
+                stats_rows = cursor.fetchall()
+                for row in stats_rows:
+                    print(row[0])
+                
+                # Execute the query to show results
+                print("\nQuery Results:")
+                cursor.execute(query)
+                results = cursor.fetchall()
+                if results:
+                    print(f"Found {len(results)} rows")
+                    # Display first few results
+                    for row in results[:5]:
+                        print(row)
+                    if len(results) > 5:
+                        print("...")
+                else:
+                    print("No results found")
+                    
+        except sqlite3.Error as e:
+            print(f"Error analyzing query: {e}", file=sys.stderr)
+            sys.exit(1)
 
     def setup_indexes(self, analyze=True):
         """Create indexes on the contest database"""
