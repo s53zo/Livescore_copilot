@@ -338,19 +338,22 @@ class ScoreReporter:
                 params = [contest, contest, callsign, callsign]
                 category_clause = ""
         
-                # Add category filtering if requested
+                # Add category filtering only if category_filter is 'same'
+                self.logger.debug(f"Category filter is: {category_filter}")
                 if category_filter == 'same':
                     category_clause = """
                         AND (ss.callsign = ? 
                         OR (ss.power = ? AND ss.assisted = ?))
                     """
                     params.extend([callsign, station_power, station_assisted])
-                    
+                # For 'all', we don't add any category clause
+                
                 self.logger.debug(f"Category clause: {category_clause}")
                 self.logger.debug(f"Query parameters: {params}")
                 
                 # Format the query with the category clause
                 formatted_query = query.format(category_filter=category_clause)
+                self.logger.debug(f"Final query: {formatted_query}")
                 
                 # Execute query and log results
                 cursor.execute(formatted_query, params)
@@ -360,7 +363,7 @@ class ScoreReporter:
                     self.logger.debug(f"Station: {station[1]} - Power: {station[3]}, Assisted: {station[4]}")
                 
                 return stations
-                
+                    
         except Exception as e:
             self.logger.error(f"Unexpected error: {e}")
             self.logger.error(traceback.format_exc())
