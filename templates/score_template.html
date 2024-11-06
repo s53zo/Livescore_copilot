@@ -5,31 +5,6 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <style>
-        .category-tag {
-            display: inline-block;
-            padding: 0.25rem 0.5rem;
-            background-color: #e7f3ff;
-            border: 1px solid #cce5ff;
-            border-radius: 0.25rem;
-            color: #0066cc;
-        }
-        .footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background-color: #f8f9fa;
-            padding: 0.625rem 1.25rem;
-            text-align: center;
-            font-size: 0.875rem;
-            color: #666;
-            border-top: 1px solid #dee2e6;
-        }
-        @media print {
-            .footer { display: none; }
-        }
-    </style>
 </head>
 <body class="p-5 bg-gray-50">
     <h1 class="text-2xl font-bold mb-4">Contest Progress Report - {contest}</h1>
@@ -42,8 +17,8 @@
     <div class="bg-white p-4 rounded-lg mb-6 shadow-sm">
         <div class="mb-2">
             <strong>Category:</strong>
-            <span class="category-tag ml-2">Power: {power}</span>
-            <span class="category-tag ml-2">Assisted: {assisted}</span>
+            <span class="inline-block px-2 py-1 bg-blue-50 border border-blue-200 rounded text-blue-700 ml-2">Power: {power}</span>
+            <span class="inline-block px-2 py-1 bg-blue-50 border border-blue-200 rounded text-blue-700 ml-2">Assisted: {assisted}</span>
         </div>
         <div class="flex items-center gap-4">
             <label class="inline-flex items-center">
@@ -61,7 +36,7 @@
 
     <div id="root" class="mb-16"></div>
 
-    <div class="footer">
+    <div class="fixed bottom-0 left-0 right-0 bg-gray-50 py-2 px-5 text-center text-sm text-gray-600 border-t border-gray-200">
         Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network
     </div>
 
