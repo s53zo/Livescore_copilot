@@ -81,9 +81,14 @@ def index():
                 ORDER BY contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            logger.debug(f"Found contests with station counts: {contests}")
             
+            # Get contest and callsign from form or query parameters
             selected_contest = request.form.get('contest') or request.args.get('contest')
             selected_callsign = request.form.get('callsign') or request.args.get('callsign')
+            
+            logger.debug(f"Selected contest: {selected_contest}")
+            logger.debug(f"Selected callsign: {selected_callsign}")
             
             callsigns = []
             countries = []
@@ -92,7 +97,7 @@ def index():
             station_category = None
             
             if selected_contest:
-                # Fetch callsigns with QSO count specifically for the selected contest
+                # Fetch callsigns with QSO count for the selected contest
                 logger.debug(f"Fetching callsigns with QSO count for contest: {selected_contest}")
                 cursor.execute("""
                     SELECT callsign, COUNT(*) AS qso_count
@@ -102,10 +107,11 @@ def index():
                     ORDER BY callsign
                 """, (selected_contest,))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-                logger.debug(f"Found callsigns with QSO counts for selected contest '{selected_contest}': {callsigns}")
-
+                
+                # If callsign is selected, get its category
                 if selected_callsign:
                     station_category = get_station_category(db, selected_contest, selected_callsign)
+                    logger.debug(f"Station category for {selected_callsign}: {station_category}")
                 
                 # Get available DXCC countries for this contest
                 cursor.execute("""
@@ -129,7 +135,6 @@ def index():
                     ORDER BY qi.dxcc_country
                 """, (selected_contest, selected_contest))
                 countries = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found countries: {len(countries)}")
                 
                 # Get available CQ zones for this contest
                 cursor.execute("""
@@ -153,7 +158,6 @@ def index():
                     ORDER BY CAST(qi.cq_zone AS INTEGER)
                 """, (selected_contest, selected_contest))
                 cq_zones = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found CQ zones: {len(cq_zones)}")
                 
                 # Get available IARU zones for this contest
                 cursor.execute("""
@@ -177,8 +181,6 @@ def index():
                     ORDER BY CAST(qi.iaru_zone AS INTEGER)
                 """, (selected_contest, selected_contest))
                 iaru_zones = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found IARU zones: {len(iaru_zones)}")
-
         
         if request.method == 'POST' and request.form.get('callsign'):
             callsign = request.form.get('callsign')
@@ -236,7 +238,6 @@ def index():
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
 
-
 @app.route('/reports/live.html')
 def live_report():
     try:
@@ -245,15 +246,18 @@ def live_report():
         contest = request.args.get('contest')
         filter_type = request.args.get('filter_type')
         filter_value = request.args.get('filter_value')
+        category_filter = request.args.get('category_filter', 'same')
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
         logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
+                   f"filter_type={filter_type}, filter_value={filter_value}, "
+                   f"category_filter={category_filter}")
 
         reporter = ScoreReporter(Config.DB_PATH)
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value,
+                                             category_filter=category_filter)
 
         if stations:
             success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
