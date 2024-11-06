@@ -3,6 +3,18 @@
 <head>
     <title>Contest Progress Report - {contest}</title>
     <script>
+        function initializeCategorySwitch() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const categoryFilter = urlParams.get('category_filter');
+            const categorySwitch = document.getElementById('categorySwitch');
+            if (categorySwitch) {
+                categorySwitch.checked = categoryFilter === 'all';
+            }
+        }
+    
+        // Call it when the page loads
+        document.addEventListener('DOMContentLoaded', initializeCategorySwitch);
+        
         function refreshPage() {{
             const params = {{
                 callsign: '{callsign}',
