@@ -9,7 +9,7 @@ def calculate_rates(db_path, callsign, contest):
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             
-            # Get latest submission first
+            # Get entries in the last hour and 15 minutes relative to now
             cursor.execute("""
                 SELECT 
                     timestamp,
@@ -25,13 +25,48 @@ def calculate_rates(db_path, callsign, contest):
                 ) band_data ON band_data.contest_score_id = cs.id
                 WHERE callsign = ? 
                 AND contest = ?
+                AND timestamp >= datetime('now', '-65 minutes')  -- Get a bit more for accurate closest match
                 ORDER BY timestamp DESC
-                LIMIT 1
             """, (callsign, contest))
             
-            latest = cursor.fetchone()
+            records = cursor.fetchall()
+            
+            if not records:
+                print(f"No recent records found for {callsign} in {contest} in the last hour")
+                return
+
+            now = datetime.now()
+            hour_ago = now - timedelta(hours=1)
+            quarter_ago = now - timedelta(minutes=15)
+
+            # Find records closest to now, hour ago, and quarter ago
+            latest = None
+            hour_record = None
+            quarter_record = None
+            min_hour_diff = float('inf')
+            min_quarter_diff = float('inf')
+
+            for record in records:
+                record_ts = datetime.strptime(record[0], '%Y-%m-%d %H:%M:%S')
+                
+                # Always update latest if it's more recent
+                if not latest or record_ts > datetime.strptime(latest[0], '%Y-%m-%d %H:%M:%S'):
+                    latest = record
+
+                # Find closest to an hour ago
+                hour_diff = abs((record_ts - hour_ago).total_seconds())
+                if hour_diff < min_hour_diff:
+                    hour_record = record
+                    min_hour_diff = hour_diff
+
+                # Find closest to 15 minutes ago
+                quarter_diff = abs((record_ts - quarter_ago).total_seconds())
+                if quarter_diff < min_quarter_diff:
+                    quarter_record = record
+                    min_quarter_diff = quarter_diff
+
             if not latest:
-                print(f"No records found for {callsign} in {contest}")
+                print("No records found")
                 return
 
             latest_ts = datetime.strptime(latest[0], '%Y-%m-%d %H:%M:%S')
@@ -40,49 +75,14 @@ def calculate_rates(db_path, callsign, contest):
 
             print(f"\nRate analysis for {callsign} in {contest}")
             print(f"Latest entry: {latest_ts} with {latest_qsos} QSOs")
+            print(f"Current time: {now}")
+            print(f"Time since last update: {(now - latest_ts).total_seconds() / 60:.1f} minutes")
             print("-" * 50)
 
-            # Calculate target timestamps
-            hour_target = latest_ts - timedelta(hours=1)
-            quarter_target = latest_ts - timedelta(minutes=15)
-
-            # Get closest records to target times
-            cursor.execute("""
-                SELECT 
-                    timestamp,
-                    qsos,
-                    band_data.band_breakdown,
-                    ABS(JULIANDAY(timestamp) - JULIANDAY(?)) as hour_diff,
-                    ABS(JULIANDAY(timestamp) - JULIANDAY(?)) as quarter_diff
-                FROM contest_scores cs
-                LEFT JOIN (
-                    SELECT 
-                        contest_score_id,
-                        GROUP_CONCAT(band || ':' || qsos) as band_breakdown
-                    FROM band_breakdown
-                    GROUP BY contest_score_id
-                ) band_data ON band_data.contest_score_id = cs.id
-                WHERE callsign = ? 
-                AND contest = ?
-                AND timestamp < ?
-                ORDER BY timestamp DESC
-            """, (hour_target, quarter_target, callsign, contest, latest[0]))
-
-            records = cursor.fetchall()
-            
-            # Find closest records to target times
-            hour_record = None
-            quarter_record = None
-            min_hour_diff = float('inf')
-            min_quarter_diff = float('inf')
-
-            for record in records:
-                if record[3] < min_hour_diff:
-                    hour_record = record
-                    min_hour_diff = record[3]
-                if record[4] < min_quarter_diff:
-                    quarter_record = record
-                    min_quarter_diff = record[4]
+            # If latest entry is more than 65 minutes old, rates should be 0
+            if (now - latest_ts).total_seconds() / 3600 > 1.1:
+                print("\nNo recent activity (last entry more than an hour old)")
+                return
 
             # Calculate 1-hour rate
             if hour_record:
@@ -90,53 +90,41 @@ def calculate_rates(db_path, callsign, contest):
                 hour_qsos = hour_record[1]
                 hour_bands = parse_band_breakdown(hour_record[2]) if hour_record[2] else {}
                 
-                # Calculate actual time difference in minutes
                 time_diff = (latest_ts - hour_ts).total_seconds() / 60
                 qso_diff = latest_qsos - hour_qsos
                 
                 print("\n1-hour rate calculation:")
+                print(f"From: {hour_ts}")
+                print(f"To:   {latest_ts}")
                 print(f"Time span: {time_diff:.1f} minutes")
                 print(f"QSOs in span: {qso_diff}")
                 
                 if qso_diff == 0:
                     print("No QSO changes - rate is 0/hr")
                 else:
-                    # Interpolate to 60 minutes
                     hour_rate = int(round((qso_diff * 60) / time_diff))
                     print(f"Interpolated 60-minute rate: {hour_rate}/hr")
-                
-                print("Band changes:")
-                for band in sorted(set(latest_bands.keys()) | set(hour_bands.keys())):
-                    diff = latest_bands.get(band, 0) - hour_bands.get(band, 0)
-                    if diff != 0:
-                        print(f"  {band}m: +{diff}")
 
-            # Calculate 15-minute rate
+            # Calculate 15-minute rate (similar to 1-hour rate)
             if quarter_record:
+                # Similar calculation for 15-minute rate...
                 quarter_ts = datetime.strptime(quarter_record[0], '%Y-%m-%d %H:%M:%S')
                 quarter_qsos = quarter_record[1]
-                quarter_bands = parse_band_breakdown(quarter_record[2]) if quarter_record[2] else {}
                 
-                # Calculate actual time difference in minutes
                 time_diff = (latest_ts - quarter_ts).total_seconds() / 60
                 qso_diff = latest_qsos - quarter_qsos
                 
                 print("\n15-minute rate calculation:")
+                print(f"From: {quarter_ts}")
+                print(f"To:   {latest_ts}")
                 print(f"Time span: {time_diff:.1f} minutes")
                 print(f"QSOs in span: {qso_diff}")
                 
                 if qso_diff == 0:
                     print("No QSO changes - rate is 0/hr")
                 else:
-                    # Interpolate to 60 minutes
                     quarter_rate = int(round((qso_diff * 60) / time_diff))
                     print(f"Interpolated 60-minute rate: {quarter_rate}/hr")
-                
-                print("Band changes:")
-                for band in sorted(set(latest_bands.keys()) | set(quarter_bands.keys())):
-                    diff = latest_bands.get(band, 0) - quarter_bands.get(band, 0)
-                    if diff != 0:
-                        print(f"  {band}m: +{diff}")
 
     except sqlite3.Error as e:
         print(f"Database error: {e}")
