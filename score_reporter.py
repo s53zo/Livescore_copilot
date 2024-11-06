@@ -242,17 +242,22 @@ class ScoreReporter:
     def get_band_breakdown_with_rate(self, station_id, callsign, contest):
         """Get band breakdown and calculate QSO rate for each band using current time as reference"""
         current_query = """
+            WITH CurrentScore AS (
+                SELECT cs.id, cs.timestamp
+                FROM contest_scores cs
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            )
             SELECT 
                 bb.band, 
                 bb.qsos as band_qsos, 
                 bb.multipliers
             FROM band_breakdown bb
-            JOIN contest_scores cs ON cs.id = bb.contest_score_id
-            WHERE cs.callsign = ?
-            AND cs.contest = ?
-            AND cs.timestamp <= datetime('now')
-            ORDER BY cs.timestamp DESC
-            LIMIT 1
+            JOIN CurrentScore cs ON cs.id = bb.contest_score_id
+            WHERE bb.qsos > 0  -- Only include bands with QSOs
+            ORDER BY bb.band
         """
         
         previous_query = """
@@ -269,6 +274,7 @@ class ScoreReporter:
             WHERE cs.callsign = ?
             AND cs.contest = ?
             AND cs.timestamp <= datetime('now')
+            AND bb.qsos > 0  -- Only include bands with QSOs
             ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(tt.target_time))
             LIMIT 1
         """
@@ -327,15 +333,15 @@ class ScoreReporter:
         except sqlite3.Error as e:
             self.logger.error(f"Database error in band rate calculation: {e}")
             return {}
-
-
+    
     def format_band_data(self, band_data):
         """Format band data as QSO/Mults (rate/h)"""
         if band_data:
             qsos, mults, rate = band_data
-            rate_str = f"{rate:+d}" if rate != 0 else "0"
-            return f"{qsos}/{mults} ({rate_str})"
-        return "-/- (0)"
+            if qsos > 0:  # Only show bands with QSOs
+                rate_str = f"{rate:+d}" if rate != 0 else "0"
+                return f"{qsos}/{mults} ({rate_str})"
+        return "-/- (0)"  # Only shown when band_data is None
 
     def format_total_data(self, qsos, mults, rate):
         """Format total QSO/Mults with rate"""
