@@ -378,7 +378,7 @@ class ScoreReporter:
             filter_display = ""
     
         # Category filter information
-        category_checked = "checked" if category_filter == 'all' else ""
+        category_checked = 'checked="checked"' if category_filter == 'all' else ''
         category_label = "Showing all categories" if category_filter == 'all' else "Showing only matching category"
     
         # Format HTML
@@ -393,7 +393,7 @@ class ScoreReporter:
             filter_value=filter_value or '',
             filter_display=filter_display,
             category_filter=category_filter,
-            category_checked=category_checked,
+            category_checked=category_checked,  # This will now be a string
             category_label=category_label
         )
     
