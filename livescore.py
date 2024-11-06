@@ -96,8 +96,7 @@ class ContestDatabaseHandler:
                         'transmitter': class_elem.get('transmitter', ''),
                         'ops': class_elem.get('ops', ''),
                         'bands': class_elem.get('bands', ''),
-                        'mode': class_elem.get('mode', ''),
-                        'overlay': class_elem.get('overlay', '')
+                        'mode': class_elem.get('mode', '')
                     })
                 
                 # Extract QTH data
@@ -115,22 +114,28 @@ class ContestDatabaseHandler:
                 # Extract breakdown totals
                 breakdown = root.find('breakdown')
                 if breakdown is not None:
-                    contest_data['qsos'] = int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0))
-                    contest_data['points'] = int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0))
-                    contest_data['multipliers'] = int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0))
+                    # Get total QSOs, points, and multipliers
+                    contest_data['qsos'] = int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0)) or sum(int(elem.text) for elem in breakdown.findall('qso[@band="total"]'))
+                    contest_data['points'] = int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0)) or sum(int(elem.text) for elem in breakdown.findall('point[@band="total"]'))
+                    contest_data['multipliers'] = int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0)) or sum(int(elem.text) for elem in breakdown.findall('mult[@band="total"]'))
                     
                     # Extract per-band breakdown
                     bands = ['160', '80', '40', '20', '15', '10']
                     contest_data['band_breakdown'] = []
                     for band in bands:
-                        band_data = {
-                            'band': band,
-                            'mode': 'ALL',
-                            'qsos': int(breakdown.findtext(f'qso[@band="{band}"][@mode="ALL"]', 0)),
-                            'points': int(breakdown.findtext(f'point[@band="{band}"][@mode="ALL"]', 0)),
-                            'multipliers': int(breakdown.findtext(f'mult[@band="{band}"][@mode="ALL"]', 0))
-                        }
-                        if band_data['qsos'] > 0:
+                        # Sum over all modes for each band
+                        qsos = sum(int(elem.text) for elem in breakdown.findall(f'qso[@band="{band}"]'))
+                        points = sum(int(elem.text) for elem in breakdown.findall(f'point[@band="{band}"]'))
+                        multipliers = sum(int(elem.text) for elem in breakdown.findall(f'mult[@band="{band}"]'))
+                        
+                        if qsos > 0:
+                            band_data = {
+                                'band': band,
+                                'mode': 'ALL',  # Since we're summing over all modes
+                                'qsos': qsos,
+                                'points': points,
+                                'multipliers': multipliers
+                            }
                             contest_data['band_breakdown'].append(band_data)
                 
                 results.append(contest_data)
@@ -139,8 +144,9 @@ class ContestDatabaseHandler:
                 logging.error(f"Error parsing XML: {e}")
             except Exception as e:
                 logging.error(f"Error processing data: {e}")
-                
+                    
         return results
+
 
     def store_data(self, contest_data):
         """Store contest data in the database."""
