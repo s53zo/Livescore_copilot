@@ -46,6 +46,22 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
+def get_station_category(db, contest, callsign):
+    """Get the category information for a specific station"""
+    try:
+        cursor = db.cursor()
+        cursor.execute("""
+            SELECT power, assisted
+            FROM contest_scores
+            WHERE contest = ? AND callsign = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (contest, callsign))
+        return cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Error getting station category: {str(e)}")
+        return None
+
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
@@ -65,16 +81,15 @@ def index():
                 ORDER BY contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Found contests with station counts: {contests}")
             
-            # If contest is selected (either via POST or GET parameter)
             selected_contest = request.form.get('contest') or request.args.get('contest')
-            logger.debug(f"Selected contest: {selected_contest}")
+            selected_callsign = request.form.get('callsign') or request.args.get('callsign')
             
             callsigns = []
             countries = []
             cq_zones = []
             iaru_zones = []
+            station_category = None
             
             if selected_contest:
                 # Fetch callsigns with QSO count specifically for the selected contest
@@ -89,25 +104,8 @@ def index():
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
                 logger.debug(f"Found callsigns with QSO counts for selected contest '{selected_contest}': {callsigns}")
 
-    
-                # Get callsigns for this contest only
-                #logger.debug(f"Fetching callsigns for contest: {selected_contest}")
-                #cursor.execute("""
-                #    WITH LatestScores AS (
-                #        SELECT callsign, MAX(timestamp) as max_ts
-                #        FROM contest_scores
-                #        WHERE contest = ?
-                #        GROUP BY callsign
-                #    )
-                #    SELECT cs.callsign
-                #    FROM contest_scores cs
-                #    JOIN LatestScores ls ON cs.callsign = ls.callsign 
-                #       AND cs.timestamp = ls.max_ts
-                #   WHERE cs.contest = ?
-                #   ORDER BY cs.callsign
-                #""", (selected_contest, selected_contest))
-                #callsigns = [row[0] for row in cursor.fetchall()]
-                #logger.debug(f"Found callsigns: {len(callsigns)}")
+                if selected_callsign:
+                    station_category = get_station_category(db, selected_contest, selected_callsign)
                 
                 # Get available DXCC countries for this contest
                 cursor.execute("""
@@ -186,6 +184,7 @@ def index():
             callsign = request.form.get('callsign')
             contest = request.form.get('contest')
             filter_type = request.form.get('filter_type')
+            category_filter = request.form.get('category_filter', 'same')  # 'same' or 'all'
             
             # Select only the last non-empty filter_value
             filter_values = request.form.getlist('filter_value')
@@ -197,20 +196,25 @@ def index():
                                      error="Filter type selected but no value provided")
         
             logger.info(f"Processing report request: callsign={callsign}, contest={contest}, "
-                       f"filter_type={filter_type}, filter_value={filter_value}")
+                       f"filter_type={filter_type}, filter_value={filter_value}, "
+                       f"category_filter={category_filter}")
             
             reporter = ScoreReporter(Config.DB_PATH)
-            stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+            stations = reporter.get_station_details(callsign, contest, filter_type, filter_value, 
+                                                 category_filter=category_filter)
             
             if stations:
                 success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR, 
                                               filter_type=filter_type, filter_value=filter_value)
                 if success:
-                    query_params = f"?callsign={callsign}&contest={contest}"
+                    query_params = [f"callsign={callsign}", f"contest={contest}"]
                     if filter_type and filter_value:
-                        query_params += f"&filter_type={filter_type}&filter_value={filter_value}"
+                        query_params.extend([f"filter_type={filter_type}", 
+                                          f"filter_value={filter_value}"])
+                    if category_filter:
+                        query_params.append(f"category_filter={category_filter}")
                     
-                    return redirect(f'/reports/live.html{query_params}')
+                    return redirect(f'/reports/live.html?{"&".join(query_params)}')
                 else:
                     return render_template('error.html', error="Failed to generate report")
             else:
@@ -220,10 +224,12 @@ def index():
         return render_template('select_form.html', 
                              contests=contests,
                              selected_contest=selected_contest,
+                             selected_callsign=selected_callsign,
                              callsigns=callsigns,
                              countries=countries,
                              cq_zones=cq_zones,
-                             iaru_zones=iaru_zones)
+                             iaru_zones=iaru_zones,
+                             station_category=station_category)
     
     except Exception as e:
         logger.error("Exception in index route:")
