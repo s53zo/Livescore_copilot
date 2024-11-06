@@ -36,6 +36,152 @@ class ScoreReporter:
             self.logger.error(f"Error loading template: {e}")
             return None
 
+    def get_total_qso_rate(self, callsign, contest):
+        """Calculate total QSO rate over specified time period"""
+        query = """
+            WITH CurrentScore AS (
+                SELECT cs.qsos
+                FROM contest_scores cs
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= datetime('now')
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            ),
+            PreviousScore AS (
+                SELECT cs.qsos, cs.timestamp
+                FROM contest_scores cs
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= datetime('now', ? || ' minutes')
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            )
+            SELECT 
+                (SELECT qsos FROM CurrentScore) as current_qsos,
+                p.qsos as previous_qsos,
+                (JULIANDAY('now') - JULIANDAY(p.timestamp)) * 24 * 60 as minutes_diff
+            FROM PreviousScore p
+        """
+            
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                minutes_param = f"-{self.rate_minutes}"
+                cursor.execute(query, (callsign, contest, callsign, contest, minutes_param))
+                result = cursor.fetchone()
+                
+                if result and None not in result and result[2] > 0:
+                    current_qsos, previous_qsos, minutes_diff = result
+                    qso_diff = current_qsos - previous_qsos
+                    
+                    if qso_diff == 0:
+                        return 0
+                        
+                    rate = int(round((qso_diff * 60) / minutes_diff))
+                    self.logger.debug(f"Total QSO rate for {callsign}: {rate}/hr "
+                                    f"(+{qso_diff} QSOs in {minutes_diff:.1f} minutes)")
+                    return rate
+                return 0
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error in total rate calculation: {e}")
+            return 0
+        except Exception as e:
+            self.logger.error(f"Unexpected error: {e}")
+            self.logger.error(traceback.format_exc())
+            return 0
+    
+    def get_band_breakdown_with_rate(self, callsign, contest):
+        """Get band breakdown and calculate QSO rate for each band"""
+        current_query = """
+            WITH CurrentScore AS (
+                SELECT cs.id, cs.timestamp
+                FROM contest_scores cs
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            )
+            SELECT 
+                bb.band, 
+                bb.qsos as band_qsos, 
+                bb.multipliers
+            FROM band_breakdown bb
+            JOIN CurrentScore cs ON cs.id = bb.contest_score_id
+            WHERE bb.qsos > 0
+            ORDER BY bb.band
+        """
+        
+        previous_query = """
+            WITH TimeTarget AS (
+                SELECT datetime('now', ? || ' minutes') as target_time
+            )
+            SELECT 
+                bb.band,
+                bb.qsos,
+                cs.timestamp
+            FROM contest_scores cs
+            JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+            CROSS JOIN TimeTarget tt
+            WHERE cs.callsign = ?
+            AND cs.contest = ?
+            AND cs.timestamp <= datetime('now')
+            AND bb.qsos > 0
+            ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(tt.target_time))
+        """
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute(current_query, (callsign, contest))
+                current_data = cursor.fetchall()
+                
+                if not current_data:
+                    return {}
+                
+                result = {}
+                for row in current_data:
+                    band, qsos, mults = row
+                    result[band] = [qsos, mults, 0]  # [qsos, mults, rate]
+                
+                minutes_param = f"-{self.rate_minutes}"
+                cursor.execute(previous_query, (minutes_param, callsign, contest))
+                previous_data = cursor.fetchall()
+                
+                if previous_data:
+                    prev_timestamp = datetime.strptime(previous_data[0][2], '%Y-%m-%d %H:%M:%S')
+                    minutes_diff = (datetime.utcnow() - prev_timestamp).total_seconds() / 60
+        
+                    prev_bands = {row[0]: row[1] for row in previous_data}
+                    
+                    for band in result:
+                        current_qsos = result[band][0]
+                        if band in prev_bands and minutes_diff > 0:
+                            qso_diff = current_qsos - prev_bands[band]
+                            
+                            if qso_diff == 0:
+                                continue
+                                
+                            rate = int(round((qso_diff * 60) / minutes_diff))
+                            result[band][2] = rate
+                            
+                            self.logger.debug(f"Band {band} rate calculation:")
+                            self.logger.debug(f"  Current QSOs: {current_qsos}")
+                            self.logger.debug(f"  Previous QSOs: {prev_bands[band]}")
+                            self.logger.debug(f"  Time span: {minutes_diff:.1f} minutes")
+                            self.logger.debug(f"  Calculated rate: {rate}/hr")
+                
+                return result
+                    
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error in band rate calculation: {e}")
+            return {}
+        except Exception as e:
+            self.logger.error(f"Unexpected error: {e}")
+            self.logger.error(traceback.format_exc())
+            return {}
+    
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None, category_filter='same'):
         """Get station details and nearby competitors with optional filtering"""
         self.logger.debug(f"get_station_details called with: callsign={callsign}, contest={contest}")
@@ -128,98 +274,6 @@ class ScoreReporter:
             self.logger.error(f"Unexpected error: {e}")
             self.logger.error(traceback.format_exc())
             return None
-
-    def get_band_breakdown_with_rate(self, station_id, callsign, contest):
-        """Get band breakdown and calculate QSO rate for each band"""
-        current_query = """
-            WITH CurrentScore AS (
-                SELECT cs.id, cs.timestamp
-                FROM contest_scores cs
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
-            )
-            SELECT 
-                bb.band, 
-                bb.qsos as band_qsos, 
-                bb.multipliers
-            FROM band_breakdown bb
-            JOIN CurrentScore cs ON cs.id = bb.contest_score_id
-            WHERE bb.qsos > 0
-            ORDER BY bb.band
-        """
-        
-        previous_query = """
-            WITH TimeTarget AS (
-                SELECT datetime('now', ? || ' minutes') as target_time
-            )
-            SELECT 
-                bb.band,
-                bb.qsos,
-                cs.timestamp
-            FROM contest_scores cs
-            JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-            CROSS JOIN TimeTarget tt
-            WHERE cs.callsign = ?
-            AND cs.contest = ?
-            AND cs.timestamp <= datetime('now')
-            AND bb.qsos > 0
-            ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(tt.target_time))
-            LIMIT 1
-        """
-        
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute(current_query, (callsign, contest))
-                current_data = cursor.fetchall()
-                
-                if not current_data:
-                    return {}
-                
-                result = {}
-                for row in current_data:
-                    band, qsos, mults = row
-                    result[band] = [qsos, mults, 0]
-                
-                minutes_param = f"-{self.rate_minutes}"
-                cursor.execute(previous_query, (minutes_param, callsign, contest))
-                previous_data = cursor.fetchall()
-                
-                if previous_data:
-                    prev_timestamp = datetime.strptime(previous_data[0][2], '%Y-%m-%d %H:%M:%S')
-                    minutes_diff = (datetime.utcnow() - prev_timestamp).total_seconds() / 60
-    
-                    prev_bands = {row[0]: row[1] for row in previous_data}
-                    
-                    for band in result:
-                        current_qsos = result[band][0]
-                        if band in prev_bands and minutes_diff > 0:
-                            qso_diff = current_qsos - prev_bands[band]
-                            
-                            if qso_diff == 0:
-                                continue
-                                
-                            rate = int(round((qso_diff * 60) / minutes_diff))
-                            result[band][2] = rate
-                            
-                            self.logger.debug(f"Band {band} rate calculation:")
-                            self.logger.debug(f"  Current QSOs: {current_qsos}")
-                            self.logger.debug(f"  Previous QSOs: {prev_bands[band]}")
-                            self.logger.debug(f"  Time span: {minutes_diff:.1f} minutes")
-                            self.logger.debug(f"  Calculated rate: {rate}/hr")
-                
-                return result
-                    
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error in band rate calculation: {e}")
-            return {}
-        except Exception as e:
-            self.logger.error(f"Unexpected error: {e}")
-            self.logger.error(traceback.format_exc())
-            return {}
 
     def format_band_data(self, band_data):
         """Format band data as QSO/Mults (rate/h)"""
