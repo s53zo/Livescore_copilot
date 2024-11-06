@@ -99,23 +99,30 @@ def index():
             filter_type = request.form.get('filter_type')
             filter_value = request.form.get('filter_value')
             category_scope = request.form.get('category_scope')
-
-            # If "Selected Callsign's Category Only" is chosen, fetch the category of the selected callsign
-            if category_scope == 'selected':
-                cursor.execute("""
-                    SELECT category
-                    FROM contest_scores
-                    WHERE callsign = ? AND contest = ?
-                    ORDER BY timestamp DESC
-                    LIMIT 1
-                """, (callsign, contest))
-                category_result = cursor.fetchone()
-                if category_result:
-                    selected_category = category_result[0]
-                    logger.debug(f"Selected callsign's category: {selected_category}")
-                else:
-                    selected_category = None
-                    logger.warning("Selected callsign's category not found")
+        
+            selected_category = None  # Initialize selected category as None
+        
+            # Fetch the category of the selected callsign
+            cursor.execute("""
+                SELECT category
+                FROM contest_scores
+                WHERE callsign = ? AND contest = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (callsign, contest))
+            category_result = cursor.fetchone()
+            if category_result:
+                selected_category = category_result[0]
+                logger.debug(f"Selected callsign's category: {selected_category}")
+            else:
+                logger.warning("Selected callsign's category not found")
+        
+            # Render template with additional context, including selected_category
+            return render_template('select_form.html', 
+                                   contests=contests,
+                                   selected_contest=selected_contest,
+                                   callsigns=callsigns,
+                                   selected_category=selected_category)  # Pass the selected category
 
             # Fetch stations based on the selected category scope
             if category_scope == 'selected' and selected_category:
