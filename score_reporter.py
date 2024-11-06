@@ -65,9 +65,8 @@ class ScoreReporter:
                 
                 # Main query for all stations
                 query = """
-                    WITH latest_scores AS (
-                        SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
-                               cs.timestamp, cs.qsos, cs.multipliers
+                    WITH station_scores AS (
+                        SELECT cs.*
                         FROM contest_scores cs
                         INNER JOIN (
                             SELECT callsign, MAX(timestamp) as max_ts
@@ -77,25 +76,26 @@ class ScoreReporter:
                         ) latest ON cs.callsign = latest.callsign 
                             AND cs.timestamp = latest.max_ts
                         WHERE cs.contest = ?
-                        {category_filter}
                     )
                     SELECT 
-                        ls.id,
-                        ls.callsign,
-                        ls.score,
-                        ls.power,
-                        ls.assisted,
-                        ls.timestamp,
-                        ls.qsos,
-                        ls.multipliers,
+                        ss.id,
+                        ss.callsign,
+                        ss.score,
+                        ss.power,
+                        ss.assisted,
+                        ss.timestamp,
+                        ss.qsos,
+                        ss.multipliers,
                         CASE 
-                            WHEN ls.callsign = ? THEN 'current'
-                            WHEN ls.score > (SELECT score FROM latest_scores WHERE callsign = ?) THEN 'above'
+                            WHEN ss.callsign = ? THEN 'current'
+                            WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
                             ELSE 'below'
                         END as position,
                         1 as rn
-                    FROM latest_scores ls
-                    ORDER BY ls.score DESC
+                    FROM station_scores ss
+                    WHERE 1=1
+                    {category_filter}
+                    ORDER BY ss.score DESC
                 """
         
                 params = [contest, contest, callsign, callsign]
@@ -104,8 +104,8 @@ class ScoreReporter:
                 # Add category filtering if requested
                 if category_filter == 'same':
                     category_clause = """
-                        AND (cs.callsign = ? 
-                        OR (cs.power = ? AND cs.assisted = ?))
+                        AND (ss.callsign = ? 
+                        OR (ss.power = ? AND ss.assisted = ?))
                     """
                     params.extend([callsign, station_power, station_assisted])
                     
@@ -128,62 +128,6 @@ class ScoreReporter:
             self.logger.error(f"Unexpected error: {e}")
             self.logger.error(traceback.format_exc())
             return None
-
-    def get_total_qso_rate(self, station_id, callsign, contest):
-        """Calculate total QSO rate over specified time period"""
-        query = """
-            WITH CurrentScore AS (
-                SELECT cs.qsos
-                FROM contest_scores cs
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                AND cs.timestamp <= datetime('now')
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
-            ),
-            PreviousScore AS (
-                SELECT cs.qsos, cs.timestamp
-                FROM contest_scores cs
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                AND cs.timestamp <= datetime('now')
-                ORDER BY ABS(JULIANDAY(cs.timestamp) - 
-                          JULIANDAY(datetime('now', ? || ' minutes')))
-                LIMIT 1
-            )
-            SELECT 
-                (SELECT qsos FROM CurrentScore) as current_qsos,
-                p.qsos as previous_qsos,
-                (JULIANDAY(datetime('now')) - JULIANDAY(p.timestamp)) * 24 * 60 as minutes_diff
-            FROM PreviousScore p
-        """
-            
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                minutes_param = f"-{self.rate_minutes}"
-                cursor.execute(query, (callsign, contest, callsign, contest, minutes_param))
-                result = cursor.fetchone()
-                
-                if result and None not in result and result[2] > 0:
-                    current_qsos, previous_qsos, minutes_diff = result
-                    qso_diff = current_qsos - previous_qsos
-                    
-                    if qso_diff == 0:
-                        return 0
-                        
-                    rate = int(round((qso_diff * 60) / minutes_diff))
-                    self.logger.debug(f"Total QSO rate for {callsign}: {rate}/hr "
-                                    f"(+{qso_diff} QSOs in {minutes_diff:.1f} minutes)")
-                    return rate
-                return 0
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error in total rate calculation: {e}")
-            return 0
-        except Exception as e:
-            self.logger.error(f"Unexpected error: {e}")
-            self.logger.error(traceback.format_exc())
-            return 0
 
     def get_band_breakdown_with_rate(self, station_id, callsign, contest):
         """Get band breakdown and calculate QSO rate for each band"""
