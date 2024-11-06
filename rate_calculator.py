@@ -38,6 +38,10 @@ def calculate_rates(db_path, callsign, contest):
             latest_qsos = latest[1]
             latest_bands = parse_band_breakdown(latest[2]) if latest[2] else {}
 
+            print(f"\nRate analysis for {callsign} in {contest}")
+            print(f"Latest entry: {latest_ts} with {latest_qsos} QSOs")
+            print("-" * 50)
+
             # Calculate target timestamps
             hour_target = latest_ts - timedelta(hours=1)
             quarter_target = latest_ts - timedelta(minutes=15)
@@ -66,10 +70,6 @@ def calculate_rates(db_path, callsign, contest):
 
             records = cursor.fetchall()
             
-            print(f"\nRate analysis for {callsign} in {contest}")
-            print(f"Latest entry: {latest_ts} with {latest_qsos} QSOs")
-            print("-" * 50)
-
             # Find closest records to target times
             hour_record = None
             quarter_record = None
@@ -94,13 +94,17 @@ def calculate_rates(db_path, callsign, contest):
                 time_diff = (latest_ts - hour_ts).total_seconds() / 60
                 qso_diff = latest_qsos - hour_qsos
                 
-                # Interpolate to 60 minutes
-                hour_rate = int(round((qso_diff * 60) / time_diff))
-                
                 print("\n1-hour rate calculation:")
                 print(f"Time span: {time_diff:.1f} minutes")
                 print(f"QSOs in span: {qso_diff}")
-                print(f"Interpolated 60-minute rate: {hour_rate}/hr")
+                
+                if qso_diff == 0:
+                    print("No QSO changes - rate is 0/hr")
+                else:
+                    # Interpolate to 60 minutes
+                    hour_rate = int(round((qso_diff * 60) / time_diff))
+                    print(f"Interpolated 60-minute rate: {hour_rate}/hr")
+                
                 print("Band changes:")
                 for band in sorted(set(latest_bands.keys()) | set(hour_bands.keys())):
                     diff = latest_bands.get(band, 0) - hour_bands.get(band, 0)
@@ -117,13 +121,17 @@ def calculate_rates(db_path, callsign, contest):
                 time_diff = (latest_ts - quarter_ts).total_seconds() / 60
                 qso_diff = latest_qsos - quarter_qsos
                 
-                # Interpolate to 60 minutes
-                quarter_rate = int(round((qso_diff * 60) / time_diff))
-                
                 print("\n15-minute rate calculation:")
                 print(f"Time span: {time_diff:.1f} minutes")
                 print(f"QSOs in span: {qso_diff}")
-                print(f"Interpolated 60-minute rate: {quarter_rate}/hr")
+                
+                if qso_diff == 0:
+                    print("No QSO changes - rate is 0/hr")
+                else:
+                    # Interpolate to 60 minutes
+                    quarter_rate = int(round((qso_diff * 60) / time_diff))
+                    print(f"Interpolated 60-minute rate: {quarter_rate}/hr")
+                
                 print("Band changes:")
                 for band in sorted(set(latest_bands.keys()) | set(quarter_bands.keys())):
                     diff = latest_bands.get(band, 0) - quarter_bands.get(band, 0)
@@ -164,3 +172,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
