@@ -234,6 +234,14 @@ class ScoreReporter:
 
     def get_band_breakdown_with_rate(self, station_id, callsign, contest):
         """Get band breakdown and calculate QSO rate for each band with correct interpolation"""
+        # First get the current timestamp
+        current_timestamp_query = """
+            SELECT timestamp 
+            FROM contest_scores 
+            WHERE id = ?
+        """
+    
+        # Get current band breakdown
         current_query = """
             SELECT 
                 bb.band, 
@@ -245,29 +253,32 @@ class ScoreReporter:
             WHERE bb.contest_score_id = ?
         """
         
+        # Get previous band breakdown - closest to rate_minutes ago
         previous_query = """
-            WITH CurrentTimestamp AS (
-                SELECT timestamp 
-                FROM contest_scores 
-                WHERE id = ?
+            WITH TimeTarget AS (
+                SELECT datetime(?, ? || ' minutes') as target_time
             )
             SELECT 
-                bb.band, 
-                bb.qsos as prev_band_qsos,
-                cs.timestamp,
-                ABS(JULIANDAY(cs.timestamp) - 
-                    JULIANDAY(datetime((SELECT timestamp FROM CurrentTimestamp), ? || ' minutes'))) as time_diff
+                bb.band,
+                bb.qsos,
+                cs.timestamp
             FROM contest_scores cs
             JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-            WHERE cs.callsign = ? 
+            CROSS JOIN TimeTarget tt
+            WHERE cs.callsign = ?
             AND cs.contest = ?
-            AND cs.timestamp < (SELECT timestamp FROM CurrentTimestamp)
-            ORDER BY time_diff ASC, bb.band
+            AND cs.timestamp < ?
+            ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(tt.target_time))
+            LIMIT 1
         """
         
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                
+                # Get current timestamp first
+                cursor.execute(current_timestamp_query, (station_id,))
+                current_timestamp = cursor.fetchone()[0]
                 
                 # Get current band breakdown
                 cursor.execute(current_query, (station_id,))
@@ -277,61 +288,42 @@ class ScoreReporter:
                     return {}
                 
                 # Organize current data
-                current_by_band = {}
-                current_timestamp = None
+                result = {}
                 for row in current_data:
-                    band, qsos, mults, timestamp = row
-                    current_timestamp = timestamp
-                    current_by_band[band] = {
-                        'qsos': qsos,
-                        'mults': mults,
-                        'timestamp': timestamp
-                    }
+                    band, qsos, mults, _ = row
+                    result[band] = [qsos, mults, 0]  # Initialize rate as 0
                 
-                # Get the closest previous record to rate_minutes ago
+                # Get previous record closest to rate_minutes ago
                 minutes_param = f"-{self.rate_minutes}"
-                cursor.execute(previous_query, (station_id, minutes_param, callsign, contest))
+                cursor.execute(previous_query, 
+                             (current_timestamp, minutes_param, callsign, contest, current_timestamp))
                 previous_data = cursor.fetchall()
                 
-                # Group previous data by band
-                previous_by_band = {}
-                for row in previous_data:
-                    band, qsos, timestamp, time_diff = row
-                    if band not in previous_by_band or time_diff < previous_by_band[band]['time_diff']:
-                        previous_by_band[band] = {
-                            'qsos': qsos,
-                            'timestamp': timestamp,
-                            'time_diff': time_diff
-                        }
-                
-                # Calculate rates for each band
-                result = {}
-                for band in current_by_band:
-                    current = current_by_band[band]
-                    current_qsos = current['qsos']
+                if previous_data:
+                    prev_timestamp = datetime.strptime(previous_data[0][2], '%Y-%m-%d %H:%M:%S')
+                    current_ts = datetime.strptime(current_timestamp, '%Y-%m-%d %H:%M:%S')
+                    minutes_diff = (current_ts - prev_timestamp).total_seconds() / 60
+    
+                    # Create dict of previous band QSOs
+                    prev_bands = {row[0]: row[1] for row in previous_data}
                     
-                    if band in previous_by_band:
-                        prev = previous_by_band[band]
-                        # Calculate time difference in minutes
-                        minutes_diff = (datetime.strptime(current['timestamp'], '%Y-%m-%d %H:%M:%S') - 
-                                      datetime.strptime(prev['timestamp'], '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-                        
-                        if minutes_diff > 0:
-                            qso_diff = current_qsos - prev['qsos']
+                    # Calculate rates
+                    for band in result:
+                        current_qsos = result[band][0]
+                        if band in prev_bands and minutes_diff > 0:
+                            qso_diff = current_qsos - prev_bands[band]
                             # Interpolate to 60 minute rate
                             rate = int(round((qso_diff * 60) / minutes_diff))
-                        else:
-                            rate = 0
-                    else:
-                        rate = 0
-                    
-                    result[band] = (current_qsos, current['mults'], rate)
-                    
-                    self.logger.debug(f"Band {band} rate for {callsign}: {rate}/hr "
-                                    f"(current: {current_qsos}, mults: {current['mults']})")
+                            result[band][2] = rate  # Update rate in result
+                            
+                            self.logger.debug(f"Band {band} rate calculation:")
+                            self.logger.debug(f"  Current QSOs: {current_qsos}")
+                            self.logger.debug(f"  Previous QSOs: {prev_bands[band]}")
+                            self.logger.debug(f"  Time span: {minutes_diff:.1f} minutes")
+                            self.logger.debug(f"  Calculated rate: {rate}/hr")
                 
                 return result
-                
+                    
         except sqlite3.Error as e:
             self.logger.error(f"Database error in band rate calculation: {e}")
             return {}
