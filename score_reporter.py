@@ -194,35 +194,36 @@ class ScoreReporter:
                 WHERE cs.id = ?
             ),
             PreviousScore AS (
-                SELECT cs.qsos, cs.timestamp
+                SELECT cs.qsos, cs.timestamp,
+                       ABS(JULIANDAY(cs.timestamp) - 
+                           JULIANDAY(datetime((SELECT timestamp FROM CurrentScore), ? || ' minutes'))) as time_diff
                 FROM contest_scores cs
                 WHERE cs.callsign = ?
                 AND cs.contest = ?
                 AND cs.timestamp < (SELECT timestamp FROM CurrentScore)
-                AND cs.timestamp >= datetime((SELECT timestamp FROM CurrentScore), ? || ' minutes')
-                ORDER BY cs.timestamp DESC
+                ORDER BY time_diff ASC
                 LIMIT 1
             )
             SELECT 
                 c.qsos as current_qsos,
                 p.qsos as previous_qsos,
-                ROUND((JULIANDAY(c.timestamp) - JULIANDAY(p.timestamp)) * 24 * 60, 2) as minutes_diff
+                (JULIANDAY(c.timestamp) - JULIANDAY(p.timestamp)) * 24 * 60 as minutes_diff
             FROM CurrentScore c
             LEFT JOIN PreviousScore p
-            """
+        """
             
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 minutes_param = f"-{self.rate_minutes}"
-                cursor.execute(query, (station_id, callsign, contest, minutes_param))
+                cursor.execute(query, (station_id, minutes_param, callsign, contest))
                 result = cursor.fetchone()
                 
                 if result and result[0] is not None and result[1] is not None and result[2] > 0:
                     current_qsos, previous_qsos, minutes_diff = result
                     qso_diff = current_qsos - previous_qsos
-                    # Convert to hourly rate
-                    rate = int(round(qso_diff * (60 / minutes_diff)))
+                    # Interpolate to 60 minute rate
+                    rate = int(round((qso_diff * 60) / minutes_diff))
                     self.logger.debug(f"Total QSO rate for {callsign}: {rate}/hr "
                                     f"(+{qso_diff} QSOs in {minutes_diff:.1f} minutes)")
                     return rate
@@ -232,7 +233,7 @@ class ScoreReporter:
             return 0
 
     def get_band_breakdown_with_rate(self, station_id, callsign, contest):
-        """Get band breakdown and calculate QSO rate for each band with interpolation"""
+        """Get band breakdown and calculate QSO rate for each band with correct interpolation"""
         current_query = """
             SELECT 
                 bb.band, 
@@ -241,7 +242,7 @@ class ScoreReporter:
                 cs.timestamp
             FROM band_breakdown bb
             JOIN contest_scores cs ON cs.id = bb.contest_score_id
-            WHERE bb.contest_score_id = ?;
+            WHERE bb.contest_score_id = ?
         """
         
         previous_query = """
@@ -254,15 +255,14 @@ class ScoreReporter:
                 bb.band, 
                 bb.qsos as prev_band_qsos,
                 cs.timestamp,
-                ABS(ROUND((JULIANDAY(cs.timestamp) - 
-                          JULIANDAY((SELECT timestamp FROM CurrentTimestamp))) * 24 * 60, 2)) as minutes_diff
+                ABS(JULIANDAY(cs.timestamp) - 
+                    JULIANDAY(datetime((SELECT timestamp FROM CurrentTimestamp), ? || ' minutes'))) as time_diff
             FROM contest_scores cs
             JOIN band_breakdown bb ON bb.contest_score_id = cs.id
             WHERE cs.callsign = ? 
             AND cs.contest = ?
             AND cs.timestamp < (SELECT timestamp FROM CurrentTimestamp)
-            AND cs.timestamp >= datetime((SELECT timestamp FROM CurrentTimestamp), ? || ' minutes')
-            ORDER BY cs.timestamp DESC, bb.band;
+            ORDER BY time_diff ASC, bb.band
         """
         
         try:
@@ -276,37 +276,59 @@ class ScoreReporter:
                 if not current_data:
                     return {}
                 
-                # Organize current data and store current timestamp
+                # Organize current data
                 current_by_band = {}
+                current_timestamp = None
                 for row in current_data:
-                    band, qsos, mults, current_timestamp = row
+                    band, qsos, mults, timestamp = row
+                    current_timestamp = timestamp
                     current_by_band[band] = {
                         'qsos': qsos,
                         'mults': mults,
-                        'timestamp': current_timestamp
+                        'timestamp': timestamp
                     }
                 
-                # Get previous data points using rate_minutes
+                # Get the closest previous record to rate_minutes ago
                 minutes_param = f"-{self.rate_minutes}"
-                cursor.execute(previous_query, (station_id, callsign, contest, minutes_param))
+                cursor.execute(previous_query, (station_id, minutes_param, callsign, contest))
                 previous_data = cursor.fetchall()
+                
+                # Group previous data by band
+                previous_by_band = {}
+                for row in previous_data:
+                    band, qsos, timestamp, time_diff = row
+                    if band not in previous_by_band or time_diff < previous_by_band[band]['time_diff']:
+                        previous_by_band[band] = {
+                            'qsos': qsos,
+                            'timestamp': timestamp,
+                            'time_diff': time_diff
+                        }
                 
                 # Calculate rates for each band
                 result = {}
                 for band in current_by_band:
                     current = current_by_band[band]
                     current_qsos = current['qsos']
-                    rate = 0
                     
-                    for prev_row in previous_data:
-                        prev_band, prev_qsos, prev_timestamp, minutes_diff = prev_row
-                        if prev_band == band and minutes_diff > 0:
-                            qso_diff = current_qsos - prev_qsos
-                            # Convert to hourly rate
-                            rate = int(round(qso_diff * (60 / minutes_diff)))
-                            break
+                    if band in previous_by_band:
+                        prev = previous_by_band[band]
+                        # Calculate time difference in minutes
+                        minutes_diff = (datetime.strptime(current['timestamp'], '%Y-%m-%d %H:%M:%S') - 
+                                      datetime.strptime(prev['timestamp'], '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                        
+                        if minutes_diff > 0:
+                            qso_diff = current_qsos - prev['qsos']
+                            # Interpolate to 60 minute rate
+                            rate = int(round((qso_diff * 60) / minutes_diff))
+                        else:
+                            rate = 0
+                    else:
+                        rate = 0
                     
                     result[band] = (current_qsos, current['mults'], rate)
+                    
+                    self.logger.debug(f"Band {band} rate for {callsign}: {rate}/hr "
+                                    f"(current: {current_qsos}, mults: {current['mults']})")
                 
                 return result
                 
