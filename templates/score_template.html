@@ -2,26 +2,128 @@
 <html>
 <head>
     <title>Contest Progress Report - {contest}</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 100%;
+            margin: 20px;
+            padding: 20px;
+        }
+        .refresh-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #4caf50;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f5f5f5;
+        }
+        .highlight {
+            background-color: #e8f5e9;
+        }
+        .category-info {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .category-tag {
+            display: inline-block;
+            padding: 4px 8px;
+            background-color: #e7f3ff;
+            border: 1px solid #cce5ff;
+            border-radius: 3px;
+            margin: 0 5px;
+            color: #0066cc;
+        }
+    </style>
 </head>
 <body>
-    <div id="root"></div>
+    <h1>Contest Progress Report - {contest}</h1>
+    
+    <div class="refresh-info">
+        Next refresh in <span id="countdown">5:00</span>
+    </div>
+
+    <p>Monitoring: {callsign} {filter_display}</p>
+    
+    <div class="category-info">
+        <strong>Category:</strong>
+        <span class="category-tag">Power: {power}</span>
+        <span class="category-tag">Assisted: {assisted}</span>
+        
+        <div style="margin-top: 10px;">
+            <label>
+                <input type="radio" name="category_filter" value="same" onclick="window.location.href='?callsign={callsign}&contest={contest}&category_filter=same'" {same_checked}>
+                Show only stations in this category
+            </label>
+            <label style="margin-left: 20px;">
+                <input type="radio" name="category_filter" value="all" onclick="window.location.href='?callsign={callsign}&contest={contest}&category_filter=all'" {all_checked}>
+                Show all categories
+            </label>
+        </div>
+    </div>
+
+    <table>
+        <tr>
+            <th>Place</th>
+            <th>Call Sign</th>
+            <th>Score</th>
+            <th>160m</th>
+            <th>80m</th>
+            <th>40m</th>
+            <th>20m</th>
+            <th>15m</th>
+            <th>10m</th>
+            <th>Total<br>QSO/Mults</th>
+            <th>Last Update</th>
+        </tr>
+        {table_rows}
+    </table>
 
     <script>
-        function toggleCategory() {
-            const newFilter = document.getElementById('categorySwitch').checked ? 'all' : 'same';
-            const currentUrl = new URL(window.location.href);
-            currentUrl.searchParams.set('category_filter', newFilter);
-            window.location.href = currentUrl.toString();
+        function updateCountdown() {
+            var countdownElement = document.getElementById('countdown');
+            var minutes = 4;
+            var seconds = 59;
+
+            setInterval(function() {
+                if (minutes === 0 && seconds === 0) {
+                    window.location.reload();
+                    return;
+                }
+
+                if (seconds === 0) {
+                    minutes--;
+                    seconds = 59;
+                } else {
+                    seconds--;
+                }
+
+                countdownElement.textContent = minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+            }, 1000);
         }
 
-        const updateScore = () => {
-            window.location.reload();
-        };
+        document.addEventListener('DOMContentLoaded', updateCountdown);
 
-        setInterval(updateScore, 300000); // 5 minutes
+        // Refresh page every 5 minutes
+        setTimeout(function() {
+            window.location.reload();
+        }, 300000);
     </script>
 </body>
 </html>
