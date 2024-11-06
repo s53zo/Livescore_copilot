@@ -91,7 +91,7 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return 0
     
-    def get_band_breakdown_with_rate(self, callsign, contest):
+    def get_band_breakdown_with_rate(self, station_id, callsign, contest):
         """Get band breakdown and calculate QSO rate for each band"""
         current_query = """
             WITH CurrentScore AS (
