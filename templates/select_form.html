@@ -89,7 +89,7 @@
                     <option value="">-- Select Contest --</option>
                     {% for contest in contests %}
                     <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
-                        {{ contest.name }} ({{ contest.count }})
+                        {{ contest.name }} ({{ contest.count }} OPs)
                     </option>
                     {% endfor %}
                 </select>
@@ -103,7 +103,9 @@
                 <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required>
                     <option value="">-- Select Callsign --</option>
                     {% for callsign in callsigns %}
-                    <option value="{{ callsign }}">{{ callsign }}</option>
+                    <option value="{{ callsign.name }}">
+                        {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
+                    </option>
                     {% endfor %}
                 </select>
             </div>
