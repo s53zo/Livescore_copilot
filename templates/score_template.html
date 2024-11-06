@@ -2,82 +2,112 @@
 <html>
 <head>
     <title>Contest Progress Report - {contest}</title>
+    <script>
+        function refreshPage() {{
+            const params = {{
+                callsign: '{callsign}',
+                contest: '{contest}',
+                category_filter: '{category_filter}'
+            }};
+            if ('{filter_type}') {{
+                params.filter_type = '{filter_type}';
+                params.filter_value = '{filter_value}';
+            }}
+            
+            const query = new URLSearchParams(params).toString();
+            window.location.href = '/reports/live.html?' + query;
+        }}
+        
+        setInterval(refreshPage, 300000);
+
+        function updateCountdown() {{
+            const countdownElement = document.getElementById('countdown');
+            let minutes = 4;
+            let seconds = 59;
+
+            function pad(num) {{
+                return num.toString().padStart(2, '0');
+            }}
+
+            const timer = setInterval(() => {{
+                if (minutes === 0 && seconds === 0) {{
+                    clearInterval(timer);
+                    return;
+                }}
+
+                if (seconds === 0) {{
+                    minutes--;
+                    seconds = 59;
+                }} else {{
+                    seconds--;
+                }}
+
+                countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
+            }}, 1000);
+        }}
+
+        document.addEventListener('DOMContentLoaded', updateCountdown);
+
+        function toggleCategory() {{
+            const newFilter = document.getElementById('categorySwitch').checked ? 'all' : 'same';
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('category_filter', newFilter);
+            window.location.href = currentUrl.toString();
+        }}
+    </script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 100%;
-            margin: 20px;
-            padding: 20px;
-        }
-        .refresh-info {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background-color: #4caf50;
-            color: white;
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: center;
-        }
-        th {
-            background-color: #f5f5f5;
-        }
-        .highlight {
-            background-color: #e8f5e9;
-        }
-        .category-info {
-            background-color: #f8f9fa;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        .category-tag {
-            display: inline-block;
-            padding: 4px 8px;
-            background-color: #e7f3ff;
-            border: 1px solid #cce5ff;
-            border-radius: 3px;
-            margin: 0 5px;
-            color: #0066cc;
-        }
+        body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; padding-bottom: 40px; }}
+        h1 {{ color: #2c3e50; margin-bottom: 10px; }}
+        .info {{ color: #7f8c8d; margin-bottom: 20px; }}
+        .category-info {{ background-color: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px; }}
+        .category-tag {{ display: inline-block; padding: 4px 8px; background-color: #e7f3ff; border: 1px solid #cce5ff; border-radius: 3px; color: #0066cc; }}
+        .switch {{ position: relative; display: inline-block; width: 60px; height: 34px; }}
+        .switch input {{ opacity: 0; width: 0; height: 0; }}
+        .slider {{ position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }}
+        .slider:before {{ position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }}
+        input:checked + .slider {{ background-color: #4CAF50; }}
+        input:checked + .slider:before {{ transform: translateX(26px); }}
+        .switch-label {{ font-size: 0.9em; color: #666; }}
+        table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+        th, td {{ border: 1px solid #dee2e6; padding: 8px 4px; text-align: center; font-size: 0.9em; }}
+        th {{ background-color: #f8f9fa; font-weight: bold; color: #2c3e50; }}
+        tr:nth-child(even) {{ background-color: #f8f9fa; }}
+        .highlight {{ background-color: #e8f5e9 !important; font-weight: bold; }}
+        .highlight td {{ border-top: 2px solid #4caf50; border-bottom: 2px solid #4caf50; }}
+        .timestamp {{ font-style: italic; color: #7f8c8d; margin-bottom: 15px; }}
+        .band-data {{ white-space: nowrap; }}
+        .refresh-info {{ position: fixed; top: 10px; right: 10px; background-color: #4caf50; color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 1000; }}
+        #countdown {{ font-weight: bold; }}
+        .filter-info {{ color: #4caf50; font-weight: normal; margin-left: 10px; }}
+        .footer {{ position: fixed; bottom: 0; left: 0; right: 0; background-color: #f8f9fa; padding: 10px 20px; text-align: center; font-size: 0.8em; color: #666; border-top: 1px solid #dee2e6; }}
+        @media print {{ .refresh-info, .footer {{ display: none; }} body {{ padding-bottom: 0; }} }}
     </style>
 </head>
 <body>
-    <h1>Contest Progress Report - {contest}</h1>
-    
     <div class="refresh-info">
         Next refresh in <span id="countdown">5:00</span>
     </div>
 
-    <p>Monitoring: {callsign} {filter_display}</p>
-    
+    <h1>Contest Progress Report - {contest}</h1>
+    <p class="timestamp">
+        Updated: {timestamp}<br>
+        Monitoring: {callsign} 
+        <span class="filter-info">{filter_display}</span>
+    </p>
     <div class="category-info">
-        <strong>Category:</strong>
-        <span class="category-tag">Power: {power}</span>
-        <span class="category-tag">Assisted: {assisted}</span>
-        
-        <div style="margin-top: 10px;">
-            <label>
-                <input type="radio" name="category_filter" value="same" onclick="window.location.href='?callsign={callsign}&contest={contest}&category_filter=same'" {same_checked}>
-                Show only stations in this category
+        <div>
+            <strong>Category:</strong>
+            <span class="category-tag">Power: {power}</span>
+            <span class="category-tag">Assisted: {assisted}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <label class="switch">
+                <input type="checkbox" id="categorySwitch" onchange="toggleCategory()" {category_checked}>
+                <span class="slider"></span>
             </label>
-            <label style="margin-left: 20px;">
-                <input type="radio" name="category_filter" value="all" onclick="window.location.href='?callsign={callsign}&contest={contest}&category_filter=all'" {all_checked}>
-                Show all categories
-            </label>
+            <span class="switch-label">{category_label}</span>
         </div>
     </div>
-
     <table>
         <tr>
             <th>Place</th>
@@ -95,35 +125,8 @@
         {table_rows}
     </table>
 
-    <script>
-        function updateCountdown() {
-            var countdownElement = document.getElementById('countdown');
-            var minutes = 4;
-            var seconds = 59;
-
-            setInterval(function() {
-                if (minutes === 0 && seconds === 0) {
-                    window.location.reload();
-                    return;
-                }
-
-                if (seconds === 0) {
-                    minutes--;
-                    seconds = 59;
-                } else {
-                    seconds--;
-                }
-
-                countdownElement.textContent = minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
-            }, 1000);
-        }
-
-        document.addEventListener('DOMContentLoaded', updateCountdown);
-
-        // Refresh page every 5 minutes
-        setTimeout(function() {
-            window.location.reload();
-        }, 300000);
-    </script>
+    <div class="footer">
+        Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network
+    </div>
 </body>
 </html>
