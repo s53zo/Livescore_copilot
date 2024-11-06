@@ -4,54 +4,42 @@
     <title>Contest Progress Report - {contest}</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            color: #333;
-            padding-bottom: 40px;
-        }
-        
         .category-tag {
             display: inline-block;
-            padding: 4px 8px;
+            padding: 0.25rem 0.5rem;
             background-color: #e7f3ff;
             border: 1px solid #cce5ff;
-            border-radius: 3px;
+            border-radius: 0.25rem;
             color: #0066cc;
         }
-
         .footer {
             position: fixed;
             bottom: 0;
             left: 0;
             right: 0;
             background-color: #f8f9fa;
-            padding: 10px 20px;
+            padding: 0.625rem 1.25rem;
             text-align: center;
-            font-size: 0.8em;
+            font-size: 0.875rem;
             color: #666;
             border-top: 1px solid #dee2e6;
         }
-
         @media print {
-            .footer {
-                display: none;
-            }
-            body {
-                padding-bottom: 0;
-            }
+            .footer { display: none; }
         }
     </style>
 </head>
-<body>
+<body class="p-5 bg-gray-50">
     <h1 class="text-2xl font-bold mb-4">Contest Progress Report - {contest}</h1>
+    
     <p class="mb-4">
-        Monitoring: {callsign}
+        <span class="font-medium">Monitoring:</span> {callsign}
         <span class="text-green-600 ml-2">{filter_display}</span>
     </p>
-    <div class="bg-gray-50 p-4 rounded-lg mb-6">
+    
+    <div class="bg-white p-4 rounded-lg mb-6 shadow-sm">
         <div class="mb-2">
             <strong>Category:</strong>
             <span class="category-tag ml-2">Power: {power}</span>
@@ -66,19 +54,18 @@
                     {category_checked}
                     class="form-checkbox h-4 w-4 text-green-600"
                 >
-                <span class="ml-2">{category_label}</span>
+                <span class="ml-2 text-gray-700">{category_label}</span>
             </label>
         </div>
     </div>
 
-    <div id="root"></div>
+    <div id="root" class="mb-16"></div>
 
     <div class="footer">
         Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network
     </div>
 
     <script>
-        // Store initial parameters for the React component
         const initialParams = {
             callsign: '{callsign}',
             contest: '{contest}',
@@ -87,7 +74,6 @@
             filter_value: '{filter_value}'
         };
 
-        // Toggle category function (preserved from original template)
         function toggleCategory() {
             const newFilter = document.getElementById('categorySwitch').checked ? 'all' : 'same';
             const currentUrl = new URL(window.location.href);
@@ -95,17 +81,14 @@
             window.location.href = currentUrl.toString();
         }
 
-        // Load and initialize React component
         fetch('/static/LiveScoreBoard.js')
             .then(response => response.text())
             .then(sourceCode => {
-                // Create script element and add the component code
                 const script = document.createElement('script');
-                script.type = 'text/babel';
+                script.type = 'module';
                 script.textContent = sourceCode;
                 document.body.appendChild(script);
 
-                // Initialize the component
                 ReactDOM.render(
                     React.createElement(LiveScoreBoard, { initialParams }),
                     document.getElementById('root')
