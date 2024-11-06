@@ -74,6 +74,38 @@
             opacity: 0.5;
             pointer-events: none;
         }
+        .category-info {
+            margin-top: 15px;
+            padding: 12px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+        .category-tag {
+            display: inline-block;
+            padding: 4px 8px;
+            background-color: #e7f3ff;
+            border: 1px solid #cce5ff;
+            border-radius: 3px;
+            margin: 0 5px;
+            font-size: 0.9em;
+            color: #0066cc;
+        }
+        .radio-group {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid #e9ecef;
+        }
+        .radio-group label {
+            display: inline-block;
+            margin-right: 20px;
+            font-weight: normal;
+            cursor: pointer;
+        }
+        .radio-group input[type="radio"] {
+            margin-right: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -100,14 +132,33 @@
             <h2>Step 2: Select Callsign</h2>
             <div class="form-group">
                 <label for="callsign">Choose a Callsign:</label>
-                <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required>
+                <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required onchange="handleCallsignChange()">
                     <option value="">-- Select Callsign --</option>
                     {% for callsign in callsigns %}
-                    <option value="{{ callsign.name }}">
+                    <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
                         {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
                     </option>
                     {% endfor %}
                 </select>
+                
+                {% if station_category %}
+                <div class="category-info" id="categoryInfo">
+                    <strong>Station Category:</strong>
+                    <span class="category-tag">Power: {{ station_category[0] }}</span>
+                    <span class="category-tag">Assisted: {{ station_category[1] }}</span>
+                    
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="category_filter" value="same" checked>
+                            Show only stations in this category
+                        </label>
+                        <label>
+                            <input type="radio" name="category_filter" value="all">
+                            Show all categories
+                        </label>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
 
@@ -163,13 +214,6 @@
     <br><br>Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
 
     <script>
-        document.getElementById('contest').addEventListener('change', function() {
-            if (this.value) {
-                // Submit form to update callsign list
-                this.form.submit();
-            }
-        });
-
         document.getElementById('filter_type').addEventListener('change', function() {
             // Hide all filter value selects and clear their values
             document.querySelectorAll('#dxcc_filter, #cq_zone_filter, #iaru_zone_filter').forEach(el => {
@@ -183,9 +227,20 @@
             }
         });
 
-        // Enable/disable generate button based on required selections
-        document.getElementById('callsign').addEventListener('change', function() {
-            document.getElementById('generateButton').disabled = !this.value;
+        function handleCallsignChange() {
+            const callsignSelect = document.getElementById('callsign');
+            const generateButton = document.getElementById('generateButton');
+            
+            // Enable/disable generate button based on selection
+            generateButton.disabled = !callsignSelect.value;
+            
+            // If you want to refresh category info via AJAX when callsign changes,
+            // you can add that functionality here
+        }
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', function() {
+            handleCallsignChange();
         });
     </script>
 </body>
