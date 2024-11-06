@@ -77,24 +77,37 @@ def index():
             iaru_zones = []
             
             if selected_contest:
-                # Get callsigns for this contest only
-                logger.debug(f"Fetching callsigns for contest: {selected_contest}")
+            #if selected_contest:
+                # Fetch callsigns with QSO count for the selected contest
+                logger.debug(f"Fetching callsigns with QSO count for contest: {selected_contest}")
                 cursor.execute("""
-                    WITH LatestScores AS (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    )
-                    SELECT cs.callsign
-                    FROM contest_scores cs
-                    JOIN LatestScores ls ON cs.callsign = ls.callsign 
-                        AND cs.timestamp = ls.max_ts
-                    WHERE cs.contest = ?
-                    ORDER BY cs.callsign
-                """, (selected_contest, selected_contest))
-                callsigns = [row[0] for row in cursor.fetchall()]
-                logger.debug(f"Found callsigns: {len(callsigns)}")
+                    SELECT callsign, COUNT(*) AS qso_count
+                    FROM contest_scores
+                    WHERE contest = ?
+                    GROUP BY callsign
+                    ORDER BY callsign
+                """, (selected_contest,))
+                callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+                logger.debug(f"Found callsigns with QSO counts: {callsigns}")
+    
+                # Get callsigns for this contest only
+                #logger.debug(f"Fetching callsigns for contest: {selected_contest}")
+                #cursor.execute("""
+                #    WITH LatestScores AS (
+                #        SELECT callsign, MAX(timestamp) as max_ts
+                #        FROM contest_scores
+                #        WHERE contest = ?
+                #        GROUP BY callsign
+                #    )
+                #    SELECT cs.callsign
+                #    FROM contest_scores cs
+                #    JOIN LatestScores ls ON cs.callsign = ls.callsign 
+                #       AND cs.timestamp = ls.max_ts
+                #   WHERE cs.contest = ?
+                #   ORDER BY cs.callsign
+                #""", (selected_contest, selected_contest))
+                #callsigns = [row[0] for row in cursor.fetchall()]
+                #logger.debug(f"Found callsigns: {len(callsigns)}")
                 
                 # Get available DXCC countries for this contest
                 cursor.execute("""
