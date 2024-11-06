@@ -78,7 +78,6 @@ def index():
             
             if selected_contest:
                 # Fetch callsigns with QSO count specifically for the selected contest
-                # Get callsigns with QSO count for this contest only
                 logger.debug(f"Fetching callsigns with QSO count for contest: {selected_contest}")
                 cursor.execute("""
                     WITH LatestScores AS (
