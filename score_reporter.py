@@ -59,9 +59,33 @@ class ScoreReporter:
                 if not station_record:
                     self.logger.error(f"No records found for {callsign} in {contest}")
                     return None
-    
+        
                 station_id, station_power, station_assisted = station_record
-                self.logger.debug(f"Found station - Power: {station_power}, Assisted: {station_assisted}")
+                self.logger.debug(f"Reference station - Power: {station_power}, Assisted: {station_assisted}")
+                
+                # Main query for all stations
+                params = [contest, contest, callsign, callsign]
+                category_clause = ""
+        
+                # Add category filtering if requested
+                if category_filter == 'same':
+                    category_clause = """
+                        AND (cs.callsign = ? 
+                        OR (cs.power = ? AND cs.assisted = ?))
+                    """
+                    params.extend([callsign, station_power, station_assisted])
+                    
+                self.logger.debug(f"Category clause: {category_clause}")
+                self.logger.debug(f"Query parameters: {params}")
+                
+                # Execute query and log results
+                cursor.execute(formatted_query, params)
+                stations = cursor.fetchall()
+                self.logger.debug(f"Query returned {len(stations)} stations")
+                for station in stations:
+                    self.logger.debug(f"Station: {station[1]} - Power: {station[3]}, Assisted: {station[4]}")
+                
+                return stations
     
                 # Main query for all stations
                 query = """
