@@ -37,7 +37,7 @@ class ScoreReporter:
         """
         self.logger.debug(f"Starting get_station_details with filter_type={filter_type}, filter_value={filter_value}, category_filter={category_filter}")
     
-        # Base query structure with category filtering
+        # Base query structure
         query = """
             WITH StationScore AS (
                 SELECT 
@@ -156,7 +156,34 @@ class ScoreReporter:
             if filter_type == 'dxcc':
                 filter_clause = "AND qi.dxcc_country = ?"
                 params.append(filter_value.strip())
-            elif filter_type == 'cq_zone
+            elif filter_type == 'cq_zone':
+                filter_clause = "AND CAST(qi.cq_zone AS TEXT) = ?"
+                params.append(str(filter_value).strip())
+            elif filter_type == 'iaru_zone':
+                filter_clause = "AND CAST(qi.iaru_zone AS TEXT) = ?"
+                params.append(str(filter_value).strip())
+        
+        formatted_query = query.format(filter_clause=filter_clause, category_clause=category_clause)
+        self.logger.debug(f"Executing query with params: {params}")
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(formatted_query, params)
+                stations = cursor.fetchall()
+                
+                if not stations:
+                    self.logger.error(f"No data found for {callsign} in {contest}")
+                    return None
+                
+                self.logger.debug(f"Found {len(stations)} matching stations")
+                return stations
+                    
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error: {e}")
+            self.logger.error(f"Query: {formatted_query}")
+            self.logger.error(f"Parameters: {params}")
+            return None
             
     def get_total_qso_rate(self, station_id, callsign, contest):
         """Calculate total QSO rate over specified time period"""
