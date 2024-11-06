@@ -6,7 +6,8 @@
         function refreshPage() {{
             const params = {{
                 callsign: '{callsign}',
-                contest: '{contest}'
+                contest: '{contest}',
+                category_filter: '{category_filter}'
             }};
             if ('{filter_type}') {{
                 params.filter_type = '{filter_type}';
@@ -47,6 +48,13 @@
 
         // Start the countdown when page loads
         document.addEventListener('DOMContentLoaded', updateCountdown);
+
+        function toggleCategory() {{
+            const newFilter = document.getElementById('categorySwitch').checked ? 'all' : 'same';
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('category_filter', newFilter);
+            window.location.href = currentUrl.toString();
+        }}
     </script>
     <style>
         body {{
@@ -71,6 +79,69 @@
             padding: 10px;
             border-radius: 4px;
             margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }}
+
+        .category-tag {{
+            display: inline-block;
+            padding: 4px 8px;
+            background-color: #e7f3ff;
+            border: 1px solid #cce5ff;
+            border-radius: 3px;
+            color: #0066cc;
+        }}
+        
+        /* Toggle switch styles */
+        .switch {{
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }}
+
+        .switch input {{
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }}
+
+        .slider {{
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }}
+
+        .slider:before {{
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }}
+
+        input:checked + .slider {{
+            background-color: #4CAF50;
+        }}
+
+        input:checked + .slider:before {{
+            transform: translateX(26px);
+        }}
+
+        .switch-label {{
+            font-size: 0.9em;
+            color: #666;
         }}
         
         table {{
@@ -175,7 +246,18 @@
         <span class="filter-info">{filter_display}</span>
     </p>
     <div class="category-info">
-        <strong>Category:</strong> Power: {power} | Assisted: {assisted}
+        <div>
+            <strong>Category:</strong>
+            <span class="category-tag">Power: {power}</span>
+            <span class="category-tag">Assisted: {assisted}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <label class="switch">
+                <input type="checkbox" id="categorySwitch" onchange="toggleCategory()" {category_checked}>
+                <span class="slider"></span>
+            </label>
+            <span class="switch-label">{category_label}</span>
+        </div>
     </div>
     <table>
         <tr>
