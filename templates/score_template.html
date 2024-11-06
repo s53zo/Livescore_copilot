@@ -136,24 +136,28 @@
         Next refresh in <span id="countdown">5:00</span>
     </div>
 
-    <h1>Contest Progress Report - {contest}</h1>
-    <p class="timestamp">
-        Updated: {timestamp}<br>
-        Monitoring: {callsign} 
-        <span class="filter-info">{filter_display}</span>
-    </p>
-    <div class="category-info">
-        <div>
+    <h1>Contest Progress Report - {{ contest }}</h1>
+<p class="timestamp">
+    Updated: {{ timestamp }}<br>
+    Monitoring: {{ callsign }}
+    <span class="filter-info">{{ filter_display }}</span>
+</p>
+<div class="category-info">
+    <div>
+        <strong>Category:</strong>
+        <span class="category-tag">Power: {{ power }}</span>
+        <span class="category-tag">Assisted: {{ assisted }}</span>
+    </div>
             <strong>Category:</strong>
             <span class="category-tag">Power: {power}</span>
             <span class="category-tag">Assisted: {assisted}</span>
         </div>
         <div style="display: flex; align-items: center; gap: 10px;">
             <label class="switch">
-                <input type="checkbox" id="categorySwitch" onchange="toggleCategory()" {category_checked}>
+                <input type="checkbox" id="categorySwitch" onchange="toggleCategory()" {{ category_checked }}>
                 <span class="slider"></span>
             </label>
-            <span class="switch-label">{category_label}</span>
+            <span class="switch-label">{{ category_label }}</span>
         </div>
     </div>
     <table>
