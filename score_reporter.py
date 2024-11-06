@@ -52,7 +52,6 @@ class ScoreReporter:
                     'current' as position,
                     1 as rn
                 FROM contest_scores cs
-                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
                 ORDER BY cs.timestamp DESC
@@ -70,52 +69,9 @@ class ScoreReporter:
                     GROUP BY callsign
                 ) latest ON cs.callsign = latest.callsign 
                     AND cs.timestamp = latest.max_ts
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ?
                 {filter_clause}
-            ),
-            ValidStations AS (
-                SELECT 
-                    ls.id,
-                    ls.callsign, 
-                    ls.score, 
-                    ls.power, 
-                    ls.assisted,
-                    ls.timestamp, 
-                    ls.qsos, 
-                    ls.multipliers
-                FROM LatestScores ls, StationScore ss
-                WHERE 1=1
-                {category_clause}
-                AND ls.callsign != ss.callsign
-            ),
-            NearbyStations AS (
-                SELECT 
-                    vs.id,
-                    vs.callsign, 
-                    vs.score, 
-                    vs.power, 
-                    vs.assisted,
-                    vs.timestamp, 
-                    vs.qsos, 
-                    vs.multipliers,
-                    CASE
-                        WHEN vs.score > (SELECT score FROM StationScore) THEN 'above'
-                        WHEN vs.score < (SELECT score FROM StationScore) THEN 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY 
-                            CASE
-                                WHEN vs.score > (SELECT score FROM StationScore) THEN 'above'
-                                WHEN vs.score < (SELECT score FROM StationScore) THEN 'below'
-                            END
-                        ORDER BY 
-                            CASE
-                                WHEN vs.score > (SELECT score FROM StationScore) THEN score END ASC,
-                            CASE
-                                WHEN vs.score < (SELECT score FROM StationScore) THEN score END DESC
-                    ) as rn
-                FROM ValidStations vs
             )
             SELECT 
                 id,
@@ -131,9 +87,35 @@ class ScoreReporter:
             FROM (
                 SELECT * FROM StationScore
                 UNION ALL
-                SELECT * FROM NearbyStations
-                WHERE (position = 'above' AND rn <= 2)
-                OR (position = 'below' AND rn <= 2)
+                SELECT 
+                    ls.id,
+                    ls.callsign, 
+                    ls.score, 
+                    ls.power, 
+                    ls.assisted,
+                    ls.timestamp, 
+                    ls.qsos, 
+                    ls.multipliers,
+                    CASE
+                        WHEN ls.score > ss.score THEN 'above'
+                        WHEN ls.score < ss.score THEN 'below'
+                    END as position,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY 
+                            CASE
+                                WHEN ls.score > ss.score THEN 'above'
+                                WHEN ls.score < ss.score THEN 'below'
+                            END
+                        ORDER BY 
+                            CASE
+                                WHEN ls.score > ss.score THEN score END ASC,
+                            CASE
+                                WHEN ls.score < ss.score THEN score END DESC
+                    ) as rn
+                FROM LatestScores ls
+                CROSS JOIN StationScore ss
+                WHERE ls.callsign != ss.callsign
+                {category_clause}
             )
             ORDER BY score DESC;
         """
@@ -151,8 +133,6 @@ class ScoreReporter:
         
         # Add location filtering if specified
         if filter_type and filter_value and str(filter_value).strip():
-            self.logger.debug(f"Applying filter: {filter_type}={filter_value}")
-            
             if filter_type == 'dxcc':
                 filter_clause = "AND qi.dxcc_country = ?"
                 params.append(filter_value.strip())
@@ -163,27 +143,15 @@ class ScoreReporter:
                 filter_clause = "AND CAST(qi.iaru_zone AS TEXT) = ?"
                 params.append(str(filter_value).strip())
         
-        formatted_query = query.format(filter_clause=filter_clause, category_clause=category_clause)
-        self.logger.debug(f"Executing query with params: {params}")
+        # Format the query with the appropriate clauses
+        formatted_query = query.format(
+            filter_clause=filter_clause,
+            category_clause=category_clause
+        )
         
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(formatted_query, params)
-                stations = cursor.fetchall()
-                
-                if not stations:
-                    self.logger.error(f"No data found for {callsign} in {contest}")
-                    return None
-                
-                self.logger.debug(f"Found {len(stations)} matching stations")
-                return stations
-                    
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error: {e}")
-            self.logger.error(f"Query: {formatted_query}")
-            self.logger.error(f"Parameters: {params}")
-            return None
+        self.logger.debug(f"Executing query with params: {params}")
+        self.logger.debug(f"Category filter: {category_filter}")
+        self.logger.debug(f"Category clause: {category_clause}")
             
     def get_total_qso_rate(self, station_id, callsign, contest):
         """Calculate total QSO rate over specified time period using current time as reference"""
