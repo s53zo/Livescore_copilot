@@ -1,29 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Contest Progress Report - {contest}</title>
+    <title>Contest Progress Report - {{{{ contest }}}}</title>
     <script>
-        function initializeCategorySwitch() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const categoryFilter = urlParams.get('category_filter');
-            const categorySwitch = document.getElementById('categorySwitch');
-            if (categorySwitch) {
-                categorySwitch.checked = categoryFilter === 'all';
-            }
-        }
-    
-        // Call it when the page loads
-        document.addEventListener('DOMContentLoaded', initializeCategorySwitch);
-        
         function refreshPage() {{
             const params = {{
-                callsign: '{callsign}',
-                contest: '{contest}',
-                category_filter: '{category_filter}'
+                callsign: '{{{ callsign }}}',
+                contest: '{{{ contest }}}',
+                category_filter: '{{{ category_filter }}}'
             }};
-            if ('{filter_type}') {{
-                params.filter_type = '{filter_type}';
-                params.filter_value = '{filter_value}';
+            if ('{{{ filter_type }}}') {{
+                params.filter_type = '{{{ filter_type }}}';
+                params.filter_value = '{{{ filter_value }}}';
             }}
             
             const query = new URLSearchParams(params).toString();
@@ -136,28 +124,24 @@
         Next refresh in <span id="countdown">5:00</span>
     </div>
 
-    <h1>Contest Progress Report - {{ contest }}</h1>
-<p class="timestamp">
-    Updated: {{ timestamp }}<br>
-    Monitoring: {{ callsign }}
-    <span class="filter-info">{{ filter_display }}</span>
-</p>
-<div class="category-info">
-    <div>
-        <strong>Category:</strong>
-        <span class="category-tag">Power: {{ power }}</span>
-        <span class="category-tag">Assisted: {{ assisted }}</span>
-    </div>
+    <h1>Contest Progress Report - {{{{ contest }}}}</h1>
+    <p class="timestamp">
+        Updated: {{{{ timestamp }}}}<br>
+        Monitoring: {{{{ callsign }}}} 
+        <span class="filter-info">{{{{ filter_display }}}}</span>
+    </p>
+    <div class="category-info">
+        <div>
             <strong>Category:</strong>
-            <span class="category-tag">Power: {power}</span>
-            <span class="category-tag">Assisted: {assisted}</span>
+            <span class="category-tag">Power: {{{{ power }}}}</span>
+            <span class="category-tag">Assisted: {{{{ assisted }}}}</span>
         </div>
         <div style="display: flex; align-items: center; gap: 10px;">
             <label class="switch">
-                <input type="checkbox" id="categorySwitch" onchange="toggleCategory()" {category_checked}>
+                <input type="checkbox" id="categorySwitch" onchange="toggleCategory()" {{{{ category_checked }}}}>
                 <span class="slider"></span>
             </label>
-            <span class="switch-label">{category_label}</span>
+            <span class="switch-label">{{{{ category_label }}}}</span>
         </div>
     </div>
     <table>
@@ -174,7 +158,7 @@
             <th>Total<br>QSO/Mults</th>
             <th>Last Update</th>
         </tr>
-        {table_rows}
+        {{{{ table_rows }}}}
     </table>
 
     <div class="footer">
