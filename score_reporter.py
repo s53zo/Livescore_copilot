@@ -64,30 +64,6 @@ class ScoreReporter:
                 self.logger.debug(f"Reference station - Power: {station_power}, Assisted: {station_assisted}")
                 
                 # Main query for all stations
-                params = [contest, contest, callsign, callsign]
-                category_clause = ""
-        
-                # Add category filtering if requested
-                if category_filter == 'same':
-                    category_clause = """
-                        AND (cs.callsign = ? 
-                        OR (cs.power = ? AND cs.assisted = ?))
-                    """
-                    params.extend([callsign, station_power, station_assisted])
-                    
-                self.logger.debug(f"Category clause: {category_clause}")
-                self.logger.debug(f"Query parameters: {params}")
-                
-                # Execute query and log results
-                cursor.execute(formatted_query, params)
-                stations = cursor.fetchall()
-                self.logger.debug(f"Query returned {len(stations)} stations")
-                for station in stations:
-                    self.logger.debug(f"Station: {station[1]} - Power: {station[3]}, Assisted: {station[4]}")
-                
-                return stations
-    
-                # Main query for all stations
                 query = """
                     WITH latest_scores AS (
                         SELECT cs.id, cs.callsign, cs.score, cs.power, cs.assisted,
@@ -121,10 +97,10 @@ class ScoreReporter:
                     FROM latest_scores ls
                     ORDER BY ls.score DESC
                 """
-    
+        
                 params = [contest, contest, callsign, callsign]
                 category_clause = ""
-    
+        
                 # Add category filtering if requested
                 if category_filter == 'same':
                     category_clause = """
@@ -132,30 +108,22 @@ class ScoreReporter:
                         OR (cs.power = ? AND cs.assisted = ?))
                     """
                     params.extend([callsign, station_power, station_assisted])
-    
-                # Format the query with the appropriate clauses
-                formatted_query = query.format(
-                    category_filter=category_clause
-                )
+                    
+                self.logger.debug(f"Category clause: {category_clause}")
+                self.logger.debug(f"Query parameters: {params}")
                 
-                self.logger.debug(f"Executing query with params: {params}")
-                self.logger.debug(f"Category filter: {category_filter}")
-                self.logger.debug(f"Query: {formatted_query}")
+                # Format the query with the category clause
+                formatted_query = query.format(category_filter=category_clause)
                 
+                # Execute query and log results
                 cursor.execute(formatted_query, params)
                 stations = cursor.fetchall()
+                self.logger.debug(f"Query returned {len(stations)} stations")
+                for station in stations:
+                    self.logger.debug(f"Station: {station[1]} - Power: {station[3]}, Assisted: {station[4]}")
                 
-                if not stations:
-                    self.logger.error("Main query returned no results")
-                    return None
-                
-                self.logger.debug(f"Found {len(stations)} stations")
                 return stations
-                    
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error: {e}")
-            self.logger.error(traceback.format_exc())
-            return None
+                
         except Exception as e:
             self.logger.error(f"Unexpected error: {e}")
             self.logger.error(traceback.format_exc())
