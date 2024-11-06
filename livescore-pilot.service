@@ -5,9 +5,16 @@ After=network.target
 [Service]
 User=root
 Group=root
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/livescore"
 WorkingDirectory=/opt/livescore
 ExecStart=/usr/local/bin/gunicorn -c gunicorn_config.py web_interface:app
 Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/opt/livescore/logs/service-output.log
+StandardError=append:/opt/livescore/logs/service-error.log
 
 [Install]
 WantedBy=multi-user.target
