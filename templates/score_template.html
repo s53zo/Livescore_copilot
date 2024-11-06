@@ -4,18 +4,17 @@
     <title>Contest Progress Report - {{{{ contest }}}}</title>
     <script>
         function refreshPage() {{
-            const params = {{
-                callsign: '{{{ callsign }}}',
-                contest: '{{{ contest }}}',
-                category_filter: '{{{ category_filter }}}'
-            }};
-            if ('{{{ filter_type }}}') {{
-                params.filter_type = '{{{ filter_type }}}';
-                params.filter_value = '{{{ filter_value }}}';
+            const params = new URLSearchParams();
+            params.set('callsign', '{{{{ callsign }}}}');
+            params.set('contest', '{{{{ contest }}}}');
+            params.set('category_filter', '{{{{ category_filter }}}}');
+            
+            if ('{{{{ filter_type }}}}') {{
+                params.set('filter_type', '{{{{ filter_type }}}}');
+                params.set('filter_value', '{{{{ filter_value }}}}');
             }}
             
-            const query = new URLSearchParams(params).toString();
-            window.location.href = '/reports/live.html?' + query;
+            window.location.href = '/reports/live.html?' + params.toString();
         }}
         
         setInterval(refreshPage, 300000);
