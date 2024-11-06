@@ -1,12 +1,74 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Livescore Pilot</title>
     <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        select:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .filter-section {
+            border: 1px solid #eee;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .filter-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
         .hidden {
             display: none;
+        }
+        .step {
+            margin-bottom: 25px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        .step h2 {
+            margin-top: 0;
+            color: #4CAF50;
+            font-size: 1.2em;
         }
         .disabled-step {
             opacity: 0.5;
@@ -17,97 +79,113 @@
 <body>
     <h1>Livescore Pilot</h1>
     <p>Online tool to follow your progress on the Contest Livescores.</p>
-
-    <!-- Step 1: Contest Selection -->
-    <div class="step" id="step1">
-        <h2>Step 1: Select Contest</h2>
-        <div class="form-group">
-            <label for="contest">Choose a Contest:</label>
-            <select name="contest" id="contest" required onchange="showStep2()">
-                <option value="">-- Select Contest --</option>
-                {% for contest in contests %}
-                <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
-                    {{ contest.name }} ({{ contest.count }} QSOs)
-                </option>
-                {% endfor %}
-            </select>
+    
+    <form method="POST" id="scoreForm">
+        <div class="step" id="step1">
+            <h2>Step 1: Select Contest</h2>
+            <div class="form-group">
+                <label for="contest">Choose a Contest:</label>
+                <select name="contest" id="contest" required onchange="this.form.submit()">
+                    <option value="">-- Select Contest --</option>
+                    {% for contest in contests %}
+                    <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
+                        {{ contest.name }} ({{ contest.count }} OPs)
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
         </div>
-    </div>
 
-    <!-- Step 2: Callsign Selection -->
-    <div class="step hidden" id="step2">
-        <h2>Step 2: Select Callsign</h2>
-        <div class="form-group">
-            <label for="callsign">Choose a Callsign:</label>
-            <select name="callsign" id="callsign" required onchange="showStep2_5()">
-                <option value="">-- Select Callsign --</option>
-                {% for callsign in callsigns %}
-                <option value="{{ callsign.name }}">
-                    {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
-                </option>
-                {% endfor %}
-            </select>
+        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step2">
+            <h2>Step 2: Select Callsign</h2>
+            <div class="form-group">
+                <label for="callsign">Choose a Callsign:</label>
+                <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required>
+                    <option value="">-- Select Callsign --</option>
+                    {% for callsign in callsigns %}
+                    <option value="{{ callsign.name }}">
+                        {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
         </div>
-    </div>
 
-    <!-- Step 2.5: Category Selection -->
-    <div class="step hidden" id="step2_5">
-        <h2>Step 2.5: Category Selection</h2>
-        <div class="form-group">
-            <label for="category_scope">Choose Report Scope:</label>
-            <select name="category_scope" id="category_scope">
-                <option value="all">All Categories</option>
-                {% if selected_category %}
-                <option value="selected">Selected Callsign's Category Only (Category: {{ selected_category }})</option>
-                {% endif %}
-            </select>
+        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step3">
+            <h2>Step 3: Apply Filters (Optional)</h2>
+            <div class="filter-section">
+                <div class="form-group">
+                    <label for="filter_type">Filter By:</label>
+                    <select name="filter_type" id="filter_type" {% if not selected_contest %}disabled{% endif %}>
+                        <option value="">-- No Filter --</option>
+                        <option value="dxcc">DXCC Country</option>
+                        <option value="cq_zone">CQ Zone</option>
+                        <option value="iaru_zone">IARU Zone</option>
+                    </select>
+                </div>
+
+                <!-- Filter value dropdowns -->
+                <div class="form-group hidden" id="dxcc_filter">
+                    <label for="dxcc_value">Select Country:</label>
+                    <select name="filter_value" id="dxcc_value">
+                        <option value="">-- Select Country --</option>
+                        {% for country in countries %}
+                        <option value="{{ country }}">{{ country }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group hidden" id="cq_zone_filter">
+                    <label for="cq_zone_value">Select CQ Zone:</label>
+                    <select name="filter_value" id="cq_zone_value">
+                        <option value="">-- Select CQ Zone --</option>
+                        {% for zone in cq_zones %}
+                        <option value="{{ zone }}">{{ zone }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group hidden" id="iaru_zone_filter">
+                    <label for="iaru_zone_value">Select IARU Zone:</label>
+                    <select name="filter_value" id="iaru_zone_value">
+                        <option value="">-- Select IARU Zone --</option>
+                        {% for zone in iaru_zones %}
+                        <option value="{{ zone }}">{{ zone }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
         </div>
-    </div>
-
-    <!-- Step 3: Report Options (Placeholder for future steps) -->
-    <div class="step hidden" id="step3">
-        <h2>Step 3: Additional Report Options</h2>
-        <p>This section can include additional report filters and options.</p>
-    </div>
+        
+        <button type="submit" id="generateButton" {% if not selected_contest %}disabled{% endif %}>Generate Report</button>
+    </form>
+    
+    <br><br>Code by Simon, S53ZO, data from competitors via Contest score distribution network
 
     <script>
-        // Show Step 2 when a contest is selected
-        function showStep2() {
-            const contestDropdown = document.getElementById('contest');
-            const step2 = document.getElementById('step2');
-            const step2_5 = document.getElementById('step2_5');
-            const step3 = document.getElementById('step3');
-
-            // Show Step 2 only if a contest is selected
-            if (contestDropdown.value) {
-                step2.classList.remove('hidden');
-            } else {
-                step2.classList.add('hidden');
-                step2_5.classList.add('hidden'); // Hide subsequent steps if contest is deselected
-                step3.classList.add('hidden');
+        document.getElementById('contest').addEventListener('change', function() {
+            if (this.value) {
+                // Submit form to update callsign list
+                this.form.submit();
             }
-        }
+        });
 
-        // Show Step 2.5 when a callsign is selected
-        function showStep2_5() {
-            const callsignDropdown = document.getElementById('callsign');
-            const step2_5 = document.getElementById('step2_5');
-            const step3 = document.getElementById('step3');
-
-            // Show Step 2.5 only if a callsign is selected
-            if (callsignDropdown.value) {
-                step2_5.classList.remove('hidden');
-                step3.classList.remove('hidden'); // Optionally show Step 3 if needed
-            } else {
-                step2_5.classList.add('hidden');
-                step3.classList.add('hidden'); // Hide subsequent steps if callsign is deselected
+        document.getElementById('filter_type').addEventListener('change', function() {
+            // Hide all filter value selects and clear their values
+            document.querySelectorAll('#dxcc_filter, #cq_zone_filter, #iaru_zone_filter').forEach(el => {
+                el.classList.add('hidden');
+                el.querySelector('select').value = '';
+            });
+            
+            // Show only the selected filter's value dropdown
+            if (this.value) {
+                document.getElementById(this.value + '_filter').classList.remove('hidden');
             }
-        }
+        });
 
-        // Initialize visibility based on existing selections on page load
-        document.addEventListener("DOMContentLoaded", function() {
-            showStep2();
-            showStep2_5();
+        // Enable/disable generate button based on required selections
+        document.getElementById('callsign').addEventListener('change', function() {
+            document.getElementById('generateButton').disabled = !this.value;
         });
     </script>
 </body>
