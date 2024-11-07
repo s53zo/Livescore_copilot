@@ -48,35 +48,46 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-@app.route('/api/contests')
-def get_contests():
+@app.route('/api/callsigns')
+def get_callsigns():
+    contest = request.args.get('contest')
+    if not contest:
+        return jsonify({"error": "Contest parameter required"}), 400
+    
+    logger.debug(f"Fetching callsigns for contest: {contest}")
+    
     try:
         with get_db() as db:
             cursor = db.cursor()
+            
+            # Updated query to get latest data for each callsign in the contest
             cursor.execute("""
                 WITH latest_scores AS (
-                    SELECT cs.id, cs.callsign, cs.contest
+                    SELECT cs.id, cs.callsign, cs.qsos, cs.timestamp
                     FROM contest_scores cs
                     INNER JOIN (
-                        SELECT callsign, contest, MAX(timestamp) as max_ts
+                        SELECT callsign, MAX(timestamp) as max_ts
                         FROM contest_scores
-                        GROUP BY callsign, contest
+                        WHERE contest = ?
+                        GROUP BY callsign
                     ) latest ON cs.callsign = latest.callsign 
-                        AND cs.contest = latest.contest
                         AND cs.timestamp = latest.max_ts
+                    WHERE cs.contest = ?
                 )
                 SELECT 
-                    contest, 
-                    COUNT(DISTINCT callsign) as active_stations
-                FROM latest_scores
-                GROUP BY contest
-                ORDER BY contest
-            """)
-            contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Fetched contests: {contests}")
-            return jsonify(contests)
+                    ls.callsign,
+                    ls.qsos as qso_count
+                FROM latest_scores ls
+                ORDER BY ls.callsign
+            """, (contest, contest))
+            
+            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+            logger.debug(f"Found {len(callsigns)} callsigns for {contest}")
+            logger.debug(f"Callsigns data: {callsigns}")
+            return jsonify(callsigns)
+            
     except Exception as e:
-        logger.error(f"Error getting contests: {str(e)}")
+        logger.error(f"Error getting callsigns: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
