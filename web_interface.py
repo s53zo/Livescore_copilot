@@ -115,14 +115,17 @@ def get_filters():
     contest = request.args.get('contest')
     callsign = request.args.get('callsign')
     
+    logger.debug(f"Filters requested for contest={contest}, callsign={callsign}")
+    
     if not (contest and callsign):
+        logger.warning("Missing required parameters")
         return jsonify({"error": "Contest and callsign parameters required"}), 400
     
     try:
         with get_db() as db:
             cursor = db.cursor()
             cursor.execute("""
-                SELECT 
+                SELECT DISTINCT
                     qi.dxcc_country,
                     qi.cq_zone,
                     qi.iaru_zone,
@@ -136,7 +139,10 @@ def get_filters():
             """, (contest, callsign))
             
             row = cursor.fetchone()
+            logger.debug(f"Database returned row: {row}")
+            
             if not row:
+                logger.warning("No QTH info found")
                 return jsonify([])
             
             filters = []
@@ -144,13 +150,17 @@ def get_filters():
             
             for field, value in zip(field_names, row):
                 if value:  # Only add non-empty values
-                    filters.append({
+                    filter_entry = {
                         "type": field,
-                        "value": value
-                    })
+                        "value": value,
+                        "label": f"{field.replace('_', ' ').title()}: {value}"
+                    }
+                    filters.append(filter_entry)
+                    logger.debug(f"Added filter: {filter_entry}")
             
-            logger.debug(f"Fetched filters for {callsign} in {contest}: {filters}")
+            logger.info(f"Returning {len(filters)} filters")
             return jsonify(filters)
+            
     except Exception as e:
         logger.error(f"Error getting filters: {str(e)}")
         logger.error(traceback.format_exc())
