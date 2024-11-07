@@ -69,35 +69,50 @@
     <div id="root"></div>
 
     <script type="text/javascript">
+        // Get initial data from template
+        const initialData = {
+            contests: {{ contests|tojson|safe }},
+            selectedContest: {{ selected_contest|tojson|safe if selected_contest else 'null' }},
+            selectedCallsign: {{ selected_callsign|tojson|safe if selected_callsign else 'null' }},
+            initialCallsigns: {{ callsigns|tojson|safe }}
+        };
+
         const FilterSelectionForm = () => {
-            const [contests, setContests] = React.useState([]);
-            const [selectedContest, setSelectedContest] = React.useState('');
-            const [callsigns, setCallsigns] = React.useState([]);
-            const [selectedCallsign, setSelectedCallsign] = React.useState('');
+            const [contests, setContests] = React.useState(initialData.contests);
+            const [selectedContest, setSelectedContest] = React.useState(initialData.selectedContest || '');
+            const [callsigns, setCallsigns] = React.useState(initialData.initialCallsigns || []);
+            const [selectedCallsign, setSelectedCallsign] = React.useState(initialData.selectedCallsign || '');
             const [filterButtons, setFilterButtons] = React.useState([]);
             
             React.useEffect(() => {
-                // Load contests on component mount
-                fetch('/api/contests')
-                    .then(res => res.json())
-                    .then(data => setContests(data));
+                // Only fetch if we don't have initial data
+                if (contests.length === 0) {
+                    fetch('/api/contests')
+                        .then(res => res.json())
+                        .then(data => setContests(data))
+                        .catch(err => console.error('Error fetching contests:', err));
+                }
             }, []);
             
             React.useEffect(() => {
                 if (selectedContest) {
-                    // Load callsigns when contest is selected
                     fetch(`/api/callsigns?contest=${selectedContest}`)
                         .then(res => res.json())
-                        .then(data => setCallsigns(data));
+                        .then(data => setCallsigns(data))
+                        .catch(err => console.error('Error fetching callsigns:', err));
+                } else {
+                    setCallsigns([]);
                 }
             }, [selectedContest]);
             
             React.useEffect(() => {
                 if (selectedCallsign && selectedContest) {
-                    // Load available filters when both contest and callsign are selected
                     fetch(`/api/filters?contest=${selectedContest}&callsign=${selectedCallsign}`)
                         .then(res => res.json())
-                        .then(data => setFilterButtons(data));
+                        .then(data => setFilterButtons(data))
+                        .catch(err => console.error('Error fetching filters:', err));
+                } else {
+                    setFilterButtons([]);
                 }
             }, [selectedContest, selectedCallsign]);
             
@@ -156,13 +171,13 @@
                             React.createElement('button', {
                                 onClick: () => handleGenerate('none', 'none'),
                                 className: 'p-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors'
-                            }, 'Generate (All Stations)',),
+                            }, 'Generate (All Stations)'),
                             filterButtons.map((filter, index) =>
                                 React.createElement('button', {
                                     key: index,
                                     onClick: () => handleGenerate(filter.type, filter.value),
                                     className: 'p-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors'
-                                }, `Generate (${filter.label})`)
+                                }, `Generate (${filter.type} ${filter.value})`)
                             )
                         )
                     )
