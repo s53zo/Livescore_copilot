@@ -81,7 +81,9 @@
                     <h1 className="text-2xl font-bold mb-6">Livescore Pilot</h1>
                     <p className="mb-6">Online tool to follow your progress on the Contest Livescores.</p>
 
-                    {error && <div style={{ color: 'red', marginBottom: '20px' }}>Error: {error}</div>}
+                    {% if error %}
+                        <div style="color: red; margin-bottom: 20px;">Error: {{ error }}</div>
+                    {% endif %}
 
                     <div className="space-y-6">
                         {/* Step 1: Contest Selection */}
