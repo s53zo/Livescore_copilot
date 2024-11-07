@@ -2,6 +2,9 @@
 <html>
 <head>
     <title>Livescore Pilot</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -63,55 +66,119 @@
     </style>
 </head>
 <body>
-    <h1>Livescore Pilot</h1>
-    <p>Online tool to follow your progress on the Contest Livescores.</p>
-    
-    <form method="POST" id="scoreForm">
-        <div class="step" id="step1">
-            <h2>Step 1: Select Contest</h2>
-            <div class="form-group">
-                <label for="contest">Choose a Contest:</label>
-                <select name="contest" id="contest" required onchange="this.form.submit()">
-                    <option value="">-- Select Contest --</option>
-                    {% for contest in contests %}
-                    <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
-                        {{ contest.name }} ({{ contest.count }} OPs)
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
+    <div id="root"></div>
 
-        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step2">
-            <h2>Step 2: Select Callsign</h2>
-            <div class="form-group">
-                <label for="callsign">Choose a Callsign:</label>
-                <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required onchange="handleCallsignChange()">
-                    <option value="">-- Select Callsign --</option>
-                    {% for callsign in callsigns %}
-                    <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
-                        {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
-        
-        <button type="submit" id="generateButton" {% if not selected_contest %}disabled{% endif %}>Generate Report</button>
-    </form>
-    
-    <br><br>Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
+    <script type="text/javascript">
+        const FilterSelectionForm = () => {
+            const [contests, setContests] = React.useState([]);
+            const [selectedContest, setSelectedContest] = React.useState('');
+            const [callsigns, setCallsigns] = React.useState([]);
+            const [selectedCallsign, setSelectedCallsign] = React.useState('');
+            const [filterButtons, setFilterButtons] = React.useState([]);
+            
+            React.useEffect(() => {
+                // Load contests on component mount
+                fetch('/api/contests')
+                    .then(res => res.json())
+                    .then(data => setContests(data));
+            }, []);
+            
+            React.useEffect(() => {
+                if (selectedContest) {
+                    // Load callsigns when contest is selected
+                    fetch(`/api/callsigns?contest=${selectedContest}`)
+                        .then(res => res.json())
+                        .then(data => setCallsigns(data));
+                }
+            }, [selectedContest]);
+            
+            React.useEffect(() => {
+                if (selectedCallsign && selectedContest) {
+                    // Load available filters when both contest and callsign are selected
+                    fetch(`/api/filters?contest=${selectedContest}&callsign=${selectedCallsign}`)
+                        .then(res => res.json())
+                        .then(data => setFilterButtons(data));
+                }
+            }, [selectedContest, selectedCallsign]);
+            
+            const handleGenerate = (filterType, filterValue) => {
+                window.location.href = `/reports/live.html?contest=${selectedContest}&callsign=${selectedCallsign}&filter_type=${filterType}&filter_value=${filterValue}`;
+            };
 
-    <script>
-        function handleCallsignChange() {
-            const callsignSelect = document.getElementById('callsign');
-            const generateButton = document.getElementById('generateButton');
-            generateButton.disabled = !callsignSelect.value;
-        }
+            return React.createElement('div', { className: 'max-w-2xl mx-auto p-6' },
+                React.createElement('h1', { className: 'text-2xl font-bold mb-6' }, 'Livescore Pilot'),
+                React.createElement('p', { className: 'mb-6' }, 'Online tool to follow your progress on the Contest Livescores.'),
+                
+                React.createElement('div', { className: 'space-y-6' },
+                    // Step 1: Contest Selection
+                    React.createElement('div', { className: 'p-6 border rounded-lg bg-white shadow-sm' },
+                        React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 1: Select Contest'),
+                        React.createElement('select', {
+                            className: 'w-full p-2 border rounded',
+                            value: selectedContest,
+                            onChange: (e) => setSelectedContest(e.target.value)
+                        },
+                            React.createElement('option', { value: '' }, '-- Select Contest --'),
+                            contests.map(contest =>
+                                React.createElement('option', {
+                                    key: contest.name,
+                                    value: contest.name
+                                }, `${contest.name} (${contest.count} OPs)`)
+                            )
+                        )
+                    ),
 
-        document.addEventListener('DOMContentLoaded', function() {
-            handleCallsignChange();
-        });
+                    // Step 2: Callsign Selection
+                    React.createElement('div', {
+                        className: `p-6 border rounded-lg bg-white shadow-sm ${!selectedContest ? 'opacity-50' : ''}`
+                    },
+                        React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 2: Select Callsign'),
+                        React.createElement('select', {
+                            className: 'w-full p-2 border rounded',
+                            value: selectedCallsign,
+                            onChange: (e) => setSelectedCallsign(e.target.value),
+                            disabled: !selectedContest
+                        },
+                            React.createElement('option', { value: '' }, '-- Select Callsign --'),
+                            callsigns.map(call =>
+                                React.createElement('option', {
+                                    key: call.name,
+                                    value: call.name
+                                }, `${call.name} (${call.qso_count} QSOs)`)
+                            )
+                        )
+                    ),
+
+                    // Step 3: Generate Buttons
+                    filterButtons.length > 0 && React.createElement('div', { className: 'p-6 border rounded-lg bg-white shadow-sm' },
+                        React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 3: Generate Report'),
+                        React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
+                            React.createElement('button', {
+                                onClick: () => handleGenerate('none', 'none'),
+                                className: 'p-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors'
+                            }, 'Generate (All Stations)',),
+                            filterButtons.map((filter, index) =>
+                                React.createElement('button', {
+                                    key: index,
+                                    onClick: () => handleGenerate(filter.type, filter.value),
+                                    className: 'p-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors'
+                                }, `Generate (${filter.label})`)
+                            )
+                        )
+                    )
+                ),
+                
+                React.createElement('p', { className: 'mt-8 text-sm text-gray-600 text-center' },
+                    'Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network'
+                )
+            );
+        };
+
+        // Mount the React component
+        ReactDOM.render(
+            React.createElement(FilterSelectionForm),
+            document.getElementById('root')
+        );
     </script>
 </body>
 </html>
