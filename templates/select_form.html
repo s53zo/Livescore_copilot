@@ -2,142 +2,243 @@
 <html>
 <head>
     <title>Livescore Pilot</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        select:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .filter-section {
+            border: 1px solid #eee;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .filter-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .hidden {
+            display: none;
+        }
+        .step {
+            margin-bottom: 25px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        .step h2 {
+            margin-top: 0;
+            color: #4CAF50;
+            font-size: 1.2em;
+        }
+        .disabled-step {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .category-info {
+            margin-top: 15px;
+            padding: 12px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+        .category-tag {
+            display: inline-block;
+            padding: 4px 8px;
+            background-color: #e7f3ff;
+            border: 1px solid #cce5ff;
+            border-radius: 3px;
+            margin: 0 5px;
+            font-size: 0.9em;
+            color: #0066cc;
+        }
+        .radio-group {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid #e9ecef;
+        }
+        .radio-group label {
+            display: inline-block;
+            margin-right: 20px;
+            font-weight: normal;
+            cursor: pointer;
+        }
+        .radio-group input[type="radio"] {
+            margin-right: 5px;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
-    <div id="root">Loading...</div>
+    <h1>Livescore Pilot</h1>
+    <p>Online tool to follow your progress on the Contest Livescores.</p>
+    
+    <form method="POST" id="scoreForm">
+        <div class="step" id="step1">
+            <h2>Step 1: Select Contest</h2>
+            <div class="form-group">
+                <label for="contest">Choose a Contest:</label>
+                <select name="contest" id="contest" required onchange="this.form.submit()">
+                    <option value="">-- Select Contest --</option>
+                    {% for contest in contests %}
+                    <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
+                        {{ contest.name }} ({{ contest.count }} OPs)
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
 
-    <script type="text/javascript">
-        const initialData = {
-            contests: {{ contests | tojson | safe }},
-            selectedContest: {{ selected_contest | tojson | safe if selected_contest else 'null' }},
-            selectedCallsign: {{ selected_callsign | tojson | safe if selected_callsign else 'null' }},
-            initialCallsigns: {{ callsigns | tojson | safe }}
-        };
-
-        const FilterSelectionForm = () => {
-            const [contests, setContests] = React.useState(initialData.contests || []);
-            const [selectedContest, setSelectedContest] = React.useState(initialData.selectedContest || '');
-            const [callsigns, setCallsigns] = React.useState(initialData.initialCallsigns || []);
-            const [selectedCallsign, setSelectedCallsign] = React.useState(initialData.selectedCallsign || '');
-            const [loading, setLoading] = React.useState(false);
-            const [error, setError] = React.useState(null);
-
-            React.useEffect(() => {
-                if (selectedContest) {
-                    console.log('Fetching callsigns for contest:', selectedContest);
-                    setLoading(true);
-                    setError(null);
-
-                    fetch(`/api/contest/callsigns?contest=${encodeURIComponent(selectedContest)}`)
-                        .then(res => {
-                            console.log('Callsigns response status:', res.status);
-                            if (res.status === 404) {
-                                throw new Error('API endpoint not found (404). Please check the server configuration.');
-                            }
-                            if (!res.ok) {
-                                throw new Error(`HTTP error! status: ${res.status}`);
-                            }
-                            return res.json();
-                        })
-                        .then(data => {
-                            console.log('Received callsigns data:', data);
-                            if (Array.isArray(data)) {
-                                setCallsigns(data);
-                            } else {
-                                console.error('Invalid callsigns data format:', data);
-                                setError('Invalid data format received from server');
-                            }
-                        })
-                        .catch(err => {
-                            console.error('Error fetching callsigns:', err);
-                            setError(err.message);
-                        })
-                        .finally(() => {
-                            setLoading(false);
-                        });
-                } else {
-                    setCallsigns([]);
-                    setSelectedCallsign('');
-                }
-            }, [selectedContest]);
-
-            const handleContestChange = (e) => {
-                const newContest = e.target.value;
-                console.log('Contest selected:', newContest);
-                setSelectedContest(newContest);
-                setSelectedCallsign('');
-                setError(null);
-            };
-
-            const handleCallsignChange = (e) => {
-                console.log('Callsign selected:', e.target.value);
-                setSelectedCallsign(e.target.value);
-            };
-
-            return (
-                <div className="max-w-2xl mx-auto p-6">
-                    <h1 className="text-2xl font-bold mb-6">Livescore Pilot</h1>
-                    <p className="mb-6">Online tool to follow your progress on the Contest Livescores.</p>
-
-                    {% if error %}
-                        <div style="color: red; margin-bottom: 20px;">Error: {{ error }}</div>
-                    {% endif %}
-
-                    <div className="space-y-6">
-                        {/* Step 1: Contest Selection */}
-                        <div className="p-6 border rounded-lg bg-white shadow-sm">
-                            <h2 className="text-lg font-semibold text-green-700 mb-4">Step 1: Select Contest</h2>
-                            <select
-                                className="w-full p-2 border rounded"
-                                value={selectedContest}
-                                onChange={handleContestChange}
-                            >
-                                <option value="">-- Select Contest --</option>
-                                {contests.map(contest => (
-                                    <option key={contest.name} value={contest.name}>
-                                        {contest.name} ({contest.count} OPs)
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Step 2: Callsign Selection */}
-                        <div className={`p-6 border rounded-lg bg-white shadow-sm ${!selectedContest ? 'opacity-50' : ''}`}>
-                            <h2 className="text-lg font-semibold text-green-700 mb-4">Step 2: Select Callsign</h2>
-                            {loading ? (
-                                <p className="text-gray-600">Loading callsigns...</p>
-                            ) : error ? (
-                                <p className="text-red-600">{error}</p>
-                            ) : (
-                                <select
-                                    className="w-full p-2 border rounded"
-                                    value={selectedCallsign}
-                                    onChange={handleCallsignChange}
-                                    disabled={!selectedContest || loading}
-                                >
-                                    <option value="">-- Select Callsign --</option>
-                                    {callsigns.map(call => (
-                                        <option key={call.name} value={call.name}>
-                                            {call.name} ({call.qso_count} QSOs)
-                                        </option>
-                                    ))}
-                                </select>
-                            )}
-                        </div>
-
-                        {/* Display footer */}
-                        <p className="mt-8 text-sm text-gray-600 text-center">
-                            Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
-                        </p>
+        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step2">
+            <h2>Step 2: Select Callsign</h2>
+            <div class="form-group">
+                <label for="callsign">Choose a Callsign:</label>
+                <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required onchange="handleCallsignChange()">
+                    <option value="">-- Select Callsign --</option>
+                    {% for callsign in callsigns %}
+                    <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
+                        {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
+                    </option>
+                    {% endfor %}
+                </select>
+                
+                {% if station_category %}
+                <div class="category-info" id="categoryInfo">
+                    <strong>Station Category:</strong>
+                    <span class="category-tag">Power: {{ station_category[0] }}</span>
+                    <span class="category-tag">Assisted: {{ station_category[1] }}</span>
+                    
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="category_filter" value="same" {% if category_filter != 'all' %}checked{% endif %}>
+                            Show only stations in this category
+                        </label>
+                        <label>
+                            <input type="radio" name="category_filter" value="all" {% if category_filter == 'all' %}checked{% endif %}>
+                            Show all categories
+                        </label>
                     </div>
                 </div>
-            );
-        };
+                {% endif %}
+            </div>
+        </div>
 
-        // Mount the React component
-        ReactDOM.render(<FilterSelectionForm />, document.getElementById('root'));
+        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step3">
+            <h2>Step 3: Apply Filters (Optional)</h2>
+            <div class="filter-section">
+                <div class="form-group">
+                    <label for="filter_type">Filter By:</label>
+                    <select name="filter_type" id="filter_type" {% if not selected_contest %}disabled{% endif %}>
+                        <option value="">-- No Filter --</option>
+                        <option value="dxcc">DXCC Country</option>
+                        <option value="cq_zone">CQ Zone</option>
+                        <option value="iaru_zone">IARU Zone</option>
+                    </select>
+                </div>
+
+                <!-- Filter value dropdowns -->
+                <div class="form-group hidden" id="dxcc_filter">
+                    <label for="dxcc_value">Select Country:</label>
+                    <select name="filter_value" id="dxcc_value">
+                        <option value="">-- Select Country --</option>
+                        {% for country in countries %}
+                        <option value="{{ country }}">{{ country }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group hidden" id="cq_zone_filter">
+                    <label for="cq_zone_value">Select CQ Zone:</label>
+                    <select name="filter_value" id="cq_zone_value">
+                        <option value="">-- Select CQ Zone --</option>
+                        {% for zone in cq_zones %}
+                        <option value="{{ zone }}">{{ zone }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group hidden" id="iaru_zone_filter">
+                    <label for="iaru_zone_value">Select IARU Zone:</label>
+                    <select name="filter_value" id="iaru_zone_value">
+                        <option value="">-- Select IARU Zone --</option>
+                        {% for zone in iaru_zones %}
+                        <option value="{{ zone }}">{{ zone }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <button type="submit" id="generateButton" {% if not selected_contest %}disabled{% endif %}>Generate Report</button>
+    </form>
+    
+    <br><br>Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
+
+    <script>
+        document.getElementById('filter_type').addEventListener('change', function() {
+            // Hide all filter value selects and clear their values
+            document.querySelectorAll('#dxcc_filter, #cq_zone_filter, #iaru_zone_filter').forEach(el => {
+                el.classList.add('hidden');
+                el.querySelector('select').value = '';
+            });
+            
+            // Show only the selected filter's value dropdown
+            if (this.value) {
+                document.getElementById(this.value + '_filter').classList.remove('hidden');
+            }
+        });
+
+        function handleCallsignChange() {
+            const callsignSelect = document.getElementById('callsign');
+            const generateButton = document.getElementById('generateButton');
+            
+            // Enable/disable generate button based on selection
+            generateButton.disabled = !callsignSelect.value;
+        }
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', function() {
+            handleCallsignChange();
+        });
     </script>
 </body>
 </html>
