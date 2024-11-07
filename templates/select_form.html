@@ -103,9 +103,13 @@
                     setCallsigns([]);
                     setSelectedCallsign('');
 
+                    // Update callsign fetch request with enhanced error handling
                     fetch(`/api/contest/callsigns?contest=${encodeURIComponent(selectedContest)}`)
                         .then(res => {
                             console.log('Callsigns response status:', res.status);
+                            if (res.status === 404) {
+                                throw new Error('API endpoint not found (404). Please check the server configuration.');
+                            }
                             if (!res.ok) {
                                 throw new Error(`HTTP error! status: ${res.status}`);
                             }
@@ -122,7 +126,7 @@
                         })
                         .catch(err => {
                             console.error('Error fetching callsigns:', err);
-                            setError(err.message);
+                            setError(err.message); // Update the error state to show the specific error message
                         })
                         .finally(() => {
                             setCallsignsLoading(false);
