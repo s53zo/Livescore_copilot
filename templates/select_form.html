@@ -66,9 +66,11 @@
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">Loading...</div>
 
     <script type="text/javascript">
+        console.log('Starting script execution');
+        
         // Get initial data from template
         const initialData = {
             contests: {{ contests|tojson|safe }},
@@ -76,17 +78,39 @@
             selectedCallsign: {{ selected_callsign|tojson|safe if selected_callsign else 'null' }},
             initialCallsigns: {{ callsigns|tojson|safe }}
         };
-
+        
         console.log('Initial data:', initialData);
 
         const FilterSelectionForm = () => {
-            const [contests, setContests] = React.useState(initialData.contests);
+            const [contests, setContests] = React.useState(initialData.contests || []);
             const [selectedContest, setSelectedContest] = React.useState(initialData.selectedContest || '');
             const [callsigns, setCallsigns] = React.useState(initialData.initialCallsigns || []);
             const [selectedCallsign, setSelectedCallsign] = React.useState(initialData.selectedCallsign || '');
             const [filterButtons, setFilterButtons] = React.useState([]);
             const [loading, setLoading] = React.useState(false);
             const [error, setError] = React.useState(null);
+            
+            React.useEffect(() => {
+                if (selectedContest) {
+                    console.log('Fetching callsigns for contest:', selectedContest);
+                    fetch(`/api/callsigns?contest=${encodeURIComponent(selectedContest)}`)
+                        .then(res => {
+                            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                            return res.json();
+                        })
+                        .then(data => {
+                            console.log('Received callsigns:', data);
+                            setCallsigns(data);
+                        })
+                        .catch(err => {
+                            console.error('Error fetching callsigns:', err);
+                            setError(err.message);
+                        });
+                } else {
+                    setCallsigns([]);
+                    setSelectedCallsign('');
+                }
+            }, [selectedContest]);
             
             React.useEffect(() => {
                 if (selectedContest && selectedCallsign) {
@@ -113,6 +137,18 @@
                 }
             }, [selectedContest, selectedCallsign]);
             
+            const handleContestChange = (e) => {
+                console.log('Contest selected:', e.target.value);
+                setSelectedContest(e.target.value);
+                setSelectedCallsign('');
+                setFilterButtons([]);
+            };
+            
+            const handleCallsignChange = (e) => {
+                console.log('Callsign selected:', e.target.value);
+                setSelectedCallsign(e.target.value);
+            };
+            
             const handleGenerate = (filterType, filterValue) => {
                 console.log(`Generating report with filter: ${filterType}=${filterValue}`);
                 window.location.href = `/reports/live.html?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}&filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`;
@@ -129,11 +165,7 @@
                         React.createElement('select', {
                             className: 'w-full p-2 border rounded',
                             value: selectedContest,
-                            onChange: (e) => {
-                                console.log('Contest selected:', e.target.value);
-                                setSelectedContest(e.target.value);
-                                setSelectedCallsign('');
-                            }
+                            onChange: handleContestChange
                         },
                             React.createElement('option', { value: '' }, '-- Select Contest --'),
                             contests.map(contest =>
@@ -153,10 +185,7 @@
                         React.createElement('select', {
                             className: 'w-full p-2 border rounded',
                             value: selectedCallsign,
-                            onChange: (e) => {
-                                console.log('Callsign selected:', e.target.value);
-                                setSelectedCallsign(e.target.value);
-                            },
+                            onChange: handleCallsignChange,
                             disabled: !selectedContest
                         },
                             React.createElement('option', { value: '' }, '-- Select Callsign --'),
@@ -186,14 +215,9 @@
                                             key: index,
                                             onClick: () => handleGenerate(filter.type, filter.value),
                                             className: 'p-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors'
-                                        }, `Generate (${filter.label})`)
+                                        }, `Generate (${filter.type} ${filter.value})`)
                                     )
                                 )
-                    ),
-
-                    // Debug Info (only in development)
-                    process.env.NODE_ENV !== 'production' && React.createElement('pre', { className: 'mt-4 p-4 bg-gray-100 rounded text-sm' },
-                        JSON.stringify({ selectedContest, selectedCallsign, filterButtons, loading, error }, null, 2)
                     )
                 ),
                 
@@ -204,10 +228,16 @@
         };
 
         // Mount the React component
-        ReactDOM.render(
-            React.createElement(FilterSelectionForm),
-            document.getElementById('root')
-        );
+        try {
+            console.log('Mounting React component');
+            ReactDOM.render(
+                React.createElement(FilterSelectionForm),
+                document.getElementById('root')
+            );
+        } catch (err) {
+            console.error('Error mounting React component:', err);
+            document.getElementById('root').innerHTML = `Error: ${err.message}`;
+        }
     </script>
 </body>
 </html>
