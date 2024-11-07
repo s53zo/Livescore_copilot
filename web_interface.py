@@ -144,33 +144,24 @@ def index():
 @app.route('/reports/live.html')
 def live_report():
     try:
-        # Get parameters from query string
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type')
-        filter_value = request.args.get('filter_value')
-        category_filter = request.args.get('category_filter', 'same')  # Default to 'same'
+        filter_type = request.args.get('filter_type', 'none')
+        filter_value = request.args.get('filter_value', 'none')
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}, "
-                   f"category_filter={category_filter}")
+        logger.info(f"Generating report: callsign={callsign}, contest={contest}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
 
-        reporter = ScoreReporter(Config.DB_PATH)
-        stations = reporter.get_station_details(callsign, contest, 
-                                             filter_type=filter_type,
-                                             filter_value=filter_value,
-                                             category_filter=category_filter)
+        stations = get_filtered_stations(contest, callsign, filter_type, filter_value)
 
         if stations:
-            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR,
-                                          filter_type=filter_type,
-                                          filter_value=filter_value,
-                                          category_filter=category_filter)
+            reporter = ScoreReporter(Config.DB_PATH)
+            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+            
             if success:
-                # We need to generate a new report each time
                 response = send_from_directory(Config.OUTPUT_DIR, 'live.html')
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
                 return response
