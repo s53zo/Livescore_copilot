@@ -274,17 +274,18 @@ class ScoreReporter:
             return {}
     
     def get_station_details(self, callsign, contest):
-        """Get station details and competitors"""
+        """Get station details and nearby competitors (2 above and 2 below)"""
         self.logger.debug(f"get_station_details called with: callsign={callsign}, contest={contest}")
     
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Main query for all stations
+                # Main query using window functions to get nearby competitors
                 query = """
                     WITH station_scores AS (
-                        SELECT cs.*
+                        SELECT cs.*,
+                               ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rank
                         FROM contest_scores cs
                         INNER JOIN (
                             SELECT callsign, MAX(timestamp) as max_ts
@@ -294,6 +295,11 @@ class ScoreReporter:
                         ) latest ON cs.callsign = latest.callsign 
                             AND cs.timestamp = latest.max_ts
                         WHERE cs.contest = ?
+                    ),
+                    selected_station AS (
+                        SELECT rank 
+                        FROM station_scores 
+                        WHERE callsign = ?
                     )
                     SELECT 
                         ss.id,
@@ -309,12 +315,13 @@ class ScoreReporter:
                             WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
                             ELSE 'below'
                         END as position,
-                        1 as rn
-                    FROM station_scores ss
+                        ss.rank
+                    FROM station_scores ss, selected_station sel
+                    WHERE ss.rank BETWEEN sel.rank - 2 AND sel.rank + 2
                     ORDER BY ss.score DESC
                 """
         
-                params = [contest, contest, callsign, callsign]
+                params = [contest, contest, callsign, callsign, callsign]
                 
                 self.logger.debug(f"Query parameters: {params}")
                 
