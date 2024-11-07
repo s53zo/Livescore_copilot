@@ -57,8 +57,29 @@
         body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; padding-bottom: 40px; }}
         h1 {{ color: #2c3e50; margin-bottom: 10px; }}
         .info {{ color: #7f8c8d; margin-bottom: 20px; }}
-        .category-info {{ background-color: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
-        .category-tag {{ display: inline-block; padding: 4px 8px; background-color: #e7f3ff; border: 1px solid #cce5ff; border-radius: 3px; color: #0066cc; }}
+        .monitor-info {{ 
+            background-color: #f8f9fa; 
+            padding: 15px; 
+            border-radius: 4px; 
+            margin-bottom: 20px;
+            border-left: 4px solid #4CAF50;
+        }}
+        .category-tag {{ 
+            display: inline-block; 
+            padding: 4px 8px; 
+            background-color: #e7f3ff; 
+            border: 1px solid #cce5ff; 
+            border-radius: 3px; 
+            color: #0066cc;
+            margin: 5px 5px 5px 0;
+        }}
+        .note {{ 
+            font-size: 0.9em; 
+            color: #666; 
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }}
         table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
         th, td {{ border: 1px solid #dee2e6; padding: 8px 4px; text-align: center; font-size: 0.9em; }}
         th {{ background-color: #f8f9fa; font-weight: bold; color: #2c3e50; position: sticky; top: 0; z-index: 1; }}
@@ -67,11 +88,34 @@
         .highlight td {{ border-top: 2px solid #4caf50; border-bottom: 2px solid #4caf50; }}
         .timestamp {{ font-style: italic; color: #7f8c8d; margin-bottom: 15px; }}
         .band-data {{ white-space: nowrap; position: relative; }}
-        .refresh-info {{ position: fixed; top: 10px; right: 10px; background-color: #4caf50; color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 1000; }}
+        .refresh-info {{ 
+            position: fixed; 
+            top: 10px; 
+            right: 10px; 
+            background-color: #4caf50; 
+            color: white; 
+            padding: 8px 12px; 
+            border-radius: 4px; 
+            font-size: 0.9em; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            z-index: 1000; 
+        }}
         #countdown {{ font-weight: bold; }}
-        .footer {{ position: fixed; bottom: 0; left: 0; right: 0; background-color: #f8f9fa; padding: 10px 20px; text-align: center; font-size: 0.8em; color: #666; border-top: 1px solid #dee2e6; }}
+        .footer {{ 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            right: 0; 
+            background-color: #f8f9fa; 
+            padding: 10px 20px; 
+            text-align: center; 
+            font-size: 0.8em; 
+            color: #666; 
+            border-top: 1px solid #dee2e6; 
+        }}
         .rate-cell {{ position: relative; }}
         .relative-time {{ color: #666; font-size: 0.8em; }}
+        .callsign {{ font-weight: bold; color: #2c3e50; }}
         @media print {{ .refresh-info, .footer {{ display: none; }} body {{ padding-bottom: 0; }} }}
         @media (max-width: 768px) {{ .band-data {{ font-size: 0.8em; }} }}
     </style>
@@ -83,14 +127,23 @@
 
     <h1>Contest Progress Report - {contest}</h1>
     <p class="timestamp">
-        Updated: {timestamp}<br>
-        Monitoring: {callsign}
+        Updated: {timestamp}
     </p>
     
-    <div class="category-info">
-        <strong>Category:</strong>
-        <span class="category-tag">Power: {power}</span>
-        <span class="category-tag">Assisted: {assisted}</span>
+    <div class="monitor-info">
+        <div>
+            <strong>Monitoring Station:</strong> 
+            <span class="callsign">{callsign}</span>
+        </div>
+        <div style="margin-top: 8px;">
+            <strong>Operating Category:</strong>
+            <span class="category-tag">Power: {power}</span>
+            <span class="category-tag">Assisted: {assisted}</span>
+        </div>
+        <div class="note">
+            Note: The table below shows all active stations in the contest, regardless of their operating category.
+            Your station is highlighted in green.
+        </div>
     </div>
 
     <table>
