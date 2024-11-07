@@ -91,20 +91,40 @@
             const [error, setError] = React.useState(null);
             
             React.useEffect(() => {
+    // Load contests if none provided
+    if (!contests || contests.length === 0) {
+        console.log('Fetching contests');
+        fetch('/api/contest/list')
+            .then(res => res.json())
+            .then(data => {
+                console.log('Received contests:', data);
+                setContests(data);
+            })
+            .catch(err => {
+                console.error('Error fetching contests:', err);
+                setError(err.message);
+            });
+    }
+}, []);
+
+            React.useEffect(() => {
                 if (selectedContest) {
                     console.log('Fetching callsigns for contest:', selectedContest);
-                    fetch(`/api/callsigns?contest=${encodeURIComponent(selectedContest)}`)
+                    setCallsignsLoading(true);
+                    fetch(`/api/contest/callsigns?contest=${encodeURIComponent(selectedContest)}`)
                         .then(res => {
                             if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                             return res.json();
                         })
                         .then(data => {
                             console.log('Received callsigns:', data);
-                            setCallsigns(data);
+                            setCallsigns(data || []);
+                            setCallsignsLoading(false);
                         })
                         .catch(err => {
                             console.error('Error fetching callsigns:', err);
                             setError(err.message);
+                            setCallsignsLoading(false);
                         });
                 } else {
                     setCallsigns([]);
@@ -116,8 +136,7 @@
                 if (selectedContest && selectedCallsign) {
                     console.log(`Fetching filters for contest=${selectedContest}, callsign=${selectedCallsign}`);
                     setLoading(true);
-                    setError(null);
-                    fetch(`/api/filters?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}`)
+                    fetch(`/api/contest/filters?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}`)
                         .then(res => {
                             if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                             return res.json();
@@ -132,8 +151,6 @@
                             setError(err.message);
                             setLoading(false);
                         });
-                } else {
-                    setFilterButtons([]);
                 }
             }, [selectedContest, selectedCallsign]);
             
