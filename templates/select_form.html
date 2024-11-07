@@ -89,41 +89,42 @@
             const [filterButtons, setFilterButtons] = React.useState([]);
             const [loading, setLoading] = React.useState(false);
             const [error, setError] = React.useState(null);
-            
-            React.useEffect(() => {
-    // Load contests if none provided
-    if (!contests || contests.length === 0) {
-        console.log('Fetching contests');
-        fetch('/api/contest/list')
-            .then(res => res.json())
-            .then(data => {
-                console.log('Received contests:', data);
-                setContests(data);
-            })
-            .catch(err => {
-                console.error('Error fetching contests:', err);
-                setError(err.message);
-            });
-    }
-}, []);
+            const [callsignsLoading, setCallsignsLoading] = React.useState(false);
+
+            console.log('Effect running with selectedContest:', selectedContest);
 
             React.useEffect(() => {
                 if (selectedContest) {
                     console.log('Fetching callsigns for contest:', selectedContest);
                     setCallsignsLoading(true);
+                    setError(null);
+
+                    // First, clear existing callsigns
+                    setCallsigns([]);
+                    setSelectedCallsign('');
+
                     fetch(`/api/contest/callsigns?contest=${encodeURIComponent(selectedContest)}`)
                         .then(res => {
-                            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                            console.log('Callsigns response status:', res.status);
+                            if (!res.ok) {
+                                throw new Error(`HTTP error! status: ${res.status}`);
+                            }
                             return res.json();
                         })
                         .then(data => {
-                            console.log('Received callsigns:', data);
-                            setCallsigns(data || []);
-                            setCallsignsLoading(false);
+                            console.log('Received callsigns data:', data);
+                            if (Array.isArray(data)) {
+                                setCallsigns(data);
+                            } else {
+                                console.error('Invalid callsigns data format:', data);
+                                setError('Invalid data format received from server');
+                            }
                         })
                         .catch(err => {
                             console.error('Error fetching callsigns:', err);
                             setError(err.message);
+                        })
+                        .finally(() => {
                             setCallsignsLoading(false);
                         });
                 } else {
@@ -131,7 +132,7 @@
                     setSelectedCallsign('');
                 }
             }, [selectedContest]);
-            
+
             React.useEffect(() => {
                 if (selectedContest && selectedCallsign) {
                     console.log(`Fetching filters for contest=${selectedContest}, callsign=${selectedCallsign}`);
@@ -153,25 +154,38 @@
                         });
                 }
             }, [selectedContest, selectedCallsign]);
-            
+
             const handleContestChange = (e) => {
-                console.log('Contest selected:', e.target.value);
-                setSelectedContest(e.target.value);
+                const newContest = e.target.value;
+                console.log('Contest selected:', newContest);
+                setSelectedContest(newContest);
                 setSelectedCallsign('');
                 setFilterButtons([]);
             };
-            
+
             const handleCallsignChange = (e) => {
                 console.log('Callsign selected:', e.target.value);
                 setSelectedCallsign(e.target.value);
             };
-            
+
             const handleGenerate = (filterType, filterValue) => {
                 console.log(`Generating report with filter: ${filterType}=${filterValue}`);
                 window.location.href = `/reports/live.html?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}&filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`;
             };
 
             return React.createElement('div', { className: 'max-w-2xl mx-auto p-6' },
+                // Debug information
+                React.createElement('pre', { className: 'mb-4 text-xs bg-gray-100 p-2' },
+                    JSON.stringify({
+                        contestsCount: contests.length,
+                        selectedContest,
+                        callsignsCount: callsigns.length,
+                        selectedCallsign,
+                        loading: callsignsLoading,
+                        error
+                    }, null, 2)
+                ),
+
                 React.createElement('h1', { className: 'text-2xl font-bold mb-6' }, 'Livescore Pilot'),
                 React.createElement('p', { className: 'mb-6' }, 'Online tool to follow your progress on the Contest Livescores.'),
                 
@@ -199,20 +213,24 @@
                         className: `p-6 border rounded-lg bg-white shadow-sm ${!selectedContest ? 'opacity-50' : ''}`
                     },
                         React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 2: Select Callsign'),
-                        React.createElement('select', {
-                            className: 'w-full p-2 border rounded',
-                            value: selectedCallsign,
-                            onChange: handleCallsignChange,
-                            disabled: !selectedContest
-                        },
-                            React.createElement('option', { value: '' }, '-- Select Callsign --'),
-                            callsigns.map(call =>
-                                React.createElement('option', {
-                                    key: call.name,
-                                    value: call.name
-                                }, `${call.name} (${call.qso_count} QSOs)`)
-                            )
-                        )
+                        callsignsLoading ? 
+                            React.createElement('p', { className: 'text-gray-600' }, 'Loading callsigns...') :
+                            error ?
+                                React.createElement('p', { className: 'text-red-600' }, `Error: ${error}`) :
+                                React.createElement('select', {
+                                    className: 'w-full p-2 border rounded',
+                                    value: selectedCallsign,
+                                    onChange: handleCallsignChange,
+                                    disabled: !selectedContest || callsignsLoading
+                                },
+                                    React.createElement('option', { value: '' }, '-- Select Callsign --'),
+                                    callsigns.map(call =>
+                                        React.createElement('option', {
+                                            key: call.name,
+                                            value: call.name
+                                        }, `${call.name} (${call.qso_count} QSOs)`)
+                                    )
+                                )
                     ),
 
                     // Step 3: Generate Buttons
