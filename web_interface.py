@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from flask import Flask, render_template, request, redirect, send_from_directory, jsonify
-from flask_cors import CORS
 import sqlite3
 import os
 import logging
@@ -25,7 +24,6 @@ logger.info("Starting web interface application")
 
 try:
     app = Flask(__name__)
-    CORS(app)
     logger.info("Flask app created successfully")
 except Exception as e:
     logger.error(f"Failed to create Flask app: {str(e)}")
@@ -48,233 +46,59 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-@app.route('/api/contest/list')
-def api_get_contests():
+def get_station_category(db, contest, callsign):
+    """Get the category information for a specific station"""
     try:
-        with get_db() as db:
-            cursor = db.cursor()
-            cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT cs.id, cs.callsign, cs.contest
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, contest, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        GROUP BY callsign, contest
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.contest = latest.contest
-                        AND cs.timestamp = latest.max_ts
-                )
-                SELECT 
-                    contest, 
-                    COUNT(DISTINCT callsign) as active_stations
-                FROM latest_scores
-                GROUP BY contest
-                ORDER BY contest
-            """)
-            contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Fetched contests: {contests}")
-            return jsonify(contests)
+        cursor = db.cursor()
+        cursor.execute("""
+            SELECT power, assisted
+            FROM contest_scores
+            WHERE contest = ? AND callsign = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (contest, callsign))
+        return cursor.fetchone()
     except Exception as e:
-        logger.error(f"Error getting contests: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/contest/callsigns')
-def api_get_callsigns():
-    contest = request.args.get('contest')
-    if not contest:
-        return jsonify({"error": "Contest parameter required"}), 400
-    
-    logger.debug(f"Fetching callsigns for contest: {contest}")
-    
-    try:
-        with get_db() as db:
-            cursor = db.cursor()
-            cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT cs.id, cs.callsign, cs.qsos, cs.timestamp
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
-                    WHERE cs.contest = ?
-                )
-                SELECT 
-                    ls.callsign,
-                    ls.qsos as qso_count
-                FROM latest_scores ls
-                ORDER BY ls.callsign
-            """, (contest, contest))
-            
-            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Found {len(callsigns)} callsigns for {contest}")
-            return jsonify(callsigns)
-            
-    except Exception as e:
-        logger.error(f"Error getting callsigns: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/contest/filters')
-def api_get_filters():
-    contest = request.args.get('contest')
-    callsign = request.args.get('callsign')
-    
-    logger.debug(f"Filters requested for contest={contest}, callsign={callsign}")
-    
-    if not (contest and callsign):
-        logger.warning("Missing required parameters")
-        return jsonify({"error": "Contest and callsign parameters required"}), 400
-    
-    try:
-        with get_db() as db:
-            cursor = db.cursor()
-            cursor.execute("""
-                SELECT DISTINCT
-                    qi.dxcc_country,
-                    qi.cq_zone,
-                    qi.iaru_zone,
-                    qi.arrl_section,
-                    qi.state_province
-                FROM contest_scores cs
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ? AND cs.callsign = ?
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
-            """, (contest, callsign))
-            
-            row = cursor.fetchone()
-            logger.debug(f"Database returned row: {row}")
-            
-            if not row:
-                logger.warning("No QTH info found")
-                return jsonify([])
-            
-            filters = []
-            field_names = ['dxcc_country', 'cq_zone', 'iaru_zone', 'arrl_section', 'state_province']
-            
-            for field, value in zip(field_names, row):
-                if value:  # Only add non-empty values
-                    filter_entry = {
-                        "type": field,
-                        "value": value,
-                        "label": f"{field.replace('_', ' ').title()}: {value}"
-                    }
-                    filters.append(filter_entry)
-                    logger.debug(f"Added filter: {filter_entry}")
-            
-            logger.info(f"Returning {len(filters)} filters")
-            return jsonify(filters)
-            
-    except Exception as e:
-        logger.error(f"Error getting filters: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
-
-def get_filtered_stations(contest, callsign, filter_type=None, filter_value=None):
-    """Get station details with filtering"""
-    try:
-        with get_db() as db:
-            cursor = db.cursor()
-            
-            # Base query with filtering
-            query = """
-                WITH station_scores AS (
-                    SELECT cs.*,
-                           ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rank
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
-                    LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.contest = ?
-            """
-            
-            params = [contest, contest]
-            
-            # Add filter condition if specified
-            if filter_type and filter_type != 'none' and filter_value and filter_value != 'none':
-                query += f" AND qi.{filter_type} = ?"
-                params.append(filter_value)
-                
-            query += """)
-                SELECT 
-                    cs.id,
-                    cs.callsign,
-                    cs.score,
-                    cs.power,
-                    cs.assisted,
-                    cs.timestamp,
-                    cs.qsos,
-                    cs.multipliers,
-                    CASE 
-                        WHEN cs.callsign = ? THEN 'current'
-                        WHEN cs.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
-                        ELSE 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (ORDER BY cs.score DESC) as display_rank
-                FROM station_scores cs
-                ORDER BY cs.score DESC"""
-            
-            params.extend([callsign, callsign])
-            
-            logger.debug(f"Executing query with params: {params}")
-            cursor.execute(query, params)
-            results = cursor.fetchall()
-            logger.debug(f"Found {len(results)} stations")
-            return results
-            
-    except Exception as e:
-        logger.error(f"Error getting filtered stations: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Error getting station category: {str(e)}")
         return None
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
-    
+    logger.debug(f"Request form data: {request.form}")
+    logger.debug(f"Request headers: {request.headers}")
+
     try:
         with get_db() as db:
             cursor = db.cursor()
             
+            # Get contests with the count of unique active stations (callsigns)
+            logger.debug("Fetching contests with active station counts")
             cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT cs.id, cs.callsign, cs.contest
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, contest, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        GROUP BY callsign, contest
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.contest = latest.contest
-                        AND cs.timestamp = latest.max_ts
-                )
-                SELECT 
-                    contest, 
-                    COUNT(DISTINCT callsign) as active_stations
-                FROM latest_scores
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
                 GROUP BY contest
                 ORDER BY contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Found contests: {contests}")
+            logger.debug(f"Found contests with station counts: {contests}")
             
+            # Get contest and callsign from form or query parameters
             selected_contest = request.form.get('contest') or request.args.get('contest')
             selected_callsign = request.form.get('callsign') or request.args.get('callsign')
             
+            logger.debug(f"Selected contest: {selected_contest}")
+            logger.debug(f"Selected callsign: {selected_callsign}")
+            
             callsigns = []
+            countries = []
+            cq_zones = []
+            iaru_zones = []
+            station_category = None
             
             if selected_contest:
-                # Fetch callsigns with QSO count
+                # Fetch callsigns with QSO count for the selected contest
+                logger.debug(f"Fetching callsigns with QSO count for contest: {selected_contest}")
                 cursor.execute("""
                     SELECT cs.callsign, cs.qsos AS qso_count
                     FROM contest_scores cs
@@ -289,44 +113,211 @@ def index():
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-                logger.debug(f"Found callsigns for {selected_contest}: {callsigns}")
+                
+                # If callsign is selected, get its category
+                if selected_callsign:
+                    station_category = get_station_category(db, selected_contest, selected_callsign)
+                    logger.debug(f"Station category for {selected_callsign}: {station_category}")
+                
+                # Get available DXCC countries for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.dxcc_country
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.dxcc_country IS NOT NULL 
+                    AND qi.dxcc_country != ''
+                    ORDER BY qi.dxcc_country
+                """, (selected_contest, selected_contest))
+                countries = [row[0] for row in cursor.fetchall()]
+                
+                # Get available CQ zones for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.cq_zone
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.cq_zone IS NOT NULL 
+                    AND qi.cq_zone != ''
+                    ORDER BY CAST(qi.cq_zone AS INTEGER)
+                """, (selected_contest, selected_contest))
+                cq_zones = [row[0] for row in cursor.fetchall()]
+                
+                # Get available IARU zones for this contest
+                cursor.execute("""
+                    WITH LatestScores AS (
+                        SELECT cs.id
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                    )
+                    SELECT DISTINCT qi.iaru_zone
+                    FROM qth_info qi
+                    JOIN LatestScores ls ON qi.contest_score_id = ls.id
+                    WHERE qi.iaru_zone IS NOT NULL 
+                    AND qi.iaru_zone != ''
+                    ORDER BY CAST(qi.iaru_zone AS INTEGER)
+                """, (selected_contest, selected_contest))
+                iaru_zones = [row[0] for row in cursor.fetchall()]
+
+            if request.method == 'POST' and request.form.get('callsign'):
+                callsign = request.form.get('callsign')
+                contest = request.form.get('contest')
+                filter_type = request.form.get('filter_type')
+                category_filter = request.form.get('category_filter', 'same')
+                
+                logger.debug(f"Processing form submission for {callsign} in {contest}")
+                logger.debug(f"Category filter: {category_filter}")
+                
+                # First, verify the data exists in the database
+                cursor.execute("""
+                    SELECT COUNT(*), MAX(timestamp)
+                    FROM contest_scores
+                    WHERE callsign = ? AND contest = ?
+                """, (callsign, contest))
+                count, last_update = cursor.fetchone()
+                logger.debug(f"Found {count} records for {callsign} in {contest}")
+                logger.debug(f"Last update: {last_update}")
+                
+                if count == 0:
+                    return render_template('error.html', 
+                                        error=f"No records found in database for {callsign} in {contest}")
+                
+                # Get category information
+                cursor.execute("""
+                    SELECT power, assisted 
+                    FROM contest_scores 
+                    WHERE callsign = ? AND contest = ?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (callsign, contest))
+                power, assisted = cursor.fetchone()
+                logger.debug(f"Station category - Power: {power}, Assisted: {assisted}")
+                
+                # Select only the last non-empty filter_value
+                filter_values = request.form.getlist('filter_value')
+                filter_value = next((fv for fv in reversed(filter_values) if fv), None)
+
+                # Validate filter inputs
+                if filter_type and not filter_value:
+                    return render_template('error.html', 
+                                        error="Filter type selected but no value provided")
             
-            template_data = {
-                'contests': contests,
-                'selected_contest': selected_contest,
-                'selected_callsign': selected_callsign,
-                'callsigns': callsigns
-            }
-            logger.debug(f"Rendering template with data: {template_data}")
-            
-            return render_template('select_form.html', **template_data)
-                                
+                logger.info(f"Processing report request: callsign={callsign}, contest={contest}, "
+                          f"filter_type={filter_type}, filter_value={filter_value}, "
+                          f"category_filter={category_filter}")
+                
+                reporter = ScoreReporter(Config.DB_PATH)
+                stations = reporter.get_station_details(callsign, contest, filter_type=filter_type, 
+                                                     filter_value=filter_value,
+                                                     category_filter=category_filter)
+                
+                if stations:
+                    logger.debug(f"Found {len(stations)} stations to display")
+                    success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR,
+                                                  filter_type=filter_type, 
+                                                  filter_value=filter_value, 
+                                                  category_filter=category_filter)
+                    if success:
+                        query_params = [f"callsign={callsign}", f"contest={contest}"]
+                        if filter_type and filter_value:
+                            query_params.extend([f"filter_type={filter_type}", 
+                                              f"filter_value={filter_value}"])
+                        if category_filter:
+                            query_params.append(f"category_filter={category_filter}")
+                        
+                        return redirect(f'/reports/live.html?{"&".join(query_params)}')
+                    else:
+                        return render_template('error.html', error="Failed to generate report")
+                else:
+                    logger.error(f"No stations returned for {callsign} in {contest}")
+                    # Get the list of available contests and callsigns for debugging
+                    cursor.execute("""
+                        SELECT DISTINCT contest, callsign 
+                        FROM contest_scores 
+                        ORDER BY contest, callsign
+                    """)
+                    available = cursor.fetchall()
+                    logger.debug("Available contest/callsign combinations:")
+                    for c, call in available:
+                        logger.debug(f"{c}: {call}")
+                    
+                    return render_template('error.html', 
+                                        error="No data found for the selected criteria")
+        
+        logger.debug("Rendering template")
+        return render_template('select_form.html', 
+                             contests=contests,
+                             selected_contest=selected_contest,
+                             selected_callsign=selected_callsign,
+                             callsigns=callsigns,
+                             countries=countries,
+                             cq_zones=cq_zones,
+                             iaru_zones=iaru_zones,
+                             station_category=station_category)
+    
     except Exception as e:
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
-        
+
 @app.route('/reports/live.html')
 def live_report():
     try:
+        # Get parameters from query string
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type', 'none')
-        filter_value = request.args.get('filter_value', 'none')
+        filter_type = request.args.get('filter_type')
+        filter_value = request.args.get('filter_value')
+        category_filter = request.args.get('category_filter', 'same')  # Default to 'same'
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        logger.info(f"Generating report: callsign={callsign}, contest={contest}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
+        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}, "
+                   f"category_filter={category_filter}")
 
-        stations = get_filtered_stations(contest, callsign, filter_type, filter_value)
+        reporter = ScoreReporter(Config.DB_PATH)
+        stations = reporter.get_station_details(callsign, contest, 
+                                             filter_type=filter_type,
+                                             filter_value=filter_value,
+                                             category_filter=category_filter)
 
         if stations:
-            reporter = ScoreReporter(Config.DB_PATH)
-            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-            
+            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR,
+                                          filter_type=filter_type,
+                                          filter_value=filter_value,
+                                          category_filter=category_filter)
             if success:
+                # We need to generate a new report each time
                 response = send_from_directory(Config.OUTPUT_DIR, 'live.html')
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
                 return response
