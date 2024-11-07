@@ -10,10 +10,10 @@
 
     <script type="text/javascript">
         const initialData = {
-            contests: {{ contests|tojson|safe }},
-            selectedContest: {{ selected_contest|tojson|safe if selected_contest else 'null' }},
-            selectedCallsign: {{ selected_callsign|tojson|safe if selected_callsign else 'null' }},
-            initialCallsigns: {{ callsigns|tojson|safe }}
+            contests: {{ contests | tojson | safe }},
+            selectedContest: {{ selected_contest | tojson | safe if selected_contest else 'null' }},
+            selectedCallsign: {{ selected_callsign | tojson | safe if selected_callsign else 'null' }},
+            initialCallsigns: {{ callsigns | tojson | safe }}
         };
 
         const FilterSelectionForm = () => {
@@ -52,7 +52,7 @@
                         })
                         .catch(err => {
                             console.error('Error fetching callsigns:', err);
-                            setError(err.message); // Display the specific error message
+                            setError(err.message);
                         })
                         .finally(() => {
                             setLoading(false);
@@ -68,7 +68,7 @@
                 console.log('Contest selected:', newContest);
                 setSelectedContest(newContest);
                 setSelectedCallsign('');
-                setError(null); // Clear previous errors
+                setError(null);
             };
 
             const handleCallsignChange = (e) => {
