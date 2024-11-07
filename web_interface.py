@@ -201,3 +201,144 @@ if __name__ == '__main__':
 else:
     # When running under gunicorn
     logger.info("Starting under gunicorn")
+
+@app.route('/api/contests')
+def get_contests():
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY contest
+            """)
+            contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            return jsonify(contests)
+    except Exception as e:
+        logger.error(f"Error getting contests: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/callsigns')
+def get_callsigns():
+    contest = request.args.get('contest')
+    if not contest:
+        return jsonify({"error": "Contest parameter required"}), 400
+    
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                SELECT cs.callsign, cs.qsos AS qso_count
+                FROM contest_scores cs
+                INNER JOIN (
+                    SELECT callsign, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    WHERE contest = ?
+                    GROUP BY callsign
+                ) latest ON cs.callsign = latest.callsign 
+                    AND cs.timestamp = latest.max_ts
+                WHERE cs.contest = ?
+                ORDER BY cs.callsign
+            """, (contest, contest))
+            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+            return jsonify(callsigns)
+    except Exception as e:
+        logger.error(f"Error getting callsigns: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/filters')
+def get_filters():
+    contest = request.args.get('contest')
+    callsign = request.args.get('callsign')
+    
+    if not (contest and callsign):
+        return jsonify({"error": "Contest and callsign parameters required"}), 400
+    
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                SELECT 
+                    qi.dxcc_country,
+                    qi.cq_zone,
+                    qi.iaru_zone,
+                    qi.arrl_section,
+                    qi.state_province
+                FROM contest_scores cs
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ? AND cs.callsign = ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            """, (contest, callsign))
+            
+            row = cursor.fetchone()
+            if not row:
+                return jsonify([])
+            
+            filters = []
+            field_names = ['dxcc_country', 'cq_zone', 'iaru_zone', 'arrl_section', 'state_province']
+            
+            for field, value in zip(field_names, row):
+                if value:  # Only add non-empty values
+                    filters.append({
+                        "type": field,
+                        "value": value,
+                        "label": f"{field.replace('_', ' ').title()} {value}"
+                    })
+            
+            return jsonify(filters)
+    except Exception as e:
+        logger.error(f"Error getting filters: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def get_filtered_stations(contest, callsign, filter_type, filter_value):
+    """Get station details with filtering"""
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            
+            # Base query with filtering
+            query = """
+                WITH station_scores AS (
+                    SELECT cs.*,
+                           ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rank
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.timestamp = latest.max_ts
+                    LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.contest = ?
+            """
+            
+            params = [contest, contest]
+            
+            # Add filter condition if specified
+            if filter_type and filter_type != 'none' and filter_value and filter_value != 'none':
+                query += f" AND qi.{filter_type} = ?"
+                params.append(filter_value)
+                
+            query += """)
+                SELECT 
+                    cs.*,
+                    CASE 
+                        WHEN cs.callsign = ? THEN 'current'
+                        WHEN cs.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
+                        ELSE 'below'
+                    END as position
+                FROM station_scores cs
+                ORDER BY cs.score DESC"""
+            
+            params.extend([callsign, callsign])
+            
+            cursor.execute(query, params)
+            return cursor.fetchall()
+            
+    except Exception as e:
+        logger.error(f"Error getting filtered stations: {str(e)}")
+        logger.error(traceback.format_exc())
+        return None
