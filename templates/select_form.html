@@ -77,47 +77,45 @@
             initialCallsigns: {{ callsigns|tojson|safe }}
         };
 
+        console.log('Initial data:', initialData);
+
         const FilterSelectionForm = () => {
             const [contests, setContests] = React.useState(initialData.contests);
             const [selectedContest, setSelectedContest] = React.useState(initialData.selectedContest || '');
             const [callsigns, setCallsigns] = React.useState(initialData.initialCallsigns || []);
             const [selectedCallsign, setSelectedCallsign] = React.useState(initialData.selectedCallsign || '');
             const [filterButtons, setFilterButtons] = React.useState([]);
+            const [loading, setLoading] = React.useState(false);
+            const [error, setError] = React.useState(null);
             
             React.useEffect(() => {
-                // Only fetch if we don't have initial data
-                if (contests.length === 0) {
-                    fetch('/api/contests')
-                        .then(res => res.json())
-                        .then(data => setContests(data))
-                        .catch(err => console.error('Error fetching contests:', err));
-                }
-            }, []);
-            
-            React.useEffect(() => {
-                if (selectedContest) {
-                    fetch(`/api/callsigns?contest=${selectedContest}`)
-                        .then(res => res.json())
-                        .then(data => setCallsigns(data))
-                        .catch(err => console.error('Error fetching callsigns:', err));
-                } else {
-                    setCallsigns([]);
-                }
-            }, [selectedContest]);
-            
-            React.useEffect(() => {
-                if (selectedCallsign && selectedContest) {
-                    fetch(`/api/filters?contest=${selectedContest}&callsign=${selectedCallsign}`)
-                        .then(res => res.json())
-                        .then(data => setFilterButtons(data))
-                        .catch(err => console.error('Error fetching filters:', err));
+                if (selectedContest && selectedCallsign) {
+                    console.log(`Fetching filters for contest=${selectedContest}, callsign=${selectedCallsign}`);
+                    setLoading(true);
+                    setError(null);
+                    fetch(`/api/filters?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}`)
+                        .then(res => {
+                            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                            return res.json();
+                        })
+                        .then(data => {
+                            console.log('Received filters:', data);
+                            setFilterButtons(data);
+                            setLoading(false);
+                        })
+                        .catch(err => {
+                            console.error('Error fetching filters:', err);
+                            setError(err.message);
+                            setLoading(false);
+                        });
                 } else {
                     setFilterButtons([]);
                 }
             }, [selectedContest, selectedCallsign]);
             
             const handleGenerate = (filterType, filterValue) => {
-                window.location.href = `/reports/live.html?contest=${selectedContest}&callsign=${selectedCallsign}&filter_type=${filterType}&filter_value=${filterValue}`;
+                console.log(`Generating report with filter: ${filterType}=${filterValue}`);
+                window.location.href = `/reports/live.html?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}&filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`;
             };
 
             return React.createElement('div', { className: 'max-w-2xl mx-auto p-6' },
@@ -131,7 +129,11 @@
                         React.createElement('select', {
                             className: 'w-full p-2 border rounded',
                             value: selectedContest,
-                            onChange: (e) => setSelectedContest(e.target.value)
+                            onChange: (e) => {
+                                console.log('Contest selected:', e.target.value);
+                                setSelectedContest(e.target.value);
+                                setSelectedCallsign('');
+                            }
                         },
                             React.createElement('option', { value: '' }, '-- Select Contest --'),
                             contests.map(contest =>
@@ -151,7 +153,10 @@
                         React.createElement('select', {
                             className: 'w-full p-2 border rounded',
                             value: selectedCallsign,
-                            onChange: (e) => setSelectedCallsign(e.target.value),
+                            onChange: (e) => {
+                                console.log('Callsign selected:', e.target.value);
+                                setSelectedCallsign(e.target.value);
+                            },
                             disabled: !selectedContest
                         },
                             React.createElement('option', { value: '' }, '-- Select Callsign --'),
@@ -165,21 +170,30 @@
                     ),
 
                     // Step 3: Generate Buttons
-                    filterButtons.length > 0 && React.createElement('div', { className: 'p-6 border rounded-lg bg-white shadow-sm' },
+                    (selectedContest && selectedCallsign) && React.createElement('div', { className: 'p-6 border rounded-lg bg-white shadow-sm' },
                         React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 3: Generate Report'),
-                        React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
-                            React.createElement('button', {
-                                onClick: () => handleGenerate('none', 'none'),
-                                className: 'p-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors'
-                            }, 'Generate (All Stations)'),
-                            filterButtons.map((filter, index) =>
-                                React.createElement('button', {
-                                    key: index,
-                                    onClick: () => handleGenerate(filter.type, filter.value),
-                                    className: 'p-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors'
-                                }, `Generate (${filter.type} ${filter.value})`)
-                            )
-                        )
+                        loading ? 
+                            React.createElement('p', { className: 'text-gray-600' }, 'Loading filters...') :
+                            error ? 
+                                React.createElement('p', { className: 'text-red-600' }, `Error: ${error}`) :
+                                React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
+                                    React.createElement('button', {
+                                        onClick: () => handleGenerate('none', 'none'),
+                                        className: 'p-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors'
+                                    }, 'Generate (All Stations)'),
+                                    filterButtons.map((filter, index) =>
+                                        React.createElement('button', {
+                                            key: index,
+                                            onClick: () => handleGenerate(filter.type, filter.value),
+                                            className: 'p-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors'
+                                        }, `Generate (${filter.label})`)
+                                    )
+                                )
+                    ),
+
+                    // Debug Info (only in development)
+                    process.env.NODE_ENV !== 'production' && React.createElement('pre', { className: 'mt-4 p-4 bg-gray-100 rounded text-sm' },
+                        JSON.stringify({ selectedContest, selectedCallsign, filterButtons, loading, error }, null, 2)
                     )
                 ),
                 
