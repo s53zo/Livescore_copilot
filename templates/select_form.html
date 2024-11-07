@@ -4,106 +4,32 @@
     <title>Livescore Pilot</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 20px auto;
-            padding: 20px;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        select {
-            width: 100%;
-            padding: 8px;
-            margin-bottom: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        select:disabled {
-            background-color: #f5f5f5;
-            cursor: not-allowed;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-        .step {
-            margin-bottom: 25px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background-color: #fff;
-        }
-        .step h2 {
-            margin-top: 0;
-            color: #4CAF50;
-            font-size: 1.2em;
-        }
-        .disabled-step {
-            opacity: 0.5;
-            pointer-events: none;
-        }
-    </style>
 </head>
 <body>
     <div id="root">Loading...</div>
 
     <script type="text/javascript">
-        console.log('Starting script execution');
-        
-        // Get initial data from template
         const initialData = {
             contests: {{ contests|tojson|safe }},
             selectedContest: {{ selected_contest|tojson|safe if selected_contest else 'null' }},
             selectedCallsign: {{ selected_callsign|tojson|safe if selected_callsign else 'null' }},
             initialCallsigns: {{ callsigns|tojson|safe }}
         };
-        
-        console.log('Initial data:', initialData);
 
         const FilterSelectionForm = () => {
             const [contests, setContests] = React.useState(initialData.contests || []);
             const [selectedContest, setSelectedContest] = React.useState(initialData.selectedContest || '');
             const [callsigns, setCallsigns] = React.useState(initialData.initialCallsigns || []);
             const [selectedCallsign, setSelectedCallsign] = React.useState(initialData.selectedCallsign || '');
-            const [filterButtons, setFilterButtons] = React.useState([]);
             const [loading, setLoading] = React.useState(false);
             const [error, setError] = React.useState(null);
-            const [callsignsLoading, setCallsignsLoading] = React.useState(false);
-
-            console.log('Effect running with selectedContest:', selectedContest);
 
             React.useEffect(() => {
                 if (selectedContest) {
                     console.log('Fetching callsigns for contest:', selectedContest);
-                    setCallsignsLoading(true);
+                    setLoading(true);
                     setError(null);
 
-                    // First, clear existing callsigns
-                    setCallsigns([]);
-                    setSelectedCallsign('');
-
-                    // Update callsign fetch request with enhanced error handling
                     fetch(`/api/contest/callsigns?contest=${encodeURIComponent(selectedContest)}`)
                         .then(res => {
                             console.log('Callsigns response status:', res.status);
@@ -126,10 +52,10 @@
                         })
                         .catch(err => {
                             console.error('Error fetching callsigns:', err);
-                            setError(err.message); // Update the error state to show the specific error message
+                            setError(err.message); // Display the specific error message
                         })
                         .finally(() => {
-                            setCallsignsLoading(false);
+                            setLoading(false);
                         });
                 } else {
                     setCallsigns([]);
@@ -137,34 +63,12 @@
                 }
             }, [selectedContest]);
 
-            React.useEffect(() => {
-                if (selectedContest && selectedCallsign) {
-                    console.log(`Fetching filters for contest=${selectedContest}, callsign=${selectedCallsign}`);
-                    setLoading(true);
-                    fetch(`/api/contest/filters?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}`)
-                        .then(res => {
-                            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-                            return res.json();
-                        })
-                        .then(data => {
-                            console.log('Received filters:', data);
-                            setFilterButtons(data);
-                            setLoading(false);
-                        })
-                        .catch(err => {
-                            console.error('Error fetching filters:', err);
-                            setError(err.message);
-                            setLoading(false);
-                        });
-                }
-            }, [selectedContest, selectedCallsign]);
-
             const handleContestChange = (e) => {
                 const newContest = e.target.value;
                 console.log('Contest selected:', newContest);
                 setSelectedContest(newContest);
                 setSelectedCallsign('');
-                setFilterButtons([]);
+                setError(null); // Clear previous errors
             };
 
             const handleCallsignChange = (e) => {
@@ -172,111 +76,66 @@
                 setSelectedCallsign(e.target.value);
             };
 
-            const handleGenerate = (filterType, filterValue) => {
-                console.log(`Generating report with filter: ${filterType}=${filterValue}`);
-                window.location.href = `/reports/live.html?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}&filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`;
-            };
+            return (
+                <div className="max-w-2xl mx-auto p-6">
+                    <h1 className="text-2xl font-bold mb-6">Livescore Pilot</h1>
+                    <p className="mb-6">Online tool to follow your progress on the Contest Livescores.</p>
 
-            return React.createElement('div', { className: 'max-w-2xl mx-auto p-6' },
-                // Debug information
-                React.createElement('pre', { className: 'mb-4 text-xs bg-gray-100 p-2' },
-                    JSON.stringify({
-                        contestsCount: contests.length,
-                        selectedContest,
-                        callsignsCount: callsigns.length,
-                        selectedCallsign,
-                        loading: callsignsLoading,
-                        error
-                    }, null, 2)
-                ),
+                    {error && <div style={{ color: 'red', marginBottom: '20px' }}>Error: {error}</div>}
 
-                React.createElement('h1', { className: 'text-2xl font-bold mb-6' }, 'Livescore Pilot'),
-                React.createElement('p', { className: 'mb-6' }, 'Online tool to follow your progress on the Contest Livescores.'),
-                
-                React.createElement('div', { className: 'space-y-6' },
-                    // Step 1: Contest Selection
-                    React.createElement('div', { className: 'p-6 border rounded-lg bg-white shadow-sm' },
-                        React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 1: Select Contest'),
-                        React.createElement('select', {
-                            className: 'w-full p-2 border rounded',
-                            value: selectedContest,
-                            onChange: handleContestChange
-                        },
-                            React.createElement('option', { value: '' }, '-- Select Contest --'),
-                            contests.map(contest =>
-                                React.createElement('option', {
-                                    key: contest.name,
-                                    value: contest.name
-                                }, `${contest.name} (${contest.count} OPs)`)
-                            )
-                        )
-                    ),
+                    <div className="space-y-6">
+                        {/* Step 1: Contest Selection */}
+                        <div className="p-6 border rounded-lg bg-white shadow-sm">
+                            <h2 className="text-lg font-semibold text-green-700 mb-4">Step 1: Select Contest</h2>
+                            <select
+                                className="w-full p-2 border rounded"
+                                value={selectedContest}
+                                onChange={handleContestChange}
+                            >
+                                <option value="">-- Select Contest --</option>
+                                {contests.map(contest => (
+                                    <option key={contest.name} value={contest.name}>
+                                        {contest.name} ({contest.count} OPs)
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
-                    // Step 2: Callsign Selection
-                    React.createElement('div', {
-                        className: `p-6 border rounded-lg bg-white shadow-sm ${!selectedContest ? 'opacity-50' : ''}`
-                    },
-                        React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 2: Select Callsign'),
-                        callsignsLoading ? 
-                            React.createElement('p', { className: 'text-gray-600' }, 'Loading callsigns...') :
-                            error ?
-                                React.createElement('p', { className: 'text-red-600' }, `Error: ${error}`) :
-                                React.createElement('select', {
-                                    className: 'w-full p-2 border rounded',
-                                    value: selectedCallsign,
-                                    onChange: handleCallsignChange,
-                                    disabled: !selectedContest || callsignsLoading
-                                },
-                                    React.createElement('option', { value: '' }, '-- Select Callsign --'),
-                                    callsigns.map(call =>
-                                        React.createElement('option', {
-                                            key: call.name,
-                                            value: call.name
-                                        }, `${call.name} (${call.qso_count} QSOs)`)
-                                    )
-                                )
-                    ),
+                        {/* Step 2: Callsign Selection */}
+                        <div className={`p-6 border rounded-lg bg-white shadow-sm ${!selectedContest ? 'opacity-50' : ''}`}>
+                            <h2 className="text-lg font-semibold text-green-700 mb-4">Step 2: Select Callsign</h2>
+                            {loading ? (
+                                <p className="text-gray-600">Loading callsigns...</p>
+                            ) : error ? (
+                                <p className="text-red-600">{error}</p>
+                            ) : (
+                                <select
+                                    className="w-full p-2 border rounded"
+                                    value={selectedCallsign}
+                                    onChange={handleCallsignChange}
+                                    disabled={!selectedContest || loading}
+                                >
+                                    <option value="">-- Select Callsign --</option>
+                                    {callsigns.map(call => (
+                                        <option key={call.name} value={call.name}>
+                                            {call.name} ({call.qso_count} QSOs)
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
 
-                    // Step 3: Generate Buttons
-                    (selectedContest && selectedCallsign) && React.createElement('div', { className: 'p-6 border rounded-lg bg-white shadow-sm' },
-                        React.createElement('h2', { className: 'text-lg font-semibold text-green-700 mb-4' }, 'Step 3: Generate Report'),
-                        loading ? 
-                            React.createElement('p', { className: 'text-gray-600' }, 'Loading filters...') :
-                            error ? 
-                                React.createElement('p', { className: 'text-red-600' }, `Error: ${error}`) :
-                                React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
-                                    React.createElement('button', {
-                                        onClick: () => handleGenerate('none', 'none'),
-                                        className: 'p-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors'
-                                    }, 'Generate (All Stations)'),
-                                    filterButtons.map((filter, index) =>
-                                        React.createElement('button', {
-                                            key: index,
-                                            onClick: () => handleGenerate(filter.type, filter.value),
-                                            className: 'p-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors'
-                                        }, `Generate (${filter.type} ${filter.value})`)
-                                    )
-                                )
-                    )
-                ),
-                
-                React.createElement('p', { className: 'mt-8 text-sm text-gray-600 text-center' },
-                    'Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network'
-                )
+                        {/* Display footer */}
+                        <p className="mt-8 text-sm text-gray-600 text-center">
+                            Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
+                        </p>
+                    </div>
+                </div>
             );
         };
 
         // Mount the React component
-        try {
-            console.log('Mounting React component');
-            ReactDOM.render(
-                React.createElement(FilterSelectionForm),
-                document.getElementById('root')
-            );
-        } catch (err) {
-            console.error('Error mounting React component:', err);
-            document.getElementById('root').innerHTML = `Error: ${err.message}`;
-        }
+        ReactDOM.render(<FilterSelectionForm />, document.getElementById('root'));
     </script>
 </body>
 </html>
