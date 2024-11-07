@@ -236,7 +236,6 @@ def index():
         with get_db() as db:
             cursor = db.cursor()
             
-            # Get contests with station counts using the same query as the API
             cursor.execute("""
                 WITH latest_scores AS (
                     SELECT cs.id, cs.callsign, cs.contest
@@ -257,6 +256,7 @@ def index():
                 ORDER BY contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            logger.debug(f"Found contests: {contests}")
             
             selected_contest = request.form.get('contest') or request.args.get('contest')
             selected_callsign = request.form.get('callsign') or request.args.get('callsign')
@@ -279,18 +279,23 @@ def index():
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+                logger.debug(f"Found callsigns for {selected_contest}: {callsigns}")
             
-            return render_template('select_form.html', 
-                                contests=contests,
-                                selected_contest=selected_contest,
-                                selected_callsign=selected_callsign,
-                                callsigns=callsigns)
+            template_data = {
+                'contests': contests,
+                'selected_contest': selected_contest,
+                'selected_callsign': selected_callsign,
+                'callsigns': callsigns
+            }
+            logger.debug(f"Rendering template with data: {template_data}")
+            
+            return render_template('select_form.html', **template_data)
                                 
     except Exception as e:
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
-
+        
 @app.route('/reports/live.html')
 def live_report():
     try:
