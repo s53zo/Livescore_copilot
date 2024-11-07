@@ -48,8 +48,40 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-@app.route('/api/callsigns')
-def get_callsigns():
+@app.route('/api/contest/list')
+def api_get_contests():
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                WITH latest_scores AS (
+                    SELECT cs.id, cs.callsign, cs.contest
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, contest, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        GROUP BY callsign, contest
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.contest = latest.contest
+                        AND cs.timestamp = latest.max_ts
+                )
+                SELECT 
+                    contest, 
+                    COUNT(DISTINCT callsign) as active_stations
+                FROM latest_scores
+                GROUP BY contest
+                ORDER BY contest
+            """)
+            contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            logger.debug(f"Fetched contests: {contests}")
+            return jsonify(contests)
+    except Exception as e:
+        logger.error(f"Error getting contests: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/contest/callsigns')
+def api_get_callsigns():
     contest = request.args.get('contest')
     if not contest:
         return jsonify({"error": "Contest parameter required"}), 400
@@ -59,8 +91,6 @@ def get_callsigns():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            
-            # Updated query to get latest data for each callsign in the contest
             cursor.execute("""
                 WITH latest_scores AS (
                     SELECT cs.id, cs.callsign, cs.qsos, cs.timestamp
@@ -83,7 +113,6 @@ def get_callsigns():
             
             callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
             logger.debug(f"Found {len(callsigns)} callsigns for {contest}")
-            logger.debug(f"Callsigns data: {callsigns}")
             return jsonify(callsigns)
             
     except Exception as e:
@@ -91,38 +120,8 @@ def get_callsigns():
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/callsigns')
-def get_callsigns():
-    contest = request.args.get('contest')
-    if not contest:
-        return jsonify({"error": "Contest parameter required"}), 400
-    
-    try:
-        with get_db() as db:
-            cursor = db.cursor()
-            cursor.execute("""
-                SELECT cs.callsign, cs.qsos AS qso_count
-                FROM contest_scores cs
-                INNER JOIN (
-                    SELECT callsign, MAX(timestamp) as max_ts
-                    FROM contest_scores
-                    WHERE contest = ?
-                    GROUP BY callsign
-                ) latest ON cs.callsign = latest.callsign 
-                    AND cs.timestamp = latest.max_ts
-                WHERE cs.contest = ?
-                ORDER BY cs.callsign
-            """, (contest, contest))
-            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Fetched callsigns for {contest}: {callsigns}")
-            return jsonify(callsigns)
-    except Exception as e:
-        logger.error(f"Error getting callsigns: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/filters')
-def get_filters():
+@app.route('/api/contest/filters')
+def api_get_filters():
     contest = request.args.get('contest')
     callsign = request.args.get('callsign')
     
