@@ -56,42 +56,39 @@ def index():
             
             # Get contests with station counts
             cursor.execute("""
-                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
-                FROM contest_scores
-                GROUP BY contest
-                ORDER BY contest
+                WITH latest_scores AS (
+                    SELECT callsign, contest, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    GROUP BY callsign, contest
+                )
+                SELECT 
+                    cs.contest, 
+                    COUNT(DISTINCT cs.callsign) as active_stations
+                FROM contest_scores cs
+                INNER JOIN latest_scores ls 
+                    ON cs.callsign = ls.callsign 
+                    AND cs.contest = ls.contest 
+                    AND cs.timestamp = ls.max_ts
+                GROUP BY cs.contest
+                ORDER BY cs.contest
             """)
+            
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            logger.debug(f"Found {len(contests)} contests")
             
             # Get contest and callsign from form or query parameters
             selected_contest = request.form.get('contest') or request.args.get('contest')
             selected_callsign = request.form.get('callsign') or request.args.get('callsign')
             
-            callsigns = []
-            
             if selected_contest:
-                # Fetch callsigns with QSO count for the selected contest
-                cursor.execute("""
-                    SELECT cs.callsign, cs.qsos AS qso_count
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
-                    WHERE cs.contest = ?
-                    ORDER BY cs.callsign
-                """, (selected_contest, selected_contest))
-                callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+                logger.debug(f"Selected contest: {selected_contest}")
+            
+            return render_template('select_form.html', 
+                                 contests=contests,
+                                 selected_contest=selected_contest,
+                                 selected_callsign=selected_callsign,
+                                 callsigns=[])  # Empty initial callsigns list
         
-        return render_template('select_form.html', 
-                             contests=contests,
-                             selected_contest=selected_contest,
-                             selected_callsign=selected_callsign,
-                             callsigns=callsigns)
-    
     except Exception as e:
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
