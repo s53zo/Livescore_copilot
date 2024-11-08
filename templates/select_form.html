@@ -187,26 +187,50 @@
             showLoading();
             try {
                 const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const callsigns = await response.json();
+                
+                // Reset callsign select
+                callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
 
-                // Create continent groups
-                const continents = ['NA', 'SA', 'EU', 'AF', 'AS', 'OC', 'Unknown'];
-                continents.forEach(continent => {
-                    const group = document.createElement('optgroup');
-                    group.label = continent;
-                    group.id = `continent-${continent}`;
-                    
-                    // Add callsigns for this continent
-                    callsigns.filter(call => call.continent === continent)
-                            .forEach(call => {
-                                const option = document.createElement('option');
-                                option.value = call.name;
-                                option.textContent = `${call.name} (${call.qso_count} QSOs)`;
-                                group.appendChild(option);
-                            });
-                    
-                    // Only add the group if it has options
-                    if (group.children.length > 0) {
+                // Create continent groups and sort them in desired order
+                const continentOrder = ['EU', 'NA', 'SA', 'AF', 'AS', 'OC', 'Unknown'];
+                const sortedCallsigns = {};
+
+                // Initialize continent groups
+                continentOrder.forEach(continent => {
+                    sortedCallsigns[continent] = [];
+                });
+
+                // Sort callsigns into continent groups
+                callsigns.forEach(call => {
+                    const continent = call.continent || 'Unknown';
+                    if (sortedCallsigns.hasOwnProperty(continent)) {
+                        sortedCallsigns[continent].push(call);
+                    } else {
+                        sortedCallsigns['Unknown'].push(call);
+                    }
+                });
+
+                // Add sorted callsigns to select element
+                continentOrder.forEach(continent => {
+                    const calls = sortedCallsigns[continent];
+                    if (calls.length > 0) {
+                        const group = document.createElement('optgroup');
+                        group.label = `${continent} (${calls.length})`;
+                        
+                        // Sort callsigns within each continent
+                        calls.sort((a, b) => a.name.localeCompare(b.name));
+                        
+                        calls.forEach(call => {
+                            const option = document.createElement('option');
+                            option.value = call.name;
+                            option.textContent = `${call.name} (${call.qso_count} QSOs)`;
+                            group.appendChild(option);
+                        });
+                        
                         callsignSelect.appendChild(group);
                     }
                 });
@@ -215,11 +239,12 @@
                 callsignSelect.disabled = false;
             } catch (error) {
                 console.error('Error fetching callsigns:', error);
+                callsignSelect.innerHTML = '<option value="">Error loading callsigns</option>';
             } finally {
                 hideLoading();
             }
         }
-
+        
         async function handleCallsignChange() {
             const contestSelect = document.getElementById('contestSelect');
             const callsignSelect = document.getElementById('callsignSelect');
