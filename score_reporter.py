@@ -273,10 +273,9 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return {}
     
-    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None, category_filter='same'):
-        """Get station details and nearby competitors with optional filtering"""
+    def get_station_details(self, callsign, contest):
+        """Get station details and all competitors in the same category"""
         self.logger.debug(f"get_station_details called with: callsign={callsign}, contest={contest}")
-        self.logger.debug(f"Filters: type={filter_type}, value={filter_value}, category={category_filter}")
     
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -300,7 +299,7 @@ class ScoreReporter:
                 station_id, station_power, station_assisted = station_record
                 self.logger.debug(f"Reference station - Power: {station_power}, Assisted: {station_assisted}")
                 
-                # Main query for all stations
+                # Query for all stations in the same category
                 query = """
                     WITH station_scores AS (
                         SELECT cs.*
@@ -313,6 +312,8 @@ class ScoreReporter:
                         ) latest ON cs.callsign = latest.callsign 
                             AND cs.timestamp = latest.max_ts
                         WHERE cs.contest = ?
+                        AND (cs.callsign = ? 
+                             OR (cs.power = ? AND cs.assisted = ?))
                     )
                     SELECT 
                         ss.id,
@@ -330,37 +331,14 @@ class ScoreReporter:
                         END as position,
                         1 as rn
                     FROM station_scores ss
-                    WHERE 1=1
-                    {category_filter}
                     ORDER BY ss.score DESC
                 """
-        
-                params = [contest, contest, callsign, callsign]
-                category_clause = ""
-        
-                # Add category filtering only if category_filter is 'same'
-                self.logger.debug(f"Category filter is: {category_filter}")
-                if category_filter == 'same':
-                    category_clause = """
-                        AND (ss.callsign = ? 
-                        OR (ss.power = ? AND ss.assisted = ?))
-                    """
-                    params.extend([callsign, station_power, station_assisted])
-                # For 'all', we don't add any category clause
                 
-                self.logger.debug(f"Category clause: {category_clause}")
-                self.logger.debug(f"Query parameters: {params}")
+                params = [contest, contest, callsign, station_power, station_assisted, callsign, callsign]
                 
-                # Format the query with the category clause
-                formatted_query = query.format(category_filter=category_clause)
-                self.logger.debug(f"Final query: {formatted_query}")
-                
-                # Execute query and log results
-                cursor.execute(formatted_query, params)
+                cursor.execute(query, params)
                 stations = cursor.fetchall()
                 self.logger.debug(f"Query returned {len(stations)} stations")
-                for station in stations:
-                    self.logger.debug(f"Station: {station[1]} - Power: {station[3]}, Assisted: {station[4]}")
                 
                 return stations
                     
@@ -383,7 +361,7 @@ class ScoreReporter:
         rate_str = f"{rate:+d}" if rate != 0 else "0"
         return f"{qsos}/{mults} ({rate_str})"
 
-    def generate_html(self, callsign, contest, stations, output_dir, filter_type=None, filter_value=None, category_filter='same'):
+    def generate_html(self, callsign, contest, stations, output_dir):
         """Generate HTML report"""
         if not stations:
             self.logger.error("No station data available")
@@ -427,16 +405,6 @@ class ScoreReporter:
             </tr>"""
             table_rows.append(row)
     
-        # Prepare filter display text
-        if filter_type and filter_value:
-            filter_display = f"| Filtered by: {filter_type.upper()}: {filter_value}"
-        else:
-            filter_display = ""
-    
-        # Category filter information
-        category_checked = 'checked="checked"' if category_filter == 'all' else ''
-        category_label = "Showing all categories" if category_filter == 'all' else "Showing only matching category"
-    
         # Format HTML
         html_content = template.format(
             contest=contest,
@@ -444,13 +412,7 @@ class ScoreReporter:
             timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
             power=stations[0][3],
             assisted=stations[0][4],
-            table_rows='\n'.join(table_rows),
-            filter_type=filter_type or '',
-            filter_value=filter_value or '',
-            filter_display=filter_display,
-            category_filter=category_filter,
-            category_checked=category_checked,
-            category_label=category_label
+            table_rows='\n'.join(table_rows)
         )
     
         # Create output directory if it doesn't exist
