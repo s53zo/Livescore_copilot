@@ -273,8 +273,8 @@ def live_report():
         reporter = ScoreReporter(Config.DB_PATH)
 
         # Verify contest and callsign exist in database
-        with get_db() as db:
-            cursor = db.cursor()
+        with get_db() as conn:
+            cursor = conn.cursor()
             cursor.execute("""
                 SELECT COUNT(*) 
                 FROM contest_scores 
@@ -288,15 +288,24 @@ def live_report():
         stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
         if stations:
-            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-            if success:
-                # Set cache control headers
-                response = send_from_directory(Config.OUTPUT_DIR, 'live.html')
+            try:
+                # Load template
+                with open(os.path.join(Config.OUTPUT_DIR, '..', 'templates', 'score_template.html'), 'r') as f:
+                    template = f.read()
+
+                # Generate HTML content using the template
+                html_content = reporter.generate_html_content(template, callsign, contest, stations)
+                
+                # Create response with appropriate headers
+                response = make_response(html_content)
+                response.headers['Content-Type'] = 'text/html'
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
                 logger.info(f"Successfully generated report for {callsign} in {contest}")
                 return response
-            else:
-                logger.error(f"Failed to generate report for {callsign} in {contest}")
+            
+            except Exception as e:
+                logger.error(f"Error generating HTML content: {e}")
+                logger.error(traceback.format_exc())
                 return render_template('error.html', error="Failed to generate report")
         else:
             logger.error(f"No station data found for {callsign} in {contest}")
