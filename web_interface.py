@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, send_from_directory, jsonify
+from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
 import sqlite3
 import os
 import logging
