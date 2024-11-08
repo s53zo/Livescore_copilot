@@ -91,25 +91,6 @@
             color: #666;
             font-size: 0.9em;
         }
-        .continent-tag {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.85em;
-            margin-left: 8px;
-        }
-        .continent-NA { background-color: #e3f2fd; color: #1565c0; }
-        .continent-SA { background-color: #f1f8e9; color: #558b2f; }
-        .continent-EU { background-color: #fff3e0; color: #ef6c00; }
-        .continent-AF { background-color: #fce4ec; color: #c2185b; }
-        .continent-AS { background-color: #e8eaf6; color: #3949ab; }
-        .continent-OC { background-color: #f3e5f5; color: #7b1fa2; }
-        .continent-Unknown { background-color: #eeeeee; color: #757575; }
-        
-        optgroup {
-            font-weight: bold;
-            color: #333;
-        }
     </style>
 </head>
 <body>
@@ -134,16 +115,10 @@
         <h2><span class="chevron-right">▶</span> Step 2: Select Callsign</h2>
         <select id="callsignSelect" onchange="handleCallsignChange()" {% if not selected_contest %}disabled{% endif %}>
             <option value="">-- Select Callsign --</option>
-            {% for continent in ['NA', 'SA', 'EU', 'AF', 'AS', 'OC', 'Unknown'] %}
-            <optgroup label="{{ continent }}" id="continent-{{ continent }}">
-                {% for callsign in callsigns %}
-                    {% if callsign.continent == continent %}
-                    <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
-                        {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
-                    </option>
-                    {% endif %}
-                {% endfor %}
-            </optgroup>
+            {% for callsign in callsigns %}
+            <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
+                {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
+            </option>
             {% endfor %}
         </select>
     </div>
@@ -176,82 +151,36 @@
             const callsignSelect = document.getElementById('callsignSelect');
             const filterButtons = document.getElementById('filterButtons');
             const contest = contestSelect.value;
-        
-            console.log("Contest selected:", contest);  // Debug log
-        
+
             // Reset subsequent steps
             callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
             filterButtons.classList.add('disabled');
             document.getElementById('callsignStep').classList.add('disabled');
-        
+
             if (!contest) return;
-        
+
             showLoading();
             try {
-                console.log("Fetching callsigns for contest:", contest);  // Debug log
                 const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
-                console.log("Response status:", response.status);  // Debug log
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
                 const callsigns = await response.json();
-                console.log("Received callsigns:", callsigns);  // Debug log
-                          
-                // Reset callsign select
+
                 callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
-
-                // Create continent groups and sort them in desired order
-                const continentOrder = ['EU', 'NA', 'SA', 'AF', 'AS', 'OC', 'Unknown'];
-                const sortedCallsigns = {};
-
-                // Initialize continent groups
-                continentOrder.forEach(continent => {
-                    sortedCallsigns[continent] = [];
-                });
-
-                // Sort callsigns into continent groups
                 callsigns.forEach(call => {
-                    const continent = call.continent || 'Unknown';
-                    if (sortedCallsigns.hasOwnProperty(continent)) {
-                        sortedCallsigns[continent].push(call);
-                    } else {
-                        sortedCallsigns['Unknown'].push(call);
-                    }
-                });
-
-                // Add sorted callsigns to select element
-                continentOrder.forEach(continent => {
-                    const calls = sortedCallsigns[continent];
-                    if (calls.length > 0) {
-                        const group = document.createElement('optgroup');
-                        group.label = `${continent} (${calls.length})`;
-                        
-                        // Sort callsigns within each continent
-                        calls.sort((a, b) => a.name.localeCompare(b.name));
-                        
-                        calls.forEach(call => {
-                            const option = document.createElement('option');
-                            option.value = call.name;
-                            option.textContent = `${call.name} (${call.qso_count} QSOs)`;
-                            group.appendChild(option);
-                        });
-                        
-                        callsignSelect.appendChild(group);
-                    }
+                    const option = document.createElement('option');
+                    option.value = call.name;
+                    option.textContent = `${call.name} (${call.qso_count} QSOs)`;
+                    callsignSelect.appendChild(option);
                 });
 
                 document.getElementById('callsignStep').classList.remove('disabled');
                 callsignSelect.disabled = false;
             } catch (error) {
                 console.error('Error fetching callsigns:', error);
-                callsignSelect.innerHTML = '<option value="">Error loading callsigns</option>';
             } finally {
                 hideLoading();
             }
         }
-        
+
         async function handleCallsignChange() {
             const contestSelect = document.getElementById('contestSelect');
             const callsignSelect = document.getElementById('callsignSelect');

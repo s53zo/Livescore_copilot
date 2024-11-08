@@ -7,36 +7,6 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
-from functools import lru_cache
-import plistlib
-
-# Cache the cty.plist data
-@lru_cache(maxsize=1)
-def load_cty_data():
-    """Load and cache the cty.plist data"""
-    try:
-        with open('/opt/livescore/cty.plist', 'rb') as fp:
-            return plistlib.load(fp)
-    except Exception as e:
-        logger.error(f"Error loading cty.plist: {e}")
-        return {}
-
-@lru_cache(maxsize=1000)
-def get_continent_from_dxcc(dxcc_country):
-    """Get continent based on DXCC country from cached cty.plist data"""
-    if not dxcc_country:
-        return 'Unknown'
-        
-    try:
-        cty_data = load_cty_data()
-        for prefix_data in cty_data.values():
-            if isinstance(prefix_data, dict):
-                if prefix_data.get('Country') == dxcc_country:
-                    return prefix_data.get('Continent', 'Unknown')
-        return 'Unknown'
-    except Exception as e:
-        logger.error(f"Error getting continent for {dxcc_country}: {e}")
-        return 'Unknown'
 
 # Set up detailed logging
 logging.basicConfig(
@@ -86,39 +56,42 @@ def index():
             
             # Get contests with station counts
             cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT callsign, contest, MAX(timestamp) as max_ts
-                    FROM contest_scores
-                    GROUP BY callsign, contest
-                )
-                SELECT 
-                    cs.contest, 
-                    COUNT(DISTINCT cs.callsign) as active_stations
-                FROM contest_scores cs
-                INNER JOIN latest_scores ls 
-                    ON cs.callsign = ls.callsign 
-                    AND cs.contest = ls.contest 
-                    AND cs.timestamp = ls.max_ts
-                GROUP BY cs.contest
-                ORDER BY cs.contest
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY contest
             """)
-            
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
-            logger.debug(f"Found {len(contests)} contests")
             
             # Get contest and callsign from form or query parameters
             selected_contest = request.form.get('contest') or request.args.get('contest')
             selected_callsign = request.form.get('callsign') or request.args.get('callsign')
             
-            if selected_contest:
-                logger.debug(f"Selected contest: {selected_contest}")
+            callsigns = []
             
-            return render_template('select_form.html', 
-                                 contests=contests,
-                                 selected_contest=selected_contest,
-                                 selected_callsign=selected_callsign,
-                                 callsigns=[])  # Empty initial callsigns list
+            if selected_contest:
+                # Fetch callsigns with QSO count for the selected contest
+                cursor.execute("""
+                    SELECT cs.callsign, cs.qsos AS qso_count
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.timestamp = latest.max_ts
+                    WHERE cs.contest = ?
+                    ORDER BY cs.callsign
+                """, (selected_contest, selected_contest))
+                callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
         
+        return render_template('select_form.html', 
+                             contests=contests,
+                             selected_contest=selected_contest,
+                             selected_callsign=selected_callsign,
+                             callsigns=callsigns)
+    
     except Exception as e:
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
@@ -211,26 +184,8 @@ def get_contests():
         logger.error(f"Error fetching contests: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-def get_continent_from_dxcc(dxcc_country):
-    """Get continent based on DXCC country from cty.plist"""
-    try:
-        import plistlib
-        with open('/opt/livescore/cty.plist', 'rb') as fp:
-            cty_data = plistlib.load(fp)
-            
-        # Search through the plist data for matching country
-        for prefix_data in cty_data.values():
-            if isinstance(prefix_data, dict):
-                if prefix_data.get('Country') == dxcc_country:
-                    return prefix_data.get('Continent', 'Unknown')
-        return 'Unknown'
-    except Exception as e:
-        logger.error(f"Error reading cty.plist: {e}")
-        return 'Unknown'
-
 @app.route('/livescore-pilot/api/callsigns')
 def get_callsigns():
-    """Get callsigns for a contest with their QSO counts and continents"""
     contest = request.args.get('contest')
     if not contest:
         return jsonify({"error": "Contest parameter required"}), 400
@@ -238,42 +193,23 @@ def get_callsigns():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            
-            # More efficient query that gets only the latest records
             cursor.execute("""
-                WITH latest_records AS (
-                    SELECT MAX(id) as latest_id
+                SELECT cs.callsign, cs.qsos AS qso_count
+                FROM contest_scores cs
+                INNER JOIN (
+                    SELECT callsign, MAX(timestamp) as max_ts
                     FROM contest_scores
                     WHERE contest = ?
                     GROUP BY callsign
-                )
-                SELECT 
-                    cs.callsign,
-                    cs.qsos,
-                    qi.dxcc_country
-                FROM contest_scores cs
-                INNER JOIN latest_records lr ON cs.id = lr.latest_id
-                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                ) latest ON cs.callsign = latest.callsign 
+                    AND cs.timestamp = latest.max_ts
+                WHERE cs.contest = ?
                 ORDER BY cs.callsign
-            """, (contest,))
-
-            callsigns = []
-            for row in cursor.fetchall():
-                callsign, qso_count, dxcc_country = row
-                continent = get_continent_from_dxcc(dxcc_country)
-                
-                callsigns.append({
-                    "name": callsign,
-                    "qso_count": qso_count or 0,
-                    "continent": continent
-                })
-
-            logger.debug(f"Returning {len(callsigns)} callsigns for contest {contest}")
+            """, (contest, contest))
+            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
             return jsonify(callsigns)
-
     except Exception as e:
-        logger.error(f"Error in get_callsigns: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Error fetching callsigns: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/livescore-pilot/api/filters')
