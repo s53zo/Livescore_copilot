@@ -6,6 +6,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <!-- Add other required scripts -->
 </head>
+    
 <body>
     <div id="root"></div>
     <script>
