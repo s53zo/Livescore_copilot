@@ -289,39 +289,11 @@ class ScoreReporter:
         return f"{qsos}/{mults} ({rate_str})"
 
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details and all competitors in the same category with optional filtering"""
-        self.logger.debug("=" * 50)
-        self.logger.debug("get_station_details called with parameters:")
-        self.logger.debug(f"Contest: {contest}")
-        self.logger.debug(f"Callsign: {callsign}")
-        self.logger.debug(f"Filter type: {filter_type}")
-        self.logger.debug(f"Filter value: {filter_value}")
-        self.logger.debug("=" * 50)
-
+        """Get station details and all competitors with optional filtering"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                # First verify data exists
                 cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT COUNT(*) 
-                    FROM contest_scores 
-                    WHERE contest = ? AND callsign = ?
-                """, (contest, callsign))
-                
-                count = cursor.fetchone()[0]
-                if count == 0:
-                    self.logger.error(f"No records found for {callsign} in {contest}")
-                    # Log available contests and callsigns for debugging
-                    cursor.execute("SELECT DISTINCT contest, callsign FROM contest_scores ORDER BY contest, callsign")
-                    available = cursor.fetchall()
-                    self.logger.debug("Available contest/callsign pairs:")
-                    for c, call in available:
-                        self.logger.debug(f"{c}: {call}")
-                    return None
-            
-                station_id, station_power, station_assisted = station_record
-                self.logger.debug(f"Reference station - Power: {station_power}, Assisted: {station_assisted}")
-                
+    
                 # Base query with QTH info join
                 query = """
                     WITH latest_scores AS (
@@ -345,11 +317,9 @@ class ScoreReporter:
                         LEFT JOIN qth_info qi 
                             ON qi.contest_score_id = cs.id
                         WHERE cs.contest = ?
-                        AND (cs.callsign = ? 
-                             OR (cs.power = ? AND cs.assisted = ?))
                 """
                 
-                params = [contest, contest, callsign, station_power, station_assisted]
+                params = [contest, contest]
     
                 # Add filter conditions if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
