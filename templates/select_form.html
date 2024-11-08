@@ -176,22 +176,29 @@
             const callsignSelect = document.getElementById('callsignSelect');
             const filterButtons = document.getElementById('filterButtons');
             const contest = contestSelect.value;
-
+        
+            console.log("Contest selected:", contest);  // Debug log
+        
             // Reset subsequent steps
             callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
             filterButtons.classList.add('disabled');
             document.getElementById('callsignStep').classList.add('disabled');
-
+        
             if (!contest) return;
-
+        
             showLoading();
             try {
+                console.log("Fetching callsigns for contest:", contest);  // Debug log
                 const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
+                console.log("Response status:", response.status);  // Debug log
+                
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const callsigns = await response.json();
                 
+                const callsigns = await response.json();
+                console.log("Received callsigns:", callsigns);  // Debug log
+                          
                 // Reset callsign select
                 callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
 
