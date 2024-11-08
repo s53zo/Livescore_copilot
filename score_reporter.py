@@ -402,16 +402,8 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return None
 
-    def generate_html(self, callsign, contest, stations, output_dir):
-        """Generate HTML report with filter information"""
-        if not stations:
-            self.logger.error("No station data available")
-            return False
-    
-        template = self.load_template()
-        if not template:
-            return False
-    
+    def generate_html_content(self, template, callsign, contest, stations):
+        """Generate HTML content directly without writing to file"""
         try:
             # Get filter information for the header if available
             filter_info = ""
@@ -468,39 +460,20 @@ class ScoreReporter:
                 </tr>"""
                 table_rows.append(row)
     
-            # Format HTML with filter info
-            try:
-                html_content = template.format(
-                    contest=contest,
-                    callsign=callsign,
-                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                    power=stations[0][3],
-                    assisted=stations[0][4],
-                    filter_info=filter_info,
-                    table_rows='\n'.join(table_rows)
-                )
-            except Exception as e:
-                self.logger.error(f"Error formatting HTML template: {e}")
-                self.logger.error(f"Template variables: contest={contest}, callsign={callsign}, "
-                                f"power={stations[0][3]}, assisted={stations[0][4]}, "
-                                f"filter_info={filter_info}")
-                raise
-    
-            # Create output directory if it doesn't exist
-            os.makedirs(output_dir, exist_ok=True)
+            # Format HTML
+            html_content = template.format(
+                contest=contest,
+                callsign=callsign,
+                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                power=stations[0][3],
+                assisted=stations[0][4],
+                filter_info=filter_info,
+                table_rows='\n'.join(table_rows)
+            )
             
-            # Write HTML file
-            output_file = os.path.join(output_dir, 'live.html')
-            try:
-                with open(output_file, 'w') as f:
-                    f.write(html_content)
-                self.logger.info(f"Report generated: {output_file}")
-                return True
-            except IOError as e:
-                self.logger.error(f"Error writing report file: {e}")
-                return False
+            return html_content
     
         except Exception as e:
-            self.logger.error(f"Error generating HTML: {e}")
+            self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
-            return False
+            raise
