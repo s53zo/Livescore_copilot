@@ -118,6 +118,7 @@
         <div>Monitoring: {callsign}</div>
         <div>Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span></div>
         <div>Updated: {timestamp}</div>
+        {filter_info and f'<div class="filter-info">Filters: {filter_info}</div>' or ''}
     </div>
 
     <table>
@@ -139,6 +140,7 @@
 
     <div class="footer">
         Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network
+        <br><a href="https://azure.s53m.com/livescore-pilot">https://azure.s53m.com/livescore-pilot</a>
     </div>
 </body>
 </html>
