@@ -202,6 +202,7 @@ class ScoreReporter:
                         LEFT JOIN qth_info qi 
                             ON qi.contest_score_id = cs.id
                         WHERE cs.contest = ?
+                        AND cs.qsos > 0
                 """
                 
                 params = [contest, contest]
