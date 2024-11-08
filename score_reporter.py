@@ -315,19 +315,21 @@ class ScoreReporter:
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
-
+    
+            # Get DXCC country and continent for the selected station
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                           qi.arrl_section, qi.state_province
+                    SELECT qi.dxcc_country
                     FROM contest_scores cs
                     JOIN qth_info qi ON qi.contest_score_id = cs.id
                     WHERE cs.callsign = ? AND cs.contest = ?
                     ORDER BY cs.timestamp DESC
                     LIMIT 1
                 """, (callsign, contest))
-                qth_info = cursor.fetchone()
+                row = cursor.fetchone()
+                dxcc_country = row[0] if row else None
+                continent = self.get_continent_from_dxcc(dxcc_country) if dxcc_country else "Unknown"
                 
                 if qth_info:
                     filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", "State/Province"]
@@ -449,6 +451,7 @@ class ScoreReporter:
                 timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
                 power=stations[0][3],
                 assisted=stations[0][4],
+                continent=continent,
                 filter_info_div=filter_info_div,
                 table_rows='\n'.join(table_rows),
                 additional_css=additional_css
