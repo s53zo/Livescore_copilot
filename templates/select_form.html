@@ -9,13 +9,29 @@
             margin: 20px auto;
             padding: 20px;
         }
-        .form-group {
-            margin-bottom: 15px;
+        .step {
+            margin-bottom: 25px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
         }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
+        .step.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            background-color: #f5f5f5;
+        }
+        .step h2 {
+            margin-top: 0;
+            color: #4CAF50;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chevron-right {
+            color: #4CAF50;
+            font-size: 1.2em;
         }
         select {
             width: 100%;
@@ -29,37 +45,44 @@
             background-color: #f5f5f5;
             cursor: not-allowed;
         }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
+        .generate-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .btn {
+            padding: 10px 15px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 14px;
+            text-align: center;
+            transition: background-color 0.3s;
         }
-        button:hover {
-            background-color: #45a049;
+        .btn-primary {
+            background-color: #4CAF50;
+            color: white;
         }
-        button:disabled {
+        .btn-secondary {
+            background-color: #2196F3;
+            color: white;
+        }
+        .btn:hover {
+            opacity: 0.9;
+        }
+        .btn:disabled {
             background-color: #cccccc;
             cursor: not-allowed;
         }
-        .step {
-            margin-bottom: 25px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background-color: #fff;
+        #filterButtons {
+            display: none;
         }
-        .step h2 {
-            margin-top: 0;
-            color: #4CAF50;
-            font-size: 1.2em;
-        }
-        .disabled-step {
-            opacity: 0.5;
-            pointer-events: none;
+        .loading {
+            text-align: center;
+            color: #666;
+            margin: 10px 0;
+            display: none;
         }
         .footer {
             margin-top: 30px;
@@ -74,53 +97,148 @@
     <h1>Livescore Pilot</h1>
     <p>Online tool to follow your progress on the Contest Livescores.</p>
     
-    <form method="POST" id="scoreForm">
-        <div class="step" id="step1">
-            <h2>Step 1: Select Contest</h2>
-            <div class="form-group">
-                <label for="contest">Choose a Contest:</label>
-                <select name="contest" id="contest" required onchange="this.form.submit()">
-                    <option value="">-- Select Contest --</option>
-                    {% for contest in contests %}
-                    <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
-                        {{ contest.name }} ({{ contest.count }} OPs)
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
+    <div id="loadingIndicator" class="loading">Loading...</div>
 
-        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step2">
-            <h2>Step 2: Select Callsign</h2>
-            <div class="form-group">
-                <label for="callsign">Choose a Callsign:</label>
-                <select name="callsign" id="callsign" {% if not selected_contest %}disabled{% endif %} required onchange="handleCallsignChange()">
-                    <option value="">-- Select Callsign --</option>
-                    {% for callsign in callsigns %}
-                    <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
-                        {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
+    <div class="step">
+        <h2><span class="chevron-right">▶</span> Step 1: Select Contest</h2>
+        <select id="contestSelect" onchange="handleContestChange()">
+            <option value="">-- Select Contest --</option>
+            {% for contest in contests %}
+            <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
+                {{ contest.name }} ({{ contest.count }} OPs)
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="step {% if not selected_contest %}disabled{% endif %}" id="callsignStep">
+        <h2><span class="chevron-right">▶</span> Step 2: Select Callsign</h2>
+        <select id="callsignSelect" onchange="handleCallsignChange()" {% if not selected_contest %}disabled{% endif %}>
+            <option value="">-- Select Callsign --</option>
+            {% for callsign in callsigns %}
+            <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
+                {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="step disabled" id="filterButtons">
+        <h2><span class="chevron-right">▶</span> Step 3: Generate Report</h2>
+        <div class="generate-buttons">
+            <button onclick="generateReport('none', 'none')" class="btn btn-primary">
+                Generate Full Report
+            </button>
+            <!-- Filter buttons will be added here dynamically -->
         </div>
-        
-        <button type="submit" id="generateButton" {% if not selected_contest %}disabled{% endif %}>Generate Report</button>
-    </form>
-    
+    </div>
+
     <div class="footer">
         Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
     </div>
 
     <script>
-        function handleCallsignChange() {
-            const callsignSelect = document.getElementById('callsign');
-            const generateButton = document.getElementById('generateButton');
-            generateButton.disabled = !callsignSelect.value;
+        function showLoading() {
+            document.getElementById('loadingIndicator').style.display = 'block';
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
-            handleCallsignChange();
+        function hideLoading() {
+            document.getElementById('loadingIndicator').style.display = 'none';
+        }
+
+        async function handleContestChange() {
+            const contestSelect = document.getElementById('contestSelect');
+            const callsignSelect = document.getElementById('callsignSelect');
+            const filterButtons = document.getElementById('filterButtons');
+            const contest = contestSelect.value;
+
+            // Reset subsequent steps
+            callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
+            filterButtons.classList.add('disabled');
+            document.getElementById('callsignStep').classList.add('disabled');
+
+            if (!contest) return;
+
+            showLoading();
+            try {
+                const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
+                const callsigns = await response.json();
+
+                callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
+                callsigns.forEach(call => {
+                    const option = document.createElement('option');
+                    option.value = call.name;
+                    option.textContent = `${call.name} (${call.qso_count} QSOs)`;
+                    callsignSelect.appendChild(option);
+                });
+
+                document.getElementById('callsignStep').classList.remove('disabled');
+                callsignSelect.disabled = false;
+            } catch (error) {
+                console.error('Error fetching callsigns:', error);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function handleCallsignChange() {
+            const contestSelect = document.getElementById('contestSelect');
+            const callsignSelect = document.getElementById('callsignSelect');
+            const filterButtons = document.getElementById('filterButtons');
+            const contest = contestSelect.value;
+            const callsign = callsignSelect.value;
+
+            filterButtons.classList.add('disabled');
+
+            if (!contest || !callsign) return;
+
+            showLoading();
+            try {
+                const response = await fetch(`/livescore-pilot/api/filters?contest=${encodeURIComponent(contest)}&callsign=${encodeURIComponent(callsign)}`);
+                const filters = await response.json();
+
+                const buttonContainer = filterButtons.querySelector('.generate-buttons');
+                // Clear existing filter buttons but keep the "Generate Full Report" button
+                const fullReportButton = buttonContainer.firstElementChild;
+                buttonContainer.innerHTML = '';
+                buttonContainer.appendChild(fullReportButton);
+
+                filters.forEach(filter => {
+                    const button = document.createElement('button');
+                    button.className = 'btn btn-secondary';
+                    button.textContent = `Generate (${filter.type} ${filter.value})`;
+                    button.onclick = () => generateReport(filter.type, filter.value);
+                    buttonContainer.appendChild(button);
+                });
+
+                filterButtons.classList.remove('disabled');
+                filterButtons.style.display = 'block';
+            } catch (error) {
+                console.error('Error fetching filters:', error);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function generateReport(filterType, filterValue) {
+            const contest = document.getElementById('contestSelect').value;
+            const callsign = document.getElementById('callsignSelect').value;
+            
+            const params = new URLSearchParams({
+                contest: contest,
+                callsign: callsign,
+                filter_type: filterType,
+                filter_value: filterValue
+            });
+
+            window.location.href = `/reports/live.html?${params.toString()}`;
+        }
+
+        // Initialize the form based on any existing selections
+        document.addEventListener('DOMContentLoaded', () => {
+            if (document.getElementById('contestSelect').value) {
+                handleContestChange();
+            }
         });
     </script>
 </body>
