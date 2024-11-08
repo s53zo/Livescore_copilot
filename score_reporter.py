@@ -288,104 +288,6 @@ class ScoreReporter:
         rate_str = f"{rate:+d}" if rate != 0 else "0"
         return f"{qsos}/{mults} ({rate_str})"
 
-    
-
-    def generate_html(self, callsign, contest, stations, output_dir):
-        """Generate HTML report with filter information"""
-            if not stations:
-                                self.logger.error("No station data available")
-                                return False
-                    
-                            template = self.load_template()
-                            if not template:
-                                return False
-                    
-                            try:
-                                # Get filter information for the header if available
-                                filter_info = ""
-                                with sqlite3.connect(self.db_path) as conn:
-                                    cursor = conn.cursor()
-                                    cursor.execute("""
-                                        SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                                               qi.arrl_section, qi.state_province
-                                        FROM contest_scores cs
-                                        JOIN qth_info qi ON qi.contest_score_id = cs.id
-                                        WHERE cs.callsign = ? AND cs.contest = ?
-                                        ORDER BY cs.timestamp DESC
-                                        LIMIT 1
-                                    """, (callsign, contest))
-                                    qth_info = cursor.fetchone()
-                                    
-                                    if qth_info:
-                                        filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", "State/Province"]
-                                        filter_info = " | ".join(f"{label}: {value}" 
-                                                               for label, value in zip(filter_labels, qth_info) 
-                                                               if value)
-                    
-                                # Generate table rows
-                                table_rows = []
-                                for i, station in enumerate(stations, 1):
-                                    station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                                    
-                                    # Get band breakdown for this station
-                                    band_breakdown = self.get_band_breakdown_with_rate(station_id, callsign_val, contest)
-                                    
-                                    # Get total QSO rate
-                                    total_rate = self.get_total_qso_rate(station_id, callsign_val, contest)
-                                    
-                                    # Format timestamp
-                                    ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                                    
-                                    # Determine if this is the highlighted row
-                                    highlight = ' class="highlight"' if callsign_val == callsign else ''
-                                    
-                                    # Create the table row
-                                    row = f"""
-                                    <tr{highlight}>
-                                        <td>{i}</td>
-                                        <td>{callsign_val}</td>
-                                        <td>{score:,}</td>
-                                        <td class="band-data">{self.format_band_data(band_breakdown.get('160'))}</td>
-                                        <td class="band-data">{self.format_band_data(band_breakdown.get('80'))}</td>
-                                        <td class="band-data">{self.format_band_data(band_breakdown.get('40'))}</td>
-                                        <td class="band-data">{self.format_band_data(band_breakdown.get('20'))}</td>
-                                        <td class="band-data">{self.format_band_data(band_breakdown.get('15'))}</td>
-                                        <td class="band-data">{self.format_band_data(band_breakdown.get('10'))}</td>
-                                        <td class="band-data">{self.format_total_data(qsos, mults, total_rate)}</td>
-                                        <td>{ts}</td>
-                                    </tr>"""
-                                    table_rows.append(row)
-                    
-                                # Format HTML
-                                html_content = template.format(
-                                    contest=contest,
-                                    callsign=callsign,
-                                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                                    power=stations[0][3],
-                                    assisted=stations[0][4],
-                                    filter_info=filter_info,
-                                    table_rows='\n'.join(table_rows)
-                                )
-                    
-                                # Create output directory if it doesn't exist
-                                os.makedirs(output_dir, exist_ok=True)
-                                
-                                # Write HTML file
-                                output_file = os.path.join(output_dir, 'live.html')
-                                try:
-                                    with open(output_file, 'w') as f:
-                                        f.write(html_content)
-                                    self.logger.info(f"Report generated: {output_file}")
-                                    return True
-                                except IOError as e:
-                                    self.logger.error(f"Error writing report: {e}")
-                                    return False
-                    
-                            except Exception as e:
-                                self.logger.error(f"Error generating HTML: {e}")
-                                self.logger.error(traceback.format_exc())
-                                return False
-
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """Get station details and all competitors in the same category with optional filtering"""
         self.logger.debug(f"get_station_details called with: callsign={callsign}, contest={contest}, "
@@ -492,3 +394,106 @@ class ScoreReporter:
             self.logger.error(f"Unexpected error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
             return None
+
+    def generate_html(self, callsign, contest, stations, output_dir):
+        """Generate HTML report with filter information"""
+        if not stations:
+            self.logger.error("No station data available")
+            return False
+    
+        template = self.load_template()
+        if not template:
+            return False
+    
+        try:
+            # Get filter information for the header if available
+            filter_info = ""
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                           qi.arrl_section, qi.state_province
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.callsign = ? AND cs.contest = ?
+                    ORDER BY cs.timestamp DESC
+                    LIMIT 1
+                """, (callsign, contest))
+                qth_info = cursor.fetchone()
+                
+                if qth_info:
+                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", "State/Province"]
+                    filter_info = " | ".join(f"{label}: {value}" 
+                                           for label, value in zip(filter_labels, qth_info) 
+                                           if value)
+    
+            # Generate table rows
+            table_rows = []
+            for i, station in enumerate(stations, 1):
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+                
+                # Get band breakdown for this station
+                band_breakdown = self.get_band_breakdown_with_rate(station_id, callsign_val, contest)
+                
+                # Get total QSO rate
+                total_rate = self.get_total_qso_rate(station_id, callsign_val, contest)
+                
+                # Format timestamp
+                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                
+                # Determine if this is the highlighted row
+                highlight = ' class="highlight"' if callsign_val == callsign else ''
+                
+                # Create the table row
+                row = f"""
+                <tr{highlight}>
+                    <td>{i}</td>
+                    <td>{callsign_val}</td>
+                    <td>{score:,}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'))}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'))}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'))}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'))}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'))}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'))}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_rate)}</td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                </tr>"""
+                table_rows.append(row)
+    
+            # Format HTML with filter info
+            try:
+                html_content = template.format(
+                    contest=contest,
+                    callsign=callsign,
+                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                    power=stations[0][3],
+                    assisted=stations[0][4],
+                    filter_info=filter_info,
+                    table_rows='\n'.join(table_rows)
+                )
+            except Exception as e:
+                self.logger.error(f"Error formatting HTML template: {e}")
+                self.logger.error(f"Template variables: contest={contest}, callsign={callsign}, "
+                                f"power={stations[0][3]}, assisted={stations[0][4]}, "
+                                f"filter_info={filter_info}")
+                raise
+    
+            # Create output directory if it doesn't exist
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Write HTML file
+            output_file = os.path.join(output_dir, 'live.html')
+            try:
+                with open(output_file, 'w') as f:
+                    f.write(html_content)
+                self.logger.info(f"Report generated: {output_file}")
+                return True
+            except IOError as e:
+                self.logger.error(f"Error writing report file: {e}")
+                return False
+    
+        except Exception as e:
+            self.logger.error(f"Error generating HTML: {e}")
+            self.logger.error(traceback.format_exc())
+            return False
