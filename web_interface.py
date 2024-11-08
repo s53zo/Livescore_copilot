@@ -7,6 +7,36 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
+from functools import lru_cache
+import plistlib
+
+# Cache the cty.plist data
+@lru_cache(maxsize=1)
+def load_cty_data():
+    """Load and cache the cty.plist data"""
+    try:
+        with open('/opt/livescore/cty.plist', 'rb') as fp:
+            return plistlib.load(fp)
+    except Exception as e:
+        logger.error(f"Error loading cty.plist: {e}")
+        return {}
+
+@lru_cache(maxsize=1000)
+def get_continent_from_dxcc(dxcc_country):
+    """Get continent based on DXCC country from cached cty.plist data"""
+    if not dxcc_country:
+        return 'Unknown'
+        
+    try:
+        cty_data = load_cty_data()
+        for prefix_data in cty_data.values():
+            if isinstance(prefix_data, dict):
+                if prefix_data.get('Country') == dxcc_country:
+                    return prefix_data.get('Continent', 'Unknown')
+        return 'Unknown'
+    except Exception as e:
+        logger.error(f"Error getting continent for {dxcc_country}: {e}")
+        return 'Unknown'
 
 # Set up detailed logging
 logging.basicConfig(
@@ -209,41 +239,32 @@ def get_callsigns():
         with get_db() as db:
             cursor = db.cursor()
             
-            # Get the latest data for each callsign in the contest
+            # More efficient query that gets only the latest records
             cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT cs.id, cs.callsign, cs.qsos
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ) latest 
-                    ON cs.callsign = latest.callsign 
-                    AND cs.timestamp = latest.max_ts
-                    WHERE cs.contest = ?
+                WITH latest_records AS (
+                    SELECT MAX(id) as latest_id
+                    FROM contest_scores
+                    WHERE contest = ?
+                    GROUP BY callsign
                 )
                 SELECT 
-                    ls.callsign,
-                    ls.qsos,
+                    cs.callsign,
+                    cs.qsos,
                     qi.dxcc_country
-                FROM latest_scores ls
-                LEFT JOIN qth_info qi ON qi.contest_score_id = ls.id
-                ORDER BY ls.callsign
-            """, (contest, contest))
+                FROM contest_scores cs
+                INNER JOIN latest_records lr ON cs.id = lr.latest_id
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                ORDER BY cs.callsign
+            """, (contest,))
 
-            results = cursor.fetchall()
             callsigns = []
-
-            # Process each result and add continent information
-            for row in results:
+            for row in cursor.fetchall():
                 callsign, qso_count, dxcc_country = row
-                continent = get_continent_from_dxcc(dxcc_country) if dxcc_country else 'Unknown'
+                continent = get_continent_from_dxcc(dxcc_country)
                 
                 callsigns.append({
                     "name": callsign,
-                    "qso_count": qso_count or 0,  # Convert None to 0
+                    "qso_count": qso_count or 0,
                     "continent": continent
                 })
 
