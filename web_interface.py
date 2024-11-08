@@ -82,6 +82,7 @@ def index():
                     ) latest ON cs.callsign = latest.callsign 
                         AND cs.timestamp = latest.max_ts
                     WHERE cs.contest = ?
+                    AND cs.qsos > 0
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
@@ -204,6 +205,7 @@ def get_callsigns():
                 ) latest ON cs.callsign = latest.callsign 
                     AND cs.timestamp = latest.max_ts
                 WHERE cs.contest = ?
+                AND cs.qsos > 0
                 ORDER BY cs.callsign
             """, (contest, contest))
             callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
