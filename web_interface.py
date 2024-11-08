@@ -46,6 +46,23 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
+def get_continent_from_dxcc(dxcc_country):
+    """Get continent based on DXCC country from cty.plist"""
+    try:
+        import plistlib
+        with open('/opt/livescore/cty.plist', 'rb') as fp:
+            cty_data = plistlib.load(fp)
+            
+        # Search through the plist data for matching country
+        for prefix_data in cty_data.values():
+            if isinstance(prefix_data, dict):
+                if prefix_data.get('Country') == dxcc_country:
+                    return prefix_data.get('Continent')
+        return None
+    except Exception as e:
+        logger.error(f"Error reading cty.plist: {e}")
+        return None
+
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
@@ -184,6 +201,7 @@ def get_contests():
         logger.error(f"Error fetching contests: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+# Replace the existing get_callsigns() function with this one
 @app.route('/livescore-pilot/api/callsigns')
 def get_callsigns():
     contest = request.args.get('contest')
@@ -194,7 +212,10 @@ def get_callsigns():
         with get_db() as db:
             cursor = db.cursor()
             cursor.execute("""
-                SELECT cs.callsign, cs.qsos AS qso_count
+                SELECT 
+                    cs.callsign, 
+                    cs.qsos AS qso_count,
+                    qi.dxcc_country
                 FROM contest_scores cs
                 INNER JOIN (
                     SELECT callsign, MAX(timestamp) as max_ts
@@ -203,10 +224,23 @@ def get_callsigns():
                     GROUP BY callsign
                 ) latest ON cs.callsign = latest.callsign 
                     AND cs.timestamp = latest.max_ts
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ?
                 ORDER BY cs.callsign
             """, (contest, contest))
-            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+            
+            callsigns = []
+            for row in cursor.fetchall():
+                callsign, qso_count, dxcc_country = row
+                continent = get_continent_from_dxcc(dxcc_country) if dxcc_country else None
+                
+                callsign_info = {
+                    "name": callsign,
+                    "qso_count": qso_count,
+                    "continent": continent if continent else "Unknown"
+                }
+                callsigns.append(callsign_info)
+                
             return jsonify(callsigns)
     except Exception as e:
         logger.error(f"Error fetching callsigns: {str(e)}")
