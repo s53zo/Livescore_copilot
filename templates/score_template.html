@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Contest Progress Report - {{{{ contest }}}}</title>
+    <title>Contest Progress Report - {contest}</title>
     <script>
         function refreshPage() {{
             const params = new URLSearchParams(window.location.search);
@@ -51,24 +51,8 @@
             }}, 1000);
         }}
 
-        function toggleCategory() {{
-            const currentUrl = new URL(window.location.href);
-            const currentFilter = currentUrl.searchParams.get('category_filter') || 'same';
-            // Toggle the value
-            const newFilter = currentFilter === 'all' ? 'same' : 'all';
-            currentUrl.searchParams.set('category_filter', newFilter);
-            window.location.href = currentUrl.toString();
-        }}
-
         document.addEventListener('DOMContentLoaded', () => {{
             updateCountdown();
-            
-            // Set initial toggle state
-            const categorySwitch = document.getElementById('categorySwitch');
-            if (categorySwitch) {{
-                const urlParams = new URLSearchParams(window.location.search);
-                categorySwitch.checked = urlParams.get('category_filter') === 'all';
-            }}
             
             // Add hover effect for rate details
             document.querySelectorAll('.rate-cell').forEach(cell => {{
@@ -88,26 +72,31 @@
         body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; padding-bottom: 40px; }}
         h1 {{ color: #2c3e50; margin-bottom: 10px; }}
         .info {{ color: #7f8c8d; margin-bottom: 20px; }}
-        .category-info {{ background-color: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px; }}
-        .category-tag {{ display: inline-block; padding: 4px 8px; background-color: #e7f3ff; border: 1px solid #cce5ff; border-radius: 3px; color: #0066cc; }}
-        .switch {{ position: relative; display: inline-block; width: 60px; height: 34px; }}
-        .switch input {{ opacity: 0; width: 0; height: 0; }}
-        .slider {{ position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }}
-        .slider:before {{ position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }}
-        input:checked + .slider {{ background-color: #4CAF50; }}
-        input:checked + .slider:before {{ transform: translateX(26px); }}
-        .switch-label {{ font-size: 0.9em; color: #666; }}
+        .station-info {{ 
+            background-color: #f8f9fa; 
+            padding: 15px; 
+            border-radius: 4px; 
+            margin-bottom: 20px; 
+            line-height: 1.5;
+        }}
+        .category-tag {{ 
+            display: inline-block; 
+            padding: 2px 8px; 
+            background-color: #e7f3ff; 
+            border: 1px solid #cce5ff; 
+            border-radius: 3px; 
+            color: #0066cc; 
+            margin: 0 5px;
+            font-size: 0.9em;
+        }}
         table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
         th, td {{ border: 1px solid #dee2e6; padding: 8px 4px; text-align: center; font-size: 0.9em; }}
         th {{ background-color: #f8f9fa; font-weight: bold; color: #2c3e50; position: sticky; top: 0; z-index: 1; }}
         tr:nth-child(even) {{ background-color: #f8f9fa; }}
         .highlight {{ background-color: #e8f5e9 !important; font-weight: bold; }}
         .highlight td {{ border-top: 2px solid #4caf50; border-bottom: 2px solid #4caf50; }}
-        .timestamp {{ font-style: italic; color: #7f8c8d; margin-bottom: 15px; }}
-        .band-data {{ white-space: nowrap; position: relative; }}
         .refresh-info {{ position: fixed; top: 10px; right: 10px; background-color: #4caf50; color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 1000; }}
         #countdown {{ font-weight: bold; }}
-        .filter-info {{ color: #4caf50; font-weight: normal; margin-left: 10px; }}
         .footer {{ position: fixed; bottom: 0; left: 0; right: 0; background-color: #f8f9fa; padding: 10px 20px; text-align: center; font-size: 0.8em; color: #666; border-top: 1px solid #dee2e6; }}
         .rate-cell {{ position: relative; }}
         .rate-details {{ display: none; position: absolute; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 2; width: 200px; text-align: left; }}
@@ -124,25 +113,13 @@
     </div>
 
     <h1>Contest Progress Report - {contest}</h1>
-    <p class="timestamp">
-        Updated: {timestamp}<br>
-        Monitoring: {callsign} 
-        <span class="filter-info">{filter_display}</span>
-    </p>
-    <div class="category-info">
-        <div>
-            <strong>Category:</strong>
-            <span class="category-tag">Power: {power}</span>
-            <span class="category-tag">Assisted: {assisted}</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <label class="switch">
-                <input type="checkbox" id="categorySwitch" onchange="toggleCategory()" {category_checked}>
-                <span class="slider"></span>
-            </label>
-            <span class="switch-label">{category_label}</span>
-        </div>
+    
+    <div class="station-info">
+        <div>Monitoring: {callsign}</div>
+        <div>Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span></div>
+        <div>Updated: {timestamp}</div>
     </div>
+
     <table>
         <tr>
             <th>Place</th>
