@@ -173,7 +173,7 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return {}
 
-     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
+    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """Get station details and all competitors with optional filtering"""
         try:
             with sqlite3.connect(self.db_path) as conn:
