@@ -91,6 +91,25 @@
             color: #666;
             font-size: 0.9em;
         }
+        .continent-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            margin-left: 8px;
+        }
+        .continent-NA { background-color: #e3f2fd; color: #1565c0; }
+        .continent-SA { background-color: #f1f8e9; color: #558b2f; }
+        .continent-EU { background-color: #fff3e0; color: #ef6c00; }
+        .continent-AF { background-color: #fce4ec; color: #c2185b; }
+        .continent-AS { background-color: #e8eaf6; color: #3949ab; }
+        .continent-OC { background-color: #f3e5f5; color: #7b1fa2; }
+        .continent-Unknown { background-color: #eeeeee; color: #757575; }
+        
+        optgroup {
+            font-weight: bold;
+            color: #333;
+        }
     </style>
 </head>
 <body>
@@ -115,10 +134,16 @@
         <h2><span class="chevron-right">▶</span> Step 2: Select Callsign</h2>
         <select id="callsignSelect" onchange="handleCallsignChange()" {% if not selected_contest %}disabled{% endif %}>
             <option value="">-- Select Callsign --</option>
-            {% for callsign in callsigns %}
-            <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
-                {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
-            </option>
+            {% for continent in ['NA', 'SA', 'EU', 'AF', 'AS', 'OC', 'Unknown'] %}
+            <optgroup label="{{ continent }}" id="continent-{{ continent }}">
+                {% for callsign in callsigns %}
+                    {% if callsign.continent == continent %}
+                    <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
+                        {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
+                    </option>
+                    {% endif %}
+                {% endfor %}
+            </optgroup>
             {% endfor %}
         </select>
     </div>
@@ -164,12 +189,26 @@
                 const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
                 const callsigns = await response.json();
 
-                callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
-                callsigns.forEach(call => {
-                    const option = document.createElement('option');
-                    option.value = call.name;
-                    option.textContent = `${call.name} (${call.qso_count} QSOs)`;
-                    callsignSelect.appendChild(option);
+                // Create continent groups
+                const continents = ['NA', 'SA', 'EU', 'AF', 'AS', 'OC', 'Unknown'];
+                continents.forEach(continent => {
+                    const group = document.createElement('optgroup');
+                    group.label = continent;
+                    group.id = `continent-${continent}`;
+                    
+                    // Add callsigns for this continent
+                    callsigns.filter(call => call.continent === continent)
+                            .forEach(call => {
+                                const option = document.createElement('option');
+                                option.value = call.name;
+                                option.textContent = `${call.name} (${call.qso_count} QSOs)`;
+                                group.appendChild(option);
+                            });
+                    
+                    // Only add the group if it has options
+                    if (group.children.length > 0) {
+                        callsignSelect.appendChild(group);
+                    }
                 });
 
                 document.getElementById('callsignStep').classList.remove('disabled');
