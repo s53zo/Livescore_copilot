@@ -46,22 +46,6 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-def get_station_category(db, contest, callsign):
-    """Get the category information for a specific station"""
-    try:
-        cursor = db.cursor()
-        cursor.execute("""
-            SELECT power, assisted
-            FROM contest_scores
-            WHERE contest = ? AND callsign = ?
-            ORDER BY timestamp DESC
-            LIMIT 1
-        """, (contest, callsign))
-        return cursor.fetchone()
-    except Exception as e:
-        logger.error(f"Error getting station category: {str(e)}")
-        return None
-
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
@@ -101,36 +85,6 @@ def index():
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-
-            if request.method == 'POST' and request.form.get('callsign'):
-                callsign = request.form.get('callsign')
-                contest = request.form.get('contest')
-                
-                # Verify data exists
-                cursor.execute("""
-                    SELECT COUNT(*)
-                    FROM contest_scores
-                    WHERE callsign = ? AND contest = ?
-                """, (callsign, contest))
-                count = cursor.fetchone()[0]
-                
-                if count == 0:
-                    return render_template('error.html', 
-                                        error=f"No records found for {callsign} in {contest}")
-                
-                # Generate report
-                reporter = ScoreReporter(Config.DB_PATH)
-                stations = reporter.get_station_details(callsign, contest)
-                
-                if stations:
-                    success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-                    if success:
-                        return redirect(f'/reports/live.html?callsign={callsign}&contest={contest}')
-                    else:
-                        return render_template('error.html', error="Failed to generate report")
-                else:
-                    return render_template('error.html', 
-                                        error="No data found for the selected criteria")
         
         return render_template('select_form.html', 
                              contests=contests,
@@ -140,6 +94,65 @@ def index():
     
     except Exception as e:
         logger.error("Exception in index route:")
+        logger.error(traceback.format_exc())
+        return render_template('error.html', error=f"Error: {str(e)}")
+
+@app.route('/reports/live.html')
+def live_report():
+    try:
+        # Get parameters from URL
+        callsign = request.args.get('callsign')
+        contest = request.args.get('contest')
+        filter_type = request.args.get('filter_type', 'none')
+        filter_value = request.args.get('filter_value', 'none')
+
+        if not (callsign and contest):
+            return render_template('error.html', error="Missing required parameters")
+
+        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
+
+        # Create reporter instance
+        reporter = ScoreReporter(Config.DB_PATH)
+
+        # Verify contest and callsign exist in database
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM contest_scores 
+                WHERE contest = ? AND callsign = ?
+            """, (contest, callsign))
+            if cursor.fetchone()[0] == 0:
+                return render_template('error.html', 
+                    error=f"No data found for {callsign} in {contest}")
+
+        # Get station data with filters
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+
+        if stations:
+            # Generate HTML content directly
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+            with open(template_path, 'r') as f:
+                template = f.read()
+
+            html_content = reporter.generate_html_content(template, callsign, contest, stations)
+            
+            # Return response with appropriate headers
+            response = make_response(html_content)
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            
+            logger.info(f"Successfully generated report for {callsign} in {contest}")
+            return response
+        else:
+            logger.error(f"No station data found for {callsign} in {contest}")
+            return render_template('error.html', error="No data found for the selected criteria")
+
+    except Exception as e:
+        logger.error("Exception in live_report:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
 
@@ -153,15 +166,6 @@ def internal_error(error):
     logger.error(f"500 error: {error}")
     logger.error(traceback.format_exc())
     return render_template('error.html', error="Internal server error"), 500
-
-if __name__ == '__main__':
-    logger.info("Starting development server")
-    app.run(host='127.0.0.1', port=8089)
-else:
-    # When running under gunicorn
-    logger.info("Starting under gunicorn")
-
-# Add these new routes to web_interface.py
 
 @app.route('/livescore-pilot/api/contests')
 def get_contests():
@@ -254,61 +258,9 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/reports/live.html')
-def live_report():
-    try:
-        # Get parameters from URL
-        callsign = request.args.get('callsign')
-        contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type', 'none')
-        filter_value = request.args.get('filter_value', 'none')
-
-        if not (callsign and contest):
-            return render_template('error.html', error="Missing required parameters")
-
-        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
-
-        # Create reporter instance
-        reporter = ScoreReporter(Config.DB_PATH)
-
-        # Verify contest and callsign exist in database
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) 
-                FROM contest_scores 
-                WHERE contest = ? AND callsign = ?
-            """, (contest, callsign))
-            if cursor.fetchone()[0] == 0:
-                return render_template('error.html', 
-                    error=f"No data found for {callsign} in {contest}")
-
-        # Get station data with filters
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
-
-        if stations:
-            # Generate HTML content directly
-            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-            with open(template_path, 'r') as f:
-                template = f.read()
-
-            html_content = reporter.generate_html_content(template, callsign, contest, stations)
-            
-            # Return response with appropriate headers
-            response = make_response(html_content)
-            response.headers['Content-Type'] = 'text/html; charset=utf-8'
-            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
-            
-            logger.info(f"Successfully generated report for {callsign} in {contest}")
-            return response
-        else:
-            logger.error(f"No station data found for {callsign} in {contest}")
-            return render_template('error.html', error="No data found for the selected criteria")
-
-    except Exception as e:
-        logger.error("Exception in live_report:")
-        logger.error(traceback.format_exc())
-        return render_template('error.html', error=f"Error: {str(e)}")
+if __name__ == '__main__':
+    logger.info("Starting development server")
+    app.run(host='127.0.0.1', port=8089)
+else:
+    # When running under gunicorn
+    logger.info("Starting under gunicorn")
