@@ -320,7 +320,7 @@ class ScoreReporter:
                         WITH latest_scores AS (
                             SELECT callsign, MAX(timestamp) as max_ts
                             FROM contest_scores
-                            WHERE contest = ?
+                            WHERE contest = ?  -- Filter by contest from the start
                             GROUP BY callsign
                         ),
                         station_scores AS (
@@ -337,51 +337,51 @@ class ScoreReporter:
                                 AND cs.timestamp = ls.max_ts
                             LEFT JOIN qth_info qi 
                                 ON qi.contest_score_id = cs.id
-                            WHERE cs.contest = ?
-                            AND (cs.callsign = ? 
-                                 OR (cs.power = ? AND cs.assisted = ?))
+                            WHERE cs.contest = ?  -- Make sure we stay within the same contest
+                    )
+                    SELECT 
+                        ss.id,
+                        ss.callsign,
+                        ss.score,
+                        ss.power,
+                        ss.assisted,
+                        ss.timestamp,
+                        ss.qsos,
+                        ss.multipliers,
+                        CASE 
+                            WHEN ss.callsign = ? THEN 'current'
+                            WHEN ss.score > (
+                                SELECT score 
+                                FROM station_scores 
+                                WHERE callsign = ? 
+                            ) THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY ss.score DESC) as rn
+                    FROM station_scores ss
+                    WHERE (ss.callsign = ? OR (
+                        ss.power = (
+                            SELECT power 
+                            FROM station_scores 
+                            WHERE callsign = ?
+                        ) 
+                        AND ss.assisted = (
+                            SELECT assisted 
+                            FROM station_scores 
+                            WHERE callsign = ?
+                        )
+                    ))
                     """
-                    
-                    params = [contest, contest, callsign, station_power, station_assisted]
     
-                    # Add filter conditions if specified
-                    if filter_type and filter_value and filter_type.lower() != 'none':
-                        filter_map = {
-                            'DXCC': 'dxcc_country',
-                            'CQ Zone': 'cq_zone',
-                            'IARU Zone': 'iaru_zone',
-                            'ARRL Section': 'arrl_section',
-                            'State/Province': 'state_province'
-                        }
-                        
-                        db_field = filter_map.get(filter_type)
-                        if db_field:
-                            query += f" AND qi.{db_field} = ?"
-                            params.append(filter_value)
-    
-                    # Complete the query
-                    query += """)
-                        SELECT 
-                            ss.id,
-                            ss.callsign,
-                            ss.score,
-                            ss.power,
-                            ss.assisted,
-                            ss.timestamp,
-                            ss.qsos,
-                            ss.multipliers,
-                            CASE 
-                                WHEN ss.callsign = ? THEN 'current'
-                                WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
-                                ELSE 'below'
-                            END as position,
-                            ROW_NUMBER() OVER (ORDER BY ss.score DESC) as rn
-                        FROM station_scores ss
-                        ORDER BY ss.score DESC
-                    """
-                    
-                    # Add callsign parameters for the CASE statement
-                    params.extend([callsign, callsign])
+                    params = [
+                        contest,  # For first WHERE contest = ?
+                        contest,  # For second WHERE contest = ?
+                        callsign, # For CASE WHEN callsign = ?
+                        callsign, # For subquery WHERE callsign = ?
+                        callsign, # For first OR condition
+                        callsign, # For power subquery
+                        callsign  # For assisted subquery
+                    ]
                     
                     self.logger.debug(f"Executing query with params: {params}")
                     cursor.execute(query, params)
