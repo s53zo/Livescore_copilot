@@ -173,12 +173,12 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return {}
 
-    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
+     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """Get station details and all competitors with optional filtering"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-
+    
                 # Base query with QTH info join
                 query = """
                     WITH latest_scores AS (
@@ -205,22 +205,58 @@ class ScoreReporter:
                 """
                 
                 params = [contest, contest]
-
+    
                 # Add filter conditions if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
-                    filter_map = {
-                        'DXCC': 'dxcc_country',
-                        'CQ Zone': 'cq_zone',
-                        'IARU Zone': 'iaru_zone',
-                        'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province'
-                    }
-                    
-                    db_field = filter_map.get(filter_type)
-                    if db_field:
-                        query += f" AND qi.{db_field} = ?"
-                        params.append(filter_value)
-
+                    if filter_type == 'Continent':
+                        # For continent filtering, we need to check the DXCC country
+                        # against the cty.plist data
+                        query += """ AND qi.dxcc_country IN (
+                            SELECT DISTINCT qi2.dxcc_country
+                            FROM qth_info qi2
+                            WHERE qi2.dxcc_country IN (
+                                SELECT dxcc
+                                FROM (
+                                    SELECT DISTINCT dxcc_country as dxcc
+                                    FROM qth_info
+                                ) tmp
+                                WHERE dxcc_country IN (
+                                    SELECT value
+                                    FROM json_each(?)
+                                )
+                            )
+                        )"""
+                        
+                        # Get all DXCC countries for the specified continent
+                        import plistlib
+                        with open('/opt/livescore/cty.plist', 'rb') as fp:
+                            cty_data = plistlib.load(fp)
+                        
+                        # Create list of countries in the specified continent
+                        continent_countries = [
+                            prefix_data.get('Country')
+                            for prefix_data in cty_data.values()
+                            if isinstance(prefix_data, dict) and 
+                               prefix_data.get('Continent') == filter_value
+                        ]
+                        
+                        # Add the list of countries as a JSON array parameter
+                        import json
+                        params.append(json.dumps(continent_countries))
+                    else:
+                        filter_map = {
+                            'DXCC': 'dxcc_country',
+                            'CQ Zone': 'cq_zone',
+                            'IARU Zone': 'iaru_zone',
+                            'ARRL Section': 'arrl_section',
+                            'State/Province': 'state_province'
+                        }
+                        
+                        db_field = filter_map.get(filter_type)
+                        if db_field:
+                            query += f" AND qi.{db_field} = ?"
+                            params.append(filter_value)
+    
                 # Complete the query
                 query += """)
                     SELECT 
@@ -251,7 +287,7 @@ class ScoreReporter:
                 
                 self.logger.debug(f"Query returned {len(stations)} stations")
                 return stations
-                    
+                        
         except Exception as e:
             self.logger.error(f"Unexpected error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
