@@ -36,6 +36,7 @@
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            font-size: 16px;
         }
         button:hover {
             background-color: #45a049;
@@ -43,20 +44,6 @@
         button:disabled {
             background-color: #cccccc;
             cursor: not-allowed;
-        }
-        .filter-section {
-            border: 1px solid #eee;
-            padding: 15px;
-            margin-top: 20px;
-            border-radius: 4px;
-            background-color: #f9f9f9;
-        }
-        .filter-section h3 {
-            margin-top: 0;
-            color: #333;
-        }
-        .hidden {
-            display: none;
         }
         .step {
             margin-bottom: 25px;
@@ -74,37 +61,12 @@
             opacity: 0.5;
             pointer-events: none;
         }
-        .category-info {
-            margin-top: 15px;
-            padding: 12px;
-            background-color: #f8f9fa;
-            border-radius: 4px;
-            border: 1px solid #e9ecef;
-        }
-        .category-tag {
-            display: inline-block;
-            padding: 4px 8px;
-            background-color: #e7f3ff;
-            border: 1px solid #cce5ff;
-            border-radius: 3px;
-            margin: 0 5px;
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #666;
             font-size: 0.9em;
-            color: #0066cc;
-        }
-        .radio-group {
-            margin-top: 12px;
-            padding-top: 10px;
-            border-top: 1px solid #e9ecef;
-        }
-        .radio-group label {
-            display: inline-block;
-            margin-right: 20px;
-            font-weight: normal;
-            cursor: pointer;
-        }
-        .radio-group input[type="radio"] {
-            margin-right: 5px;
-            cursor: pointer;
         }
     </style>
 </head>
@@ -140,102 +102,23 @@
                     </option>
                     {% endfor %}
                 </select>
-                
-                {% if station_category %}
-                <div class="category-info" id="categoryInfo">
-                    <strong>Station Category:</strong>
-                    <span class="category-tag">Power: {{ station_category[0] }}</span>
-                    <span class="category-tag">Assisted: {{ station_category[1] }}</span>
-                    
-                    <div class="radio-group">
-                        <label>
-                            <input type="radio" name="category_filter" value="same" {% if category_filter != 'all' %}checked{% endif %}>
-                            Show only stations in this category
-                        </label>
-                        <label>
-                            <input type="radio" name="category_filter" value="all" {% if category_filter == 'all' %}checked{% endif %}>
-                            Show all categories
-                        </label>
-                    </div>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="step {% if not selected_contest %}disabled-step{% endif %}" id="step3">
-            <h2>Step 3: Apply Filters (Optional)</h2>
-            <div class="filter-section">
-                <div class="form-group">
-                    <label for="filter_type">Filter By:</label>
-                    <select name="filter_type" id="filter_type" {% if not selected_contest %}disabled{% endif %}>
-                        <option value="">-- No Filter --</option>
-                        <option value="dxcc">DXCC Country</option>
-                        <option value="cq_zone">CQ Zone</option>
-                        <option value="iaru_zone">IARU Zone</option>
-                    </select>
-                </div>
-
-                <!-- Filter value dropdowns -->
-                <div class="form-group hidden" id="dxcc_filter">
-                    <label for="dxcc_value">Select Country:</label>
-                    <select name="filter_value" id="dxcc_value">
-                        <option value="">-- Select Country --</option>
-                        {% for country in countries %}
-                        <option value="{{ country }}">{{ country }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="form-group hidden" id="cq_zone_filter">
-                    <label for="cq_zone_value">Select CQ Zone:</label>
-                    <select name="filter_value" id="cq_zone_value">
-                        <option value="">-- Select CQ Zone --</option>
-                        {% for zone in cq_zones %}
-                        <option value="{{ zone }}">{{ zone }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="form-group hidden" id="iaru_zone_filter">
-                    <label for="iaru_zone_value">Select IARU Zone:</label>
-                    <select name="filter_value" id="iaru_zone_value">
-                        <option value="">-- Select IARU Zone --</option>
-                        {% for zone in iaru_zones %}
-                        <option value="{{ zone }}">{{ zone }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
             </div>
         </div>
         
         <button type="submit" id="generateButton" {% if not selected_contest %}disabled{% endif %}>Generate Report</button>
     </form>
     
-    <br><br>Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
+    <div class="footer">
+        Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
+    </div>
 
     <script>
-        document.getElementById('filter_type').addEventListener('change', function() {
-            // Hide all filter value selects and clear their values
-            document.querySelectorAll('#dxcc_filter, #cq_zone_filter, #iaru_zone_filter').forEach(el => {
-                el.classList.add('hidden');
-                el.querySelector('select').value = '';
-            });
-            
-            // Show only the selected filter's value dropdown
-            if (this.value) {
-                document.getElementById(this.value + '_filter').classList.remove('hidden');
-            }
-        });
-
         function handleCallsignChange() {
             const callsignSelect = document.getElementById('callsign');
             const generateButton = document.getElementById('generateButton');
-            
-            // Enable/disable generate button based on selection
             generateButton.disabled = !callsignSelect.value;
         }
 
-        // Initial setup
         document.addEventListener('DOMContentLoaded', function() {
             handleCallsignChange();
         });
