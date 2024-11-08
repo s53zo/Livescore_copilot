@@ -143,36 +143,6 @@ def index():
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
 
-@app.route('/reports/live.html')
-def live_report():
-    try:
-        callsign = request.args.get('callsign')
-        contest = request.args.get('contest')
-
-        if not (callsign and contest):
-            return render_template('error.html', error="Missing required parameters")
-
-        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}")
-
-        reporter = ScoreReporter(Config.DB_PATH)
-        stations = reporter.get_station_details(callsign, contest)
-
-        if stations:
-            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-            if success:
-                response = send_from_directory(Config.OUTPUT_DIR, 'live.html')
-                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                return response
-            else:
-                return render_template('error.html', error="Failed to generate report")
-        else:
-            return render_template('error.html', error="No data found for the selected criteria")
-
-    except Exception as e:
-        logger.error("Exception in live_report:")
-        logger.error(traceback.format_exc())
-        return render_template('error.html', error=f"Error: {str(e)}")
-
 @app.errorhandler(404)
 def not_found_error(error):
     logger.error(f"404 error: {error}")
@@ -190,3 +160,129 @@ if __name__ == '__main__':
 else:
     # When running under gunicorn
     logger.info("Starting under gunicorn")
+
+# Add these new routes to web_interface.py
+
+@app.route('/livescore-pilot/api/contests')
+def get_contests():
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY contest
+            """)
+            contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+            return jsonify(contests)
+    except Exception as e:
+        logger.error(f"Error fetching contests: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/livescore-pilot/api/callsigns')
+def get_callsigns():
+    contest = request.args.get('contest')
+    if not contest:
+        return jsonify({"error": "Contest parameter required"}), 400
+
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                SELECT cs.callsign, cs.qsos AS qso_count
+                FROM contest_scores cs
+                INNER JOIN (
+                    SELECT callsign, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    WHERE contest = ?
+                    GROUP BY callsign
+                ) latest ON cs.callsign = latest.callsign 
+                    AND cs.timestamp = latest.max_ts
+                WHERE cs.contest = ?
+                ORDER BY cs.callsign
+            """, (contest, contest))
+            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+            return jsonify(callsigns)
+    except Exception as e:
+        logger.error(f"Error fetching callsigns: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/livescore-pilot/api/filters')
+def get_filters():
+    contest = request.args.get('contest')
+    callsign = request.args.get('callsign')
+    
+    if not contest or not callsign:
+        return jsonify({"error": "Contest and callsign parameters required"}), 400
+
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                       qi.arrl_section, qi.state_province
+                FROM contest_scores cs
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ? AND cs.callsign = ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            """, (contest, callsign))
+            
+            row = cursor.fetchone()
+            if not row:
+                return jsonify([])
+
+            filters = []
+            filter_map = {
+                'DXCC': row[0],
+                'CQ Zone': row[1],
+                'IARU Zone': row[2],
+                'ARRL Section': row[3],
+                'State/Province': row[4]
+            }
+
+            for filter_type, value in filter_map.items():
+                if value:  # Only include non-empty values
+                    filters.append({
+                        "type": filter_type,
+                        "value": value
+                    })
+
+            return jsonify(filters)
+    except Exception as e:
+        logger.error(f"Error fetching filters: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# Modify the live_report route to handle filters
+@app.route('/reports/live.html')
+def live_report():
+    try:
+        callsign = request.args.get('callsign')
+        contest = request.args.get('contest')
+        filter_type = request.args.get('filter_type')
+        filter_value = request.args.get('filter_value')
+
+        if not (callsign and contest):
+            return render_template('error.html', error="Missing required parameters")
+
+        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, filter_type={filter_type}, filter_value={filter_value}")
+
+        reporter = ScoreReporter(Config.DB_PATH)
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+
+        if stations:
+            success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+            if success:
+                response = send_from_directory(Config.OUTPUT_DIR, 'live.html')
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                return response
+            else:
+                return render_template('error.html', error="Failed to generate report")
+        else:
+            return render_template('error.html', error="No data found for the selected criteria")
+
+    except Exception as e:
+        logger.error("Exception in live_report:")
+        logger.error(traceback.format_exc())
+        return render_template('error.html', error=f"Error: {str(e)}")
