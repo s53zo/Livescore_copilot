@@ -290,28 +290,35 @@ class ScoreReporter:
 
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """Get station details and all competitors in the same category with optional filtering"""
-        self.logger.debug(f"get_station_details called with: callsign={callsign}, contest={contest}, "
-                         f"filter_type={filter_type}, filter_value={filter_value}")
-    
+        self.logger.debug("=" * 50)
+        self.logger.debug("get_station_details called with parameters:")
+        self.logger.debug(f"Contest: {contest}")
+        self.logger.debug(f"Callsign: {callsign}")
+        self.logger.debug(f"Filter type: {filter_type}")
+        self.logger.debug(f"Filter value: {filter_value}")
+        self.logger.debug("=" * 50)
+
         try:
             with sqlite3.connect(self.db_path) as conn:
+                # First verify data exists
                 cursor = conn.cursor()
-                
-                # First verify the station exists and get its details
                 cursor.execute("""
-                    SELECT id, power, assisted
-                    FROM contest_scores
-                    WHERE callsign = ? 
-                    AND contest = ?
-                    ORDER BY timestamp DESC
-                    LIMIT 1
-                """, (callsign, contest))
+                    SELECT COUNT(*) 
+                    FROM contest_scores 
+                    WHERE contest = ? AND callsign = ?
+                """, (contest, callsign))
                 
-                station_record = cursor.fetchone()
-                if not station_record:
+                count = cursor.fetchone()[0]
+                if count == 0:
                     self.logger.error(f"No records found for {callsign} in {contest}")
+                    # Log available contests and callsigns for debugging
+                    cursor.execute("SELECT DISTINCT contest, callsign FROM contest_scores ORDER BY contest, callsign")
+                    available = cursor.fetchall()
+                    self.logger.debug("Available contest/callsign pairs:")
+                    for c, call in available:
+                        self.logger.debug(f"{c}: {call}")
                     return None
-        
+            
                 station_id, station_power, station_assisted = station_record
                 self.logger.debug(f"Reference station - Power: {station_power}, Assisted: {station_assisted}")
                 
