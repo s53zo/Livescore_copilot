@@ -254,10 +254,10 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Modify the live_report route to handle filters
 @app.route('/reports/live.html')
 def live_report():
     try:
+        # Get parameters from URL
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
         filter_type = request.args.get('filter_type')
@@ -266,20 +266,40 @@ def live_report():
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        logger.info(f"Refreshing report for: callsign={callsign}, contest={contest}, filter_type={filter_type}, filter_value={filter_value}")
+        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
 
+        # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
+
+        # Verify contest and callsign exist in database
+        with get_db() as db:
+            cursor = db.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM contest_scores 
+                WHERE contest = ? AND callsign = ?
+            """, (contest, callsign))
+            if cursor.fetchone()[0] == 0:
+                return render_template('error.html', 
+                    error=f"No data found for {callsign} in {contest}")
+
+        # Get station data with filters
         stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
         if stations:
             success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
             if success:
+                # Set cache control headers
                 response = send_from_directory(Config.OUTPUT_DIR, 'live.html')
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                logger.info(f"Successfully generated report for {callsign} in {contest}")
                 return response
             else:
+                logger.error(f"Failed to generate report for {callsign} in {contest}")
                 return render_template('error.html', error="Failed to generate report")
         else:
+            logger.error(f"No station data found for {callsign} in {contest}")
             return render_template('error.html', error="No data found for the selected criteria")
 
     except Exception as e:
