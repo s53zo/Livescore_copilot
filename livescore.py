@@ -10,13 +10,97 @@ import json
 import traceback
 import sqlite3
 import re
+import threading
+import time
+import queue
 from callsign_utils import CallsignLookup
+
+# Add BatchProcessor class at the top level, before ContestDatabaseHandler
+class BatchProcessor:
+    def __init__(self, db_handler, batch_interval=60):
+        self.db_handler = db_handler
+        self.batch_interval = batch_interval  # seconds
+        self.queue = queue.Queue()
+        self.is_running = False
+        self.processing_thread = None
+        self.batch_size = 0  # Track size for logging
+        
+    def start(self):
+        """Start the batch processing thread"""
+        if not self.is_running:
+            self.is_running = True
+            self.processing_thread = threading.Thread(target=self._process_batch_loop)
+            self.processing_thread.daemon = True
+            self.processing_thread.start()
+            logging.info("Batch processor started")
+    
+    def stop(self):
+        """Stop the batch processing thread"""
+        self.is_running = False
+        if self.processing_thread:
+            self.processing_thread.join()
+            logging.info("Batch processor stopped")
+    
+    def add_to_batch(self, xml_data):
+        """Add XML data to processing queue"""
+        self.queue.put(xml_data)
+        self.batch_size += 1
+        logging.debug(f"Added to batch. Current size: {self.batch_size}")
+    
+    def _process_batch_loop(self):
+        """Main processing loop - runs every batch_interval seconds"""
+        while self.is_running:
+            start_time = time.time()
+            batch = []
+            
+            # Collect all available items from queue
+            try:
+                while True:
+                    batch.append(self.queue.get_nowait())
+                    self.batch_size -= 1
+            except queue.Empty:
+                pass
+            
+            # Process batch if we have any items
+            if batch:
+                try:
+                    batch_start = time.time()
+                    logging.info(f"Processing batch of {len(batch)} items")
+                    
+                    # Combine all XML data
+                    combined_xml = "\n".join(batch)
+                    
+                    # Process combined data
+                    contest_data = self.db_handler.parse_xml_data(combined_xml)
+                    if contest_data:
+                        self.db_handler.store_data(contest_data)
+                    
+                    batch_time = time.time() - batch_start
+                    logging.info(f"Batch processed in {batch_time:.2f} seconds")
+                    
+                except Exception as e:
+                    logging.error(f"Error processing batch: {e}")
+            
+            # Calculate sleep time for next batch
+            elapsed = time.time() - start_time
+            sleep_time = max(0, self.batch_interval - elapsed)
+            time.sleep(sleep_time)
 
 class ContestDatabaseHandler:
     def __init__(self, db_path='contest_data.db'):
         self.db_path = db_path
         self.callsign_lookup = CallsignLookup()
         self.setup_database()
+        self.batch_processor = BatchProcessor(self)
+        self.batch_processor.start()
+
+    def process_submission(self, xml_data):
+        """Add submission to batch instead of processing immediately"""
+        self.batch_processor.add_to_batch(xml_data)
+
+    def cleanup(self):
+        """Cleanup resources"""
+        self.batch_processor.stop()
 
     def setup_database(self):
         """Create the database tables if they don't exist."""
@@ -302,88 +386,68 @@ class ContestRequestHandler(BaseHTTPRequestHandler):
             "request_version": self.request_version
         })
 
-
     def validate_xml_data(self, xml_data):
-            """Validate XML data format"""
-            try:
-                # Try to find at least one valid XML document
-                xml_docs = re.findall(r'<\?xml.*?</dynamicresults>', xml_data, re.DOTALL)
-                if not xml_docs:
-                    return False
-                # Try parsing the first document to validate XML structure
-                ET.fromstring(xml_docs[0])
-                return True
-            except (ET.ParseError, Exception) as e:
-                self.debug_print(f"XML validation error: {str(e)}")
+        """Validate XML data format"""
+        try:
+            # Try to find at least one valid XML document
+            xml_docs = re.findall(r'<\?xml.*?</dynamicresults>', xml_data, re.DOTALL)
+            if not xml_docs:
                 return False
+            # Try parsing the first document to validate XML structure
+            ET.fromstring(xml_docs[0])
+            return True
+        except (ET.ParseError, Exception) as e:
+            self.debug_print(f"XML validation error: {str(e)}")
+            return False
 
     def do_POST(self):
-            """Handle POST requests to /livescore"""
-            try:
-                self.log_request_details()
+        """Handle POST requests to /livescore"""
+        try:
+            self.log_request_details()
 
-                # Check if path is valid
-                if self.path != '/livescore':
-                    self.debug_print("Invalid endpoint requested")
-                    self._send_response(404)
-                    return
+            # Check if path is valid
+            if self.path != '/livescore':
+                self.debug_print("Invalid endpoint requested")
+                self._send_response(404)
+                return
 
-                # Read POST data
-                content_length = int(self.headers.get('Content-Length', 0))
-                self.debug_print(f"Content Length: {content_length}")
+            # Read POST data
+            content_length = int(self.headers.get('Content-Length', 0))
+            self.debug_print(f"Content Length: {content_length}")
 
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                self.debug_print("Received POST data:", post_data)
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            self.debug_print("Received POST data:", post_data)
 
-                # URL decode the data (using unquote_plus to handle + characters)
-                decoded_data = urllib.parse.unquote_plus(post_data)
-                self.debug_print("Decoded POST data:", decoded_data)
+            # URL decode the data (using unquote_plus to handle + characters)
+            decoded_data = urllib.parse.unquote_plus(post_data)
+            self.debug_print("Decoded POST data:", decoded_data)
 
-                # Validate XML data using the decoded data
-                if not self.validate_xml_data(decoded_data):
-                    self.debug_print("Invalid XML data received")
-                    self._send_response(400)
-                    return
+            # Validate XML data using the decoded data
+            if not self.validate_xml_data(decoded_data):
+                self.debug_print("Invalid XML data received")
+                self._send_response(400)
+                return
 
-                # Check authorization if needed
-                if not self.check_authorization():
-                    self.debug_print("Unauthorized access attempt")
-                    self._send_response(403)
-                    return
+            # Check authorization if needed
+            if not self.check_authorization():
+                self.debug_print("Unauthorized access attempt")
+                self._send_response(403)
+                return
 
-                # Process data
-                db_handler = ContestDatabaseHandler()
-                
-                # Parse and store with debug info
-                self.debug_print("Starting XML parsing")
-                contest_data = db_handler.parse_xml_data(decoded_data)
-                self.debug_print("Parsed contest data:", contest_data)
+            # Add to batch processor instead of processing immediately
+            db_handler = self.server.db_handler  # Get handler from server
+            db_handler.process_submission(decoded_data)
+            
+            # Return success immediately
+            self._send_response(200)
 
-                if not contest_data:
-                    self.debug_print("No valid contest data found")
-                    self._send_response(400)
-                    return
-
-                self.debug_print("Storing data in database")
-                db_handler.store_data(contest_data)
-                
-                # Cleanup with debug info
-                self.debug_print("Starting cleanup of old records")
-                removed_count = db_handler.cleanup_old_data(days=3)
-                self.debug_print(f"Cleanup completed. Removed {removed_count} records")
-
-                # Success response
-                self._send_response(200)
-
-            except Exception as e:
-                error_details = {
-                    "error": str(e),
-                    "traceback": traceback.format_exc()
-                }
-                self.debug_print("Error occurred:", error_details)
-                self._send_response(500)
-
-
+        except Exception as e:
+            error_details = {
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+            self.debug_print("Error occurred:", error_details)
+            self._send_response(500)
 
     def check_authorization(self):
         """
@@ -444,26 +508,29 @@ def parse_arguments():
     return parser.parse_args()
 
 def run_server(host='127.0.0.1', port=8088, debug=False):
-    """Run the HTTP server"""
-    server_address = (host, port)
+    class CustomServer(HTTPServer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.db_handler = ContestDatabaseHandler()
+        
+        def server_close(self):
+            self.db_handler.cleanup()
+            super().server_close()
     
     class CustomHandler(ContestRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, debug_mode=debug, **kwargs)
     
-    httpd = HTTPServer(server_address, CustomHandler)
+    server_address = (host, port)
+    httpd = CustomServer(server_address, CustomHandler)
     
-    logging.info(f"Starting server on {host}:{port} (Debug mode: {'ON' if debug else 'OFF'})")
-    
+    logging.info(f"Starting server on {host}:{port} with batch processing")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         logging.info("Server stopped by user")
-    except Exception as e:
-        logging.error(f"Server error: {str(e)}", exc_info=True)
     finally:
         httpd.server_close()
-        logging.info("Server shutdown complete")
 
 if __name__ == "__main__":
     # Parse command line arguments
