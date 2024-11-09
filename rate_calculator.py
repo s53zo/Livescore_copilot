@@ -24,7 +24,7 @@ class RateCalculator:
             self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
 
     def calculate_band_rates(self, cursor, callsign, contest, lookback_minutes=60):
-        """Calculate per-band QSO rates with detailed debugging"""
+        """Calculate per-band QSO rates with closest report within time window"""
         query = """
             WITH latest_scores AS (
                 SELECT cs.id, cs.timestamp
@@ -43,18 +43,32 @@ class RateCalculator:
                 JOIN contest_scores cs ON cs.id = ls.id
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
             ),
-            previous_bands AS (
+            previous_bands_candidates AS (
                 SELECT 
                     bb.band,
                     bb.qsos as prev_qsos,
-                    cs.timestamp as prev_ts
-                FROM contest_scores cs
+                    cs.timestamp as prev_ts,
+                    ABS(ROUND((JULIANDAY(cs.timestamp) - JULIANDAY(lb.current_ts)) * 24 * 60, 1)) as time_diff
+                FROM latest_bands lb
+                CROSS JOIN contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                 WHERE cs.callsign = ?
                 AND cs.contest = ?
-                AND cs.timestamp <= datetime('now', ? || ' minutes')
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
+                AND cs.timestamp < (SELECT current_ts FROM latest_bands LIMIT 1)
+                AND cs.timestamp >= datetime((SELECT current_ts FROM latest_bands LIMIT 1), ? || ' minutes')
+            ),
+            previous_bands AS (
+                SELECT 
+                    band,
+                    prev_qsos,
+                    prev_ts,
+                    time_diff
+                FROM previous_bands_candidates pbc
+                WHERE (band, time_diff) IN (
+                    SELECT band, MIN(time_diff)
+                    FROM previous_bands_candidates
+                    GROUP BY band
+                )
             )
             SELECT 
                 lb.band,
@@ -62,7 +76,7 @@ class RateCalculator:
                 pb.prev_qsos,
                 lb.current_ts,
                 pb.prev_ts,
-                ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(pb.prev_ts)) * 24 * 60, 1) as minutes_diff
+                pb.time_diff as minutes_diff
             FROM latest_bands lb
             LEFT JOIN previous_bands pb ON lb.band = pb.band
             WHERE lb.current_qsos > 0
@@ -105,7 +119,7 @@ class RateCalculator:
                     self.logger.debug("  Rate is 0 - no new QSOs")
                 band_rates[band] = 0
             else:
-                # Calculate hourly rate
+                # Calculate hourly rate by scaling to 60 minutes
                 rate = int(round((qso_diff * 60) / minutes_diff))
                 band_rates[band] = rate
                 if self.debug:
