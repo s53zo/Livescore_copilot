@@ -314,7 +314,7 @@ class ScoreReporter:
         short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
         return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
 
-    def generate_table_rows(self, stations, callsign):
+    def generate_table_rows(self, stations, callsign, contest):
         """Generate table rows with dual rate display"""
         table_rows = []
         for i, station in enumerate(stations, 1):
