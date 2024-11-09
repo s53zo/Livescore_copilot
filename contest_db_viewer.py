@@ -165,79 +165,6 @@ class ContestDatabaseViewer:
                     stats[stat_name] = cursor.fetchall()
         return stats
 
-    def get_contest_scores(self, sort_by='t', sort_order='DESC', limit=None, latest=False, contest=None):
-        """Retrieve contest scores from database"""
-        valid_sort_fields = {
-            't': 'timestamp',
-            'c': 'callsign',
-            'n': 'contest',
-            's': 'score',
-            'q': 'qsos',
-            'u': 'club',
-            'e': 'section',
-            'p': 'power'
-        }
-
-        if sort_by not in valid_sort_fields:
-            self.logger.error(f"Invalid sort field: {sort_by}")
-            self.logger.info(f"Valid sort fields are: {', '.join(valid_sort_fields.keys())}")
-            sys.exit(1)
-
-        sort_order = sort_order.upper()
-        if sort_order not in ['ASC', 'DESC']:
-            self.logger.error(f"Invalid sort order: {sort_order}")
-            self.logger.info("Valid sort orders are: ASC, DESC")
-            sys.exit(1)
-
-        # Use a subquery to get the latest record ID for each callsign/contest combination
-        query = """
-            WITH latest_records AS (
-                SELECT MAX(id) as latest_id
-                FROM contest_scores cs1
-                WHERE 1=1
-                {contest_filter}
-                GROUP BY callsign, contest
-            )
-            SELECT 
-                cs.timestamp,
-                cs.contest,
-                cs.callsign,
-                cs.power,
-                cs.score,
-                cs.qsos,
-                cs.multipliers,
-                cs.club,
-                cs.section,
-                cs.assisted,
-                cs.mode
-            FROM contest_scores cs
-            INNER JOIN latest_records lr ON cs.id = lr.latest_id
-            ORDER BY {sort_field} {sort_order}
-            {limit_clause}
-        """
-
-        contest_where = ""
-        params = []
-        if contest:
-            contest_where = "AND contest = ?"
-            params.append(contest)
-
-        formatted_query = query.format(
-            contest_filter=contest_where,
-            sort_field=valid_sort_fields[sort_by],
-            sort_order=sort_order,
-            limit_clause=f"LIMIT {limit}" if limit else ""
-        )
-        
-        self.logger.debug(f"Executing query: {formatted_query}")
-        self.logger.debug(f"Parameters: {params}")
-        
-        with self.connect_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(formatted_query, params)
-            results = cursor.fetchall()
-            self.logger.debug(f"Retrieved {len(results)} records")
-            return results
 
     def get_band_breakdown(self, callsign=None, contest=None):
         """Retrieve band breakdown for specific callsign or all"""
@@ -303,8 +230,31 @@ class ContestDatabaseViewer:
             self.logger.debug(f"Retrieved {len(results)} band breakdown records")
             return results
     
+       
+    def display_stats(self, stats):
+        format_band_stats(stats)
+
+    def display_scores(self, data, show_all=False):
+        format_scores(data, show_all)
+
+    def display_band_breakdown(self, data):
+        format_band_breakdown(data)
+
+    def get_callsign_contests(self, callsign):
+        """Get list of contests for a callsign"""
+        query = """
+            SELECT DISTINCT contest, timestamp 
+            FROM contest_scores 
+            WHERE callsign = ?
+            ORDER BY timestamp DESC
+        """
+        with self.connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (callsign,))
+            return cursor.fetchall()
+
     def get_qth_details(self, callsign=None, contest=None):
-        """Get QTH details for stations"""
+        """Get QTH details for stations with enhanced location data"""
         query = """
             WITH latest_scores AS (
                 SELECT cs.id, cs.callsign, cs.contest, cs.timestamp
@@ -326,7 +276,10 @@ class ContestDatabaseViewer:
                 qi.iaru_zone,
                 qi.arrl_section,
                 qi.state_province,
-                qi.grid6
+                qi.grid6,
+                qi.continent,           -- Added field
+                qi.dxcc_prefix,         -- Added field
+                qi.exact_match         -- Added field
             FROM contest_scores cs
             JOIN latest_scores ls ON cs.id = ls.id
             LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
@@ -352,9 +305,9 @@ class ContestDatabaseViewer:
             results = cursor.fetchall()
             self.logger.debug(f"Retrieved {len(results)} QTH records")
             return results
-    
+
     def get_qth_statistics(self, contest=None):
-        """Get statistics about QTH distribution"""
+        """Get enhanced statistics about QTH distribution including continents"""
         query = """
             WITH latest_scores AS (
                 SELECT cs.id, cs.callsign, cs.contest
@@ -386,6 +339,14 @@ class ContestDatabaseViewer:
             WHERE qi.cq_zone IS NOT NULL
             UNION ALL
             SELECT 
+                'Continents' as category,
+                COUNT(DISTINCT qi.continent) as unique_count,
+                GROUP_CONCAT(DISTINCT qi.continent) as items
+            FROM latest_scores ls
+            JOIN qth_info qi ON qi.contest_score_id = ls.id
+            WHERE qi.continent IS NOT NULL
+            UNION ALL
+            SELECT 
                 'ARRL Sections' as category,
                 COUNT(DISTINCT qi.arrl_section) as unique_count,
                 GROUP_CONCAT(DISTINCT qi.arrl_section) as items
@@ -414,25 +375,82 @@ class ContestDatabaseViewer:
             cursor = conn.cursor()
             cursor.execute(formatted_query, params)
             return cursor.fetchall()
-        
-    def display_stats(self, stats):
-        format_band_stats(stats)
 
-    def display_scores(self, data, show_all=False):
-        format_scores(data, show_all)
+    def get_contest_scores(self, sort_by='t', sort_order='DESC', limit=None, latest=False, contest=None):
+        """Retrieve contest scores with enhanced location information"""
+        valid_sort_fields = {
+            't': 'timestamp',
+            'c': 'callsign',
+            'n': 'contest',
+            's': 'score',
+            'q': 'qsos',
+            'u': 'club',
+            'e': 'section',
+            'p': 'power',
+            'x': 'continent',     # Added sort option for continent
+            'd': 'dxcc_country'   # Added sort option for DXCC country
+        }
 
-    def display_band_breakdown(self, data):
-        format_band_breakdown(data)
+        if sort_by not in valid_sort_fields:
+            self.logger.error(f"Invalid sort field: {sort_by}")
+            self.logger.info(f"Valid sort fields are: {', '.join(valid_sort_fields.keys())}")
+            sys.exit(1)
 
-    def get_callsign_contests(self, callsign):
-        """Get list of contests for a callsign"""
+        sort_order = sort_order.upper()
+        if sort_order not in ['ASC', 'DESC']:
+            self.logger.error(f"Invalid sort order: {sort_order}")
+            self.logger.info("Valid sort orders are: ASC, DESC")
+            sys.exit(1)
+
         query = """
-            SELECT DISTINCT contest, timestamp 
-            FROM contest_scores 
-            WHERE callsign = ?
-            ORDER BY timestamp DESC
+            WITH latest_records AS (
+                SELECT MAX(id) as latest_id
+                FROM contest_scores cs1
+                WHERE 1=1
+                {contest_filter}
+                GROUP BY callsign, contest
+            )
+            SELECT 
+                cs.timestamp,
+                cs.contest,
+                cs.callsign,
+                cs.power,
+                cs.score,
+                cs.qsos,
+                cs.multipliers,
+                cs.club,
+                cs.section,
+                cs.assisted,
+                cs.mode,
+                qi.continent,
+                qi.dxcc_country,
+                qi.dxcc_prefix
+            FROM contest_scores cs
+            INNER JOIN latest_records lr ON cs.id = lr.latest_id
+            LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+            ORDER BY {sort_field} {sort_order}
+            {limit_clause}
         """
+
+        contest_where = ""
+        params = []
+        if contest:
+            contest_where = "AND contest = ?"
+            params.append(contest)
+
+        formatted_query = query.format(
+            contest_filter=contest_where,
+            sort_field=valid_sort_fields[sort_by],
+            sort_order=sort_order,
+            limit_clause=f"LIMIT {limit}" if limit else ""
+        )
+        
+        self.logger.debug(f"Executing query: {formatted_query}")
+        self.logger.debug(f"Parameters: {params}")
+        
         with self.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, (callsign,))
-            return cursor.fetchall()
+            cursor.execute(formatted_query, params)
+            results = cursor.fetchall()
+            self.logger.debug(f"Retrieved {len(results)} records")
+            return results
