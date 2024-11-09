@@ -2,94 +2,229 @@
 <html>
 <head>
     <title>Livescore Pilot</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        /* Base styles */
         body {
             font-family: Arial, sans-serif;
             max-width: 800px;
-            margin: 20px auto;
+            margin: 0 auto;
             padding: 20px;
+            color: #333;
+            background-color: #f5f7fa;
         }
+
+        /* Mobile-first approach */
+        h1 {
+            color: #2c3e50;
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+        }
+
+        p {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            margin-bottom: 20px;
+            color: #666;
+        }
+
+        /* Step containers */
         .step {
-            margin-bottom: 25px;
+            margin-bottom: 20px;
             padding: 15px;
             border: 1px solid #ddd;
-            border-radius: 4px;
+            border-radius: 8px;
             background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
         }
+
+        .step:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
         .step.disabled {
             opacity: 0.5;
             pointer-events: none;
             background-color: #f5f5f5;
         }
+
         .step h2 {
             margin-top: 0;
             color: #4CAF50;
-            font-size: 1.2em;
+            font-size: 1.1rem;
             display: flex;
             align-items: center;
             gap: 8px;
+            margin-bottom: 15px;
         }
+
         .chevron-right {
             color: #4CAF50;
-            font-size: 1.2em;
+            font-size: 1rem;
         }
+
+        /* Form elements */
         select {
             width: 100%;
-            padding: 8px;
+            padding: 12px;
             margin-bottom: 10px;
             border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            background-color: white;
+            transition: border-color 0.3s;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 16px;
+            padding-right: 40px;
         }
+
+        select:focus {
+            outline: none;
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+        }
+
         select:disabled {
             background-color: #f5f5f5;
             cursor: not-allowed;
         }
+
+        /* Button grid */
         .generate-buttons {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            grid-template-columns: 1fr;
             gap: 10px;
             margin-top: 15px;
         }
+
         .btn {
-            padding: 10px 15px;
+            padding: 12px 15px;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 0.9rem;
             text-align: center;
-            transition: background-color 0.3s;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 500;
+            letter-spacing: 0.3px;
         }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
         .btn-primary {
             background-color: #4CAF50;
             color: white;
         }
+
         .btn-secondary {
             background-color: #2196F3;
             color: white;
         }
+
         .btn:hover {
             opacity: 0.9;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
+
         .btn:disabled {
             background-color: #cccccc;
             cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
-        #filterButtons {
-            display: none;
-        }
+
+        /* Loading indicator */
         .loading {
             text-align: center;
             color: #666;
             margin: 10px 0;
             display: none;
+            font-size: 0.9rem;
+            padding: 10px;
+            border-radius: 6px;
+            background-color: #fff;
         }
+
+        /* Footer */
         .footer {
             margin-top: 30px;
             padding-top: 20px;
             border-top: 1px solid #eee;
             color: #666;
-            font-size: 0.9em;
+            font-size: 0.8rem;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        /* Tablet and desktop adjustments */
+        @media (min-width: 768px) {
+            body {
+                padding: 40px;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .step {
+                padding: 25px;
+            }
+
+            .step h2 {
+                font-size: 1.2rem;
+            }
+
+            .generate-buttons {
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            }
+
+            select {
+                font-size: 1rem;
+            }
+
+            .btn {
+                font-size: 1rem;
+            }
+        }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #1a1a1a;
+                color: #e0e0e0;
+            }
+
+            .step {
+                background-color: #2d2d2d;
+                border-color: #404040;
+            }
+
+            select {
+                background-color: #2d2d2d;
+                border-color: #404040;
+                color: #e0e0e0;
+            }
+
+            select:disabled {
+                background-color: #242424;
+            }
+
+            .loading {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+            }
         }
     </style>
 </head>
@@ -206,7 +341,7 @@
                 filters.forEach(filter => {
                     const button = document.createElement('button');
                     button.className = 'btn btn-secondary';
-                    button.textContent = `Generate (${filter.type} ${filter.value})`;
+                    button.textContent = `Filter by ${filter.type}`;
                     button.onclick = () => generateReport(filter.type, filter.value);
                     buttonContainer.appendChild(button);
                 });
