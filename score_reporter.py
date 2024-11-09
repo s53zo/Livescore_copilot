@@ -357,12 +357,6 @@ class ScoreReporter:
             # Add explanatory text and styling for the rate display
             additional_css = """
                 <style>
-                    .rate-info {
-                        font-size: 0.8em;
-                        color: #666;
-                        margin-top: 5px;
-                        margin-bottom: 15px;
-                    }
                     .band-header {
                         white-space: nowrap;
                     }
@@ -408,13 +402,7 @@ class ScoreReporter:
                     }
                 </style>
             """
-
-            # Add rate format explanation
-            rate_explanation = """
-                <div class="rate-info">
-                    Rate format: QSOs/Multipliers (60-minute rate/15-minute rate)
-                </div>
-            """
+        
 
             table_rows = []
             for i, station in enumerate(stations, 1):
@@ -456,7 +444,7 @@ class ScoreReporter:
                 timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
                 power=stations[0][3],
                 assisted=stations[0][4],
-                filter_info_div=filter_info_div + rate_explanation if filter_info_div else rate_explanation,
+                filter_info_div=filter_info_div,
                 table_rows='\n'.join(table_rows),
                 additional_css=additional_css
             )
