@@ -331,7 +331,7 @@ class ScoreReporter:
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
-
+    
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -378,7 +378,7 @@ class ScoreReporter:
                             {' | '.join(filter_parts)}
                         </div>
                         """
-
+    
             # Add explanatory text and styling for the rate display
             additional_css = """
                 <style>
@@ -428,7 +428,7 @@ class ScoreReporter:
                 </style>
             """
         
-
+    
             table_rows = []
             for i, station in enumerate(stations, 1):
                 station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
@@ -436,6 +436,15 @@ class ScoreReporter:
                 # Calculate both rates for all bands
                 band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
                 
+                # Get reference rates (from the selected station)
+                reference_station = next((s for s in stations if s[1] == callsign), None)
+                if reference_station:
+                    reference_breakdown = self.get_band_breakdown_with_rates(
+                        reference_station[0], callsign, contest, reference_station[5]
+                    )
+                else:
+                    reference_breakdown = {}
+    
                 # Calculate total rates directly from QSO totals
                 total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
                 
@@ -451,12 +460,12 @@ class ScoreReporter:
                     <td>{i}</td>
                     <td>{callsign_val}</td>
                     <td>{score:,}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'))}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'))}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'))}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'))}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'))}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'))}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
                     <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
                     <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
@@ -475,7 +484,7 @@ class ScoreReporter:
             )
             
             return html_content
-
+    
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
