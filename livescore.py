@@ -10,10 +10,12 @@ import json
 import traceback
 import sqlite3
 import re
+from callsign_database import CallsignDatabase
 
 class ContestDatabaseHandler:
     def __init__(self, db_path='contest_data.db'):
         self.db_path = db_path
+        self.callsign_db = CallsignDatabase()  # Initialize callsign database
         self.setup_database()
 
     def setup_database(self):
@@ -54,6 +56,7 @@ class ContestDatabaseHandler:
                 )
             ''')
     
+            # Updated qth_info table with new fields
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS qth_info (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +67,9 @@ class ContestDatabaseHandler:
                     arrl_section TEXT,
                     state_province TEXT,
                     grid6 TEXT,
+                    continent TEXT,           -- Added field
+                    dxcc_prefix TEXT,         -- Added field
+                    exact_match BOOLEAN,      -- Added field
                     FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
                 )
             ''')
@@ -110,20 +116,28 @@ class ContestDatabaseHandler:
                         'state_province': qth_elem.findtext('stprvoth', ''),
                         'grid6': qth_elem.findtext('grid6', '')
                     }
+                    
+                    # Enrich QTH data with callsign database information
+                    callsign_info = self.callsign_db.lookup_callsign(contest_data['callsign'])
+                    if callsign_info:
+                        contest_data['qth'].update({
+                            'dxcc_country': callsign_info['country'],  # Override with cty.plist data
+                            'continent': callsign_info['continent'],    # Add continent info
+                            'dxcc_prefix': callsign_info['prefix'],    # Add prefix info
+                            'exact_match': callsign_info.get('exact_match', False)
+                        })
                 
                 # Extract breakdown totals
                 breakdown = root.find('breakdown')
                 if breakdown is not None:
-                    # Get total QSOs, points, and multipliers
-                    contest_data['qsos'] = int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0)) or sum(int(elem.text) for elem in breakdown.findall('qso[@band="total"]'))
-                    contest_data['points'] = int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0)) or sum(int(elem.text) for elem in breakdown.findall('point[@band="total"]'))
-                    contest_data['multipliers'] = int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0)) or sum(int(elem.text) for elem in breakdown.findall('mult[@band="total"]'))
+                    contest_data['qsos'] = int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0))
+                    contest_data['points'] = int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0))
+                    contest_data['multipliers'] = int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0))
                     
                     # Extract per-band breakdown
                     bands = ['160', '80', '40', '20', '15', '10']
                     contest_data['band_breakdown'] = []
                     for band in bands:
-                        # Sum over all modes for each band
                         qsos = sum(int(elem.text) for elem in breakdown.findall(f'qso[@band="{band}"]'))
                         points = sum(int(elem.text) for elem in breakdown.findall(f'point[@band="{band}"]'))
                         multipliers = sum(int(elem.text) for elem in breakdown.findall(f'mult[@band="{band}"]'))
@@ -131,7 +145,7 @@ class ContestDatabaseHandler:
                         if qsos > 0:
                             band_data = {
                                 'band': band,
-                                'mode': 'ALL',  # Since we're summing over all modes
+                                'mode': 'ALL',
                                 'qsos': qsos,
                                 'points': points,
                                 'multipliers': multipliers
@@ -146,7 +160,6 @@ class ContestDatabaseHandler:
                 logging.error(f"Error processing data: {e}")
                     
         return results
-
 
     def store_data(self, contest_data):
         """Store contest data in the database."""
@@ -173,15 +186,15 @@ class ContestDatabaseHandler:
                     ))
                     
                     contest_score_id = cursor.lastrowid
-                    logging.debug(f"Stored main contest data for {data['callsign']}, ID: {contest_score_id}")
                     
-                    # Store QTH data if available
+                    # Store QTH data with enriched information
                     if 'qth' in data:
                         cursor.execute('''
                             INSERT INTO qth_info (
                                 contest_score_id, dxcc_country, cq_zone, iaru_zone,
-                                arrl_section, state_province, grid6
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                arrl_section, state_province, grid6, continent,
+                                dxcc_prefix, exact_match
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             contest_score_id,
                             data['qth'].get('dxcc_country', ''),
@@ -189,11 +202,13 @@ class ContestDatabaseHandler:
                             data['qth'].get('iaru_zone', ''),
                             data['qth'].get('arrl_section', ''),
                             data['qth'].get('state_province', ''),
-                            data['qth'].get('grid6', '')
+                            data['qth'].get('grid6', ''),
+                            data['qth'].get('continent', ''),
+                            data['qth'].get('dxcc_prefix', ''),
+                            data['qth'].get('exact_match', False)
                         ))
-                        logging.debug(f"Stored QTH data for {data['callsign']}")
                     
-                    # Insert band breakdown data
+                    # Store band breakdown data
                     for band_data in data.get('band_breakdown', []):
                         cursor.execute('''
                             INSERT INTO band_breakdown (
@@ -204,7 +219,7 @@ class ContestDatabaseHandler:
                             band_data['qsos'], band_data['points'],
                             band_data['multipliers']
                         ))
-                        logging.debug(f"Stored band data for {data['callsign']}, band: {band_data['band']}")
+                        
                 except Exception as e:
                     logging.error(f"Error storing data for {data['callsign']}: {e}")
 
