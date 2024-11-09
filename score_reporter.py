@@ -14,42 +14,34 @@ class RateCalculator:
         """Calculate QSO rates for both long and short time windows"""
         query = """
             WITH current_score AS (
-                SELECT cs.qsos as current_qsos,
-                       cs.timestamp as current_ts
-                FROM contest_scores cs
-                WHERE cs.callsign = ? 
-                AND cs.contest = ?
-                AND cs.timestamp = ?
+                SELECT qsos, timestamp
+                FROM contest_scores
+                WHERE callsign = ? 
+                AND contest = ?
+                AND timestamp = ?
             ),
             long_window_score AS (
-                SELECT cs.qsos as long_window_qsos,
-                       cs.timestamp as long_window_ts
-                FROM contest_scores cs
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                AND cs.timestamp < ?
-                AND cs.timestamp >= datetime(?, ? || ' minutes')
-                ORDER BY cs.timestamp DESC
+                SELECT qsos
+                FROM contest_scores
+                WHERE callsign = ?
+                AND contest = ?
+                AND timestamp <= datetime(?, '-60 minutes')
+                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(datetime(?, '-60 minutes')))
                 LIMIT 1
             ),
             short_window_score AS (
-                SELECT cs.qsos as short_window_qsos,
-                       cs.timestamp as short_window_ts
-                FROM contest_scores cs
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                AND cs.timestamp < ?
-                AND cs.timestamp >= datetime(?, ? || ' minutes')
-                ORDER BY cs.timestamp DESC
+                SELECT qsos
+                FROM contest_scores
+                WHERE callsign = ?
+                AND contest = ?
+                AND timestamp <= datetime(?, '-15 minutes')
+                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(datetime(?, '-15 minutes')))
                 LIMIT 1
             )
             SELECT 
-                cs.current_qsos,
-                lws.long_window_qsos,
-                lws.long_window_ts,
-                sws.short_window_qsos,
-                sws.short_window_ts,
-                cs.current_ts
+                cs.qsos as current_qsos,
+                lws.qsos as long_window_qsos,
+                sws.qsos as short_window_qsos
             FROM current_score cs
             LEFT JOIN long_window_score lws
             LEFT JOIN short_window_score sws
@@ -57,36 +49,30 @@ class RateCalculator:
         
         cursor.execute(query, (
             callsign, contest, current_ts,
-            callsign, contest, current_ts, current_ts, f"-{long_window}",
-            callsign, contest, current_ts, current_ts, f"-{short_window}"
+            callsign, contest, current_ts, current_ts,
+            callsign, contest, current_ts, current_ts
         ))
         
         result = cursor.fetchone()
         if not result:
             return 0, 0
             
-        current_qsos, long_qsos, long_ts, short_qsos, short_ts, current_ts = result
+        current_qsos, long_window_qsos, short_window_qsos = result
         
-        # Calculate long window rate (60-minute)
+        # Calculate 60-minute rate
         long_rate = 0
-        if long_qsos is not None and long_ts:
-            time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
-                        datetime.strptime(long_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-            if time_diff > 0:
-                qso_diff = current_qsos - long_qsos
-                if qso_diff > 0:
-                    long_rate = int(round((qso_diff * 60) / time_diff))
-        
-        # Calculate short window rate (15-minute)
+        if long_window_qsos is not None:
+            qso_diff = current_qsos - long_window_qsos
+            if qso_diff > 0:
+                long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
+                
+        # Calculate 15-minute rate
         short_rate = 0
-        if short_qsos is not None and short_ts:
-            time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
-                        datetime.strptime(short_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-            if time_diff > 0:
-                qso_diff = current_qsos - short_qsos
-                if qso_diff > 0:
-                    short_rate = int(round((qso_diff * 60) / time_diff))
-        
+        if short_window_qsos is not None:
+            qso_diff = current_qsos - short_window_qsos
+            if qso_diff > 0:
+                short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
+                
         return long_rate, short_rate
 
     def calculate_band_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
@@ -289,94 +275,9 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # Query for 60-minute rate
-                long_query = """
-                    WITH current_data AS (
-                        SELECT cs.qsos, cs.timestamp
-                        FROM contest_scores cs
-                        WHERE cs.callsign = ? 
-                        AND cs.contest = ?
-                        AND cs.timestamp = ?
-                    ),
-                    prev_data AS (
-                        SELECT cs.qsos, cs.timestamp
-                        FROM contest_scores cs
-                        WHERE cs.callsign = ?
-                        AND cs.contest = ?
-                        AND cs.timestamp < ?
-                        ORDER BY cs.timestamp DESC
-                        LIMIT 1
-                    )
-                    SELECT 
-                        cd.qsos as current_qsos,
-                        pd.qsos as prev_qsos,
-                        cd.timestamp as current_ts,
-                        pd.timestamp as prev_ts
-                    FROM current_data cd
-                    LEFT JOIN prev_data pd
-                """
-                
-                # Execute 60-minute rate query
-                cursor.execute(long_query, (
-                    callsign, contest, timestamp,
-                    callsign, contest, timestamp
-                ))
-                
-                long_result = cursor.fetchone()
-                if not long_result:
-                    return 0, 0
-                
-                current_qsos = long_result[0]
-                prev_qsos = long_result[1] or 0
-                current_ts = datetime.strptime(long_result[2], '%Y-%m-%d %H:%M:%S')
-                prev_ts = datetime.strptime(long_result[3], '%Y-%m-%d %H:%M:%S') if long_result[3] else None
-                
-                # Calculate 60-minute rate
-                long_rate = 0
-                if prev_ts:
-                    time_diff = (current_ts - prev_ts).total_seconds() / 60.0
-                    if time_diff > 0:
-                        qso_diff = current_qsos - prev_qsos
-                        if qso_diff > 0:
-                            long_rate = int(round((qso_diff * 60) / time_diff))
-                
-                # Query for 15-minute rate using the same current QSOs
-                short_query = """
-                    SELECT cs.qsos, cs.timestamp
-                    FROM contest_scores cs
-                    WHERE cs.callsign = ?
-                    AND cs.contest = ?
-                    AND cs.timestamp < ?
-                    AND cs.timestamp >= datetime(?, '-15 minutes')
-                    ORDER BY cs.timestamp DESC
-                    LIMIT 1
-                """
-                
-                cursor.execute(short_query, (
-                    callsign, contest, timestamp, timestamp
-                ))
-                
-                short_result = cursor.fetchone()
-                short_rate = 0
-                
-                if short_result:
-                    short_qsos = short_result[0]
-                    short_ts = datetime.strptime(short_result[1], '%Y-%m-%d %H:%M:%S')
-                    time_diff = (current_ts - short_ts).total_seconds() / 60.0
-                    if time_diff > 0:
-                        qso_diff = current_qsos - short_qsos
-                        if qso_diff > 0:
-                            # Convert to hourly rate
-                            short_rate = int(round((qso_diff * 60) / time_diff))
-                
-                self.logger.debug(f"Total rate calculation for {callsign}:")
-                self.logger.debug(f"Current QSOs: {current_qsos}")
-                self.logger.debug(f"Previous QSOs (60min): {prev_qsos}")
-                self.logger.debug(f"Calculated rates - 60min: {long_rate}, 15min: {short_rate}")
-                
-                return long_rate, short_rate
-                
+                return self.rate_calculator.calculate_rates(
+                    cursor, callsign, contest, timestamp
+                )
         except Exception as e:
             self.logger.error(f"Error in get_total_rates: {e}")
             self.logger.error(traceback.format_exc())
