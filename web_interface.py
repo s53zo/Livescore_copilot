@@ -119,10 +119,12 @@ def live_report():
         # Verify contest and callsign exist in database
         with get_db() as conn:
             cursor = conn.cursor()
+            # Updated query to include QTH info
             cursor.execute("""
                 SELECT COUNT(*) 
-                FROM contest_scores 
-                WHERE contest = ? AND callsign = ?
+                FROM contest_scores cs
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ? AND cs.callsign = ?
             """, (contest, callsign))
             if cursor.fetchone()[0] == 0:
                 return render_template('error.html', 
@@ -132,7 +134,7 @@ def live_report():
         stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
         if stations:
-            # Generate HTML content directly
+            # Generate HTML content
             template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
             with open(template_path, 'r') as f:
                 template = f.read()
@@ -214,6 +216,55 @@ def get_callsigns():
         logger.error(f"Error fetching callsigns: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/livescore-pilot/api/statistics')
+def get_statistics():
+    """New endpoint to get location statistics"""
+    contest = request.args.get('contest')
+    
+    try:
+        with get_db() as db:
+            cursor = db.cursor()
+            
+            query = """
+                WITH latest_scores AS (
+                    SELECT cs.id
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    ) latest ON cs.timestamp = latest.max_ts
+                )
+                SELECT
+                    COUNT(DISTINCT qi.continent) as continents,
+                    COUNT(DISTINCT qi.dxcc_country) as countries,
+                    GROUP_CONCAT(DISTINCT qi.continent) as continent_list,
+                    COUNT(DISTINCT cs.callsign) as participants
+                FROM contest_scores cs
+                JOIN latest_scores ls ON cs.id = ls.id
+                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ?
+            """
+            
+            cursor.execute(query, (contest, contest))
+            result = cursor.fetchone()
+            
+            if result:
+                stats = {
+                    "continents": result[0],
+                    "countries": result[1],
+                    "continent_list": result[2].split(',') if result[2] else [],
+                    "participants": result[3]
+                }
+                return jsonify(stats)
+            else:
+                return jsonify({"error": "No statistics available"}), 404
+                
+    except Exception as e:
+        logger.error(f"Error fetching statistics: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/livescore-pilot/api/filters')
 def get_filters():
     contest = request.args.get('contest')
@@ -225,9 +276,16 @@ def get_filters():
     try:
         with get_db() as db:
             cursor = db.cursor()
+            # Updated query to include new location fields
             cursor.execute("""
-                SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                       qi.arrl_section, qi.state_province
+                SELECT 
+                    qi.dxcc_country,
+                    qi.dxcc_prefix,
+                    qi.continent,
+                    qi.cq_zone,
+                    qi.iaru_zone, 
+                    qi.arrl_section,
+                    qi.state_province
                 FROM contest_scores cs
                 JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ? AND cs.callsign = ?
@@ -242,17 +300,20 @@ def get_filters():
             filters = []
             filter_map = {
                 'DXCC': row[0],
-                'CQ Zone': row[1],
-                'IARU Zone': row[2],
-                'ARRL Section': row[3],
-                'State/Province': row[4]
+                'Prefix': row[1],
+                'Continent': row[2],
+                'CQ Zone': row[3],
+                'IARU Zone': row[4],
+                'ARRL Section': row[5],
+                'State/Province': row[6]
             }
 
             for filter_type, value in filter_map.items():
                 if value:  # Only include non-empty values
                     filters.append({
                         "type": filter_type,
-                        "value": value
+                        "value": value,
+                        "label": f"{filter_type}: {value}"
                     })
 
             return jsonify(filters)
