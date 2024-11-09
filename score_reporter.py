@@ -337,7 +337,7 @@ class ScoreReporter:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                           qi.arrl_section, qi.state_province
+                           qi.arrl_section, qi.state_province, qi.continent
                     FROM contest_scores cs
                     JOIN qth_info qi ON qi.contest_score_id = cs.id
                     WHERE cs.callsign = ? AND cs.contest = ?
@@ -347,7 +347,8 @@ class ScoreReporter:
                 qth_info = cursor.fetchone()
                 
                 if qth_info:
-                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", "State/Province"]
+                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
+                                   "State/Province", "Continent"]
                     filter_parts = []
                     
                     for label, value in zip(filter_labels, qth_info):
