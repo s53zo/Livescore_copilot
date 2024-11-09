@@ -13,40 +13,46 @@ class RateCalculator:
     def calculate_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
         """Calculate QSO rates for both long and short time windows"""
         query = """
-            WITH current_data AS (
-                SELECT cs.qsos, cs.timestamp
+            WITH current_score AS (
+                SELECT cs.qsos as current_qsos,
+                       cs.timestamp as current_ts
                 FROM contest_scores cs
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
                 AND cs.timestamp = ?
             ),
-            long_window_data AS (
-                SELECT cs.qsos
+            long_window_score AS (
+                SELECT cs.qsos as long_window_qsos,
+                       cs.timestamp as long_window_ts
                 FROM contest_scores cs
                 WHERE cs.callsign = ?
                 AND cs.contest = ?
-                AND cs.timestamp <= ?
+                AND cs.timestamp < ?
                 AND cs.timestamp >= datetime(?, ? || ' minutes')
                 ORDER BY cs.timestamp DESC
                 LIMIT 1
             ),
-            short_window_data AS (
-                SELECT cs.qsos
+            short_window_score AS (
+                SELECT cs.qsos as short_window_qsos,
+                       cs.timestamp as short_window_ts
                 FROM contest_scores cs
                 WHERE cs.callsign = ?
                 AND cs.contest = ?
-                AND cs.timestamp <= ?
+                AND cs.timestamp < ?
                 AND cs.timestamp >= datetime(?, ? || ' minutes')
                 ORDER BY cs.timestamp DESC
                 LIMIT 1
             )
             SELECT 
-                cd.qsos as current_qsos,
-                lwd.qsos as long_window_qsos,
-                swd.qsos as short_window_qsos
-            FROM current_data cd
-            LEFT JOIN long_window_data lwd
-            LEFT JOIN short_window_data swd
+                cs.current_qsos,
+                lws.long_window_qsos,
+                lws.long_window_ts,
+                sws.short_window_qsos,
+                sws.short_window_ts,
+                cs.current_ts
+            FROM current_score cs
+            LEFT JOIN long_window_score lws
+            LEFT JOIN short_window_score sws
         """
         
         cursor.execute(query, (
@@ -59,21 +65,27 @@ class RateCalculator:
         if not result:
             return 0, 0
             
-        current_qsos, long_window_qsos, short_window_qsos = result
+        current_qsos, long_qsos, long_ts, short_qsos, short_ts, current_ts = result
         
         # Calculate long window rate (60-minute)
         long_rate = 0
-        if long_window_qsos is not None:
-            qso_diff = current_qsos - long_window_qsos
-            if qso_diff > 0:
-                long_rate = int(round((qso_diff * 60) / long_window))
+        if long_qsos is not None and long_ts:
+            time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                        datetime.strptime(long_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+            if time_diff > 0:
+                qso_diff = current_qsos - long_qsos
+                if qso_diff > 0:
+                    long_rate = int(round((qso_diff * 60) / time_diff))
         
         # Calculate short window rate (15-minute)
         short_rate = 0
-        if short_window_qsos is not None:
-            qso_diff = current_qsos - short_window_qsos
-            if qso_diff > 0:
-                short_rate = int(round((qso_diff * 60) / short_window))
+        if short_qsos is not None and short_ts:
+            time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                        datetime.strptime(short_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+            if time_diff > 0:
+                qso_diff = current_qsos - short_qsos
+                if qso_diff > 0:
+                    short_rate = int(round((qso_diff * 60) / time_diff))
         
         return long_rate, short_rate
 
