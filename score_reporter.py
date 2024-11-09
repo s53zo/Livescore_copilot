@@ -283,15 +283,40 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return 0, 0
 
-    def format_band_data(self, band_data):
-        """Format band data as QSO/Mults (60h/15h)"""
+
+    def format_band_data(self, band_data, reference_rates=None, band=None):
+        """Format band data as QSO/Mults (60h/15h) with rate comparison"""
         if band_data:
             qsos, mults, long_rate, short_rate = band_data
             if qsos > 0:
+                # Get reference rates for this band
+                ref_long_rate = 0
+                ref_short_rate = 0
+                if reference_rates and band in reference_rates:
+                    _, _, ref_long_rate, ref_short_rate = reference_rates[band]
+                
+                # Determine if rates are better
+                better_rate = (long_rate > ref_long_rate) or (short_rate > ref_short_rate)
+                
+                # Format rates with + sign if positive
                 long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
                 short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
-                return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+                
+                # Apply CSS class based on rate comparison
+                rate_class = "better-rate" if better_rate else "worse-rate"
+                
+                return f'<span class="{rate_class}">{qsos}/{mults} ({long_rate_str}/{short_rate_str})</span>'
         return "-/- (0/0)"
+    
+    #def format_band_data(self, band_data):
+    #    """Format band data as QSO/Mults (60h/15h)"""
+    #    if band_data:
+    #        qsos, mults, long_rate, short_rate = band_data
+    #        if qsos > 0:
+    #            long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
+    #            short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
+    #            return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+    #    return "-/- (0/0)"
 
     def format_total_data(self, qsos, mults, long_rate, short_rate):
         """Format total QSO/Mults with both rates"""
