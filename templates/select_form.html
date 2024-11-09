@@ -64,6 +64,72 @@
             font-size: 1rem;
         }
 
+        .location-info {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .location-tag {
+            display: inline-block;
+            padding: 4px 8px;
+            margin: 2px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        
+        .continent-tag {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .dxcc-tag {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+        
+        .prefix-tag {
+            background-color: #fff3e0;
+            color: #e65100;
+        }
+        
+        .filter-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .filter-group {
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .filter-group h3 {
+            margin: 0 0 10px 0;
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .filter-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        
+        .filter-option {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .filter-option:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
         /* Form elements */
         select {
             width: 100%;
@@ -190,6 +256,14 @@
                 grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             }
 
+            .filter-options {
+                grid-template-columns: 1fr;
+            }
+            
+            .location-info {
+                font-size: 0.8rem;
+            }
+            
             select {
                 font-size: 1rem;
             }
@@ -256,6 +330,10 @@
             </option>
             {% endfor %}
         </select>
+        
+        <div class="location-info" id="locationInfo" style="display: none;">
+            <!-- Location info will be populated by JavaScript -->
+        </div>
     </div>
 
     <div class="step disabled" id="filterButtons">
@@ -264,7 +342,10 @@
             <button onclick="generateReport('none', 'none')" class="btn btn-primary">
                 Generate Full Report
             </button>
-            <!-- Filter buttons will be added here dynamically -->
+        </div>
+        
+        <div class="filter-options" id="filterOptions">
+            <!-- Filter options will be populated by JavaScript -->
         </div>
     </div>
 
@@ -281,73 +362,36 @@
             document.getElementById('loadingIndicator').style.display = 'none';
         }
 
-        async function handleContestChange() {
-            const contestSelect = document.getElementById('contestSelect');
-            const callsignSelect = document.getElementById('callsignSelect');
-            const filterButtons = document.getElementById('filterButtons');
-            const contest = contestSelect.value;
-
-            // Reset subsequent steps
-            callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
-            filterButtons.classList.add('disabled');
-            document.getElementById('callsignStep').classList.add('disabled');
-
-            if (!contest) return;
-
-            showLoading();
-            try {
-                const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
-                const callsigns = await response.json();
-
-                callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
-                callsigns.forEach(call => {
-                    const option = document.createElement('option');
-                    option.value = call.name;
-                    option.textContent = `${call.name} (${call.qso_count} QSOs)`;
-                    callsignSelect.appendChild(option);
-                });
-
-                document.getElementById('callsignStep').classList.remove('disabled');
-                callsignSelect.disabled = false;
-            } catch (error) {
-                console.error('Error fetching callsigns:', error);
-            } finally {
-                hideLoading();
-            }
-        }
-
         async function handleCallsignChange() {
             const contestSelect = document.getElementById('contestSelect');
             const callsignSelect = document.getElementById('callsignSelect');
             const filterButtons = document.getElementById('filterButtons');
+            const locationInfo = document.getElementById('locationInfo');
             const contest = contestSelect.value;
             const callsign = callsignSelect.value;
 
             filterButtons.classList.add('disabled');
+            locationInfo.style.display = 'none';
 
             if (!contest || !callsign) return;
 
             showLoading();
             try {
+                // Fetch location and filter information
                 const response = await fetch(`/livescore-pilot/api/filters?contest=${encodeURIComponent(contest)}&callsign=${encodeURIComponent(callsign)}`);
                 const filters = await response.json();
 
-                const buttonContainer = filterButtons.querySelector('.generate-buttons');
-                // Clear existing filter buttons but keep the "Generate Full Report" button
-                const fullReportButton = buttonContainer.firstElementChild;
-                buttonContainer.innerHTML = '';
-                buttonContainer.appendChild(fullReportButton);
+                // Display location information
+                if (filters.length > 0) {
+                    locationInfo.style.display = 'block';
+                    locationInfo.innerHTML = formatLocationInfo(filters);
+                }
 
-                filters.forEach(filter => {
-                    const button = document.createElement('button');
-                    button.className = 'btn btn-secondary';
-                    button.textContent = `Filter by ${filter.type}`;
-                    button.onclick = () => generateReport(filter.type, filter.value);
-                    buttonContainer.appendChild(button);
-                });
+                // Set up filter options
+                const filterOptions = document.getElementById('filterOptions');
+                filterOptions.innerHTML = formatFilterOptions(filters);
 
                 filterButtons.classList.remove('disabled');
-                filterButtons.style.display = 'block';
             } catch (error) {
                 console.error('Error fetching filters:', error);
             } finally {
@@ -355,26 +399,65 @@
             }
         }
 
-        function generateReport(filterType, filterValue) {
-            const contest = document.getElementById('contestSelect').value;
-            const callsign = document.getElementById('callsignSelect').value;
+        function formatLocationInfo(filters) {
+            let html = '<div class="filter-list">';
             
-            const params = new URLSearchParams({
-                contest: contest,
-                callsign: callsign,
-                filter_type: filterType,
-                filter_value: filterValue
-            });
+            const continentFilter = filters.find(f => f.type === 'Continent');
+            const dxccFilter = filters.find(f => f.type === 'DXCC');
+            const prefixFilter = filters.find(f => f.type === 'Prefix');
 
-            window.location.href = `/reports/live.html?${params.toString()}`;
+            if (continentFilter) {
+                html += `<span class="location-tag continent-tag">${continentFilter.value}</span>`;
+            }
+            if (dxccFilter) {
+                html += `<span class="location-tag dxcc-tag">${dxccFilter.value}</span>`;
+            }
+            if (prefixFilter) {
+                html += `<span class="location-tag prefix-tag">${prefixFilter.value}</span>`;
+            }
+
+            html += '</div>';
+            return html;
         }
 
-        // Initialize the form based on any existing selections
-        document.addEventListener('DOMContentLoaded', () => {
-            if (document.getElementById('contestSelect').value) {
-                handleContestChange();
+        function formatFilterOptions(filters) {
+            const groups = {
+                'Location': ['Continent', 'DXCC', 'Prefix'],
+                'Zone': ['CQ Zone', 'IARU Zone'],
+                'Regional': ['ARRL Section', 'State/Province']
+            };
+
+            let html = '';
+            
+            for (const [groupName, filterTypes] of Object.entries(groups)) {
+                const groupFilters = filters.filter(f => filterTypes.includes(f.type));
+                
+                if (groupFilters.length > 0) {
+                    html += `
+                        <div class="filter-group">
+                            <h3>${groupName} Filters</h3>
+                            <div class="filter-list">
+                    `;
+                    
+                    groupFilters.forEach(filter => {
+                        const tagClass = filter.type === 'Continent' ? 'continent-tag' : 
+                                       filter.type === 'DXCC' ? 'dxcc-tag' : 
+                                       filter.type === 'Prefix' ? 'prefix-tag' : '';
+                        
+                        html += `
+                            <span class="location-tag filter-option ${tagClass}"
+                                  onclick="generateReport('${filter.type}', '${filter.value}')">
+                                ${filter.label}
+                            </span>
+                        `;
+                    });
+                    
+                    html += '</div></div>';
+                }
             }
-        });
+            
+            return html;
+        }
     </script>
 </body>
 </html>
