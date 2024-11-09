@@ -361,7 +361,62 @@
         function hideLoading() {
             document.getElementById('loadingIndicator').style.display = 'none';
         }
-
+        async function handleContestChange() {
+            const contestSelect = document.getElementById('contestSelect');
+            const callsignSelect = document.getElementById('callsignSelect');
+            const filterButtons = document.getElementById('filterButtons');
+            const contest = contestSelect.value;
+        
+            // Reset subsequent steps
+            callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
+            filterButtons.classList.add('disabled');
+            document.getElementById('callsignStep').classList.add('disabled');
+        
+            if (!contest) return;
+        
+            showLoading();
+            try {
+                const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const callsigns = await response.json();
+                
+                console.log("Received callsigns:", callsigns); // Debug logging
+        
+                callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
+                callsigns.forEach(call => {
+                    const option = document.createElement('option');
+                    option.value = call.name;
+                    option.textContent = `${call.name} (${call.qso_count} QSOs)`;
+                    callsignSelect.appendChild(option);
+                });
+        
+                document.getElementById('callsignStep').classList.remove('disabled');
+                callsignSelect.disabled = false;
+            } catch (error) {
+                console.error('Error fetching callsigns:', error);
+                alert('Error loading callsigns. Please try again.');
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Add error handlers for loading indicator
+        function showLoading() {
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'block';
+            }
+        }
+        
+        function hideLoading() {
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+        
         async function handleCallsignChange() {
             const contestSelect = document.getElementById('contestSelect');
             const callsignSelect = document.getElementById('callsignSelect');
