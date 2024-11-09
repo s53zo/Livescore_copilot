@@ -46,12 +46,76 @@ class DatabaseManager:
             print(f"Error analyzing query: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # Modified setup_indexes method in database_manager.py
     def setup_indexes(self, analyze=True):
         """Create indexes on the contest database"""
         print(f"Setting up indexes on database: {self.db_path}")
         
         index_commands = [
-            # ... (keep existing index commands)
+            # Contest Scores indexes
+            """CREATE INDEX IF NOT EXISTS idx_scores_callsign 
+               ON contest_scores(callsign)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_contest 
+               ON contest_scores(contest)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_timestamp 
+               ON contest_scores(timestamp)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_callsign_contest 
+               ON contest_scores(callsign, contest)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_contest_timestamp 
+               ON contest_scores(contest, timestamp)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_callsign_timestamp 
+               ON contest_scores(callsign, timestamp)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_combined 
+               ON contest_scores(callsign, contest, timestamp)""",
+               
+            # For scores filtering
+            """CREATE INDEX IF NOT EXISTS idx_scores_qsos 
+               ON contest_scores(qsos)""",
+               
+            """CREATE INDEX IF NOT EXISTS idx_scores_score 
+               ON contest_scores(score)""",
+            
+            # Band Breakdown indexes
+            """CREATE INDEX IF NOT EXISTS idx_band_contest_score_id 
+               ON band_breakdown(contest_score_id)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_band_band 
+               ON band_breakdown(band)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_band_combined 
+               ON band_breakdown(contest_score_id, band)""",
+            
+            # QTH Info indexes
+            """CREATE INDEX IF NOT EXISTS idx_qth_contest_score_id 
+               ON qth_info(contest_score_id)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_dxcc 
+               ON qth_info(dxcc_country)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_continent 
+               ON qth_info(continent)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_cq_zone 
+               ON qth_info(cq_zone)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_iaru_zone 
+               ON qth_info(iaru_zone)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_section 
+               ON qth_info(arrl_section)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_state 
+               ON qth_info(state_province)""",
+               
+            # Combined indexes for frequent queries
+            """CREATE INDEX IF NOT EXISTS idx_qth_multi_location 
+               ON qth_info(dxcc_country, continent, cq_zone)"""
         ]
 
         try:
@@ -67,6 +131,7 @@ class DatabaseManager:
                     print("Analyzing database...")
                     conn.execute("ANALYZE contest_scores")
                     conn.execute("ANALYZE band_breakdown")
+                    conn.execute("ANALYZE qth_info")
                     print("Analysis complete!")
 
             print("\nAll indexes created successfully!")
