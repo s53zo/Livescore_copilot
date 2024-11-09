@@ -289,9 +289,83 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                return self.rate_calculator.calculate_rates(
-                    cursor, callsign, contest, timestamp
-                )
+                query = """
+                    WITH current_score AS (
+                        SELECT cs.qsos as current_qsos,
+                               cs.timestamp as current_ts
+                        FROM contest_scores cs
+                        WHERE cs.callsign = ? 
+                        AND cs.contest = ?
+                        AND cs.timestamp = ?
+                    ),
+                    long_window_score AS (
+                        SELECT cs.qsos as prev_qsos,
+                               cs.timestamp as prev_ts
+                        FROM contest_scores cs
+                        WHERE cs.callsign = ?
+                        AND cs.contest = ?
+                        AND cs.timestamp < ?
+                        AND cs.timestamp >= datetime(?, '-60 minutes')
+                        ORDER BY cs.timestamp DESC
+                        LIMIT 1
+                    ),
+                    short_window_score AS (
+                        SELECT cs.qsos as prev_qsos,
+                               cs.timestamp as prev_ts
+                        FROM contest_scores cs
+                        WHERE cs.callsign = ?
+                        AND cs.contest = ?
+                        AND cs.timestamp < ?
+                        AND cs.timestamp >= datetime(?, '-15 minutes')
+                        ORDER BY cs.timestamp DESC
+                        LIMIT 1
+                    )
+                    SELECT 
+                        cs.current_qsos,
+                        lws.prev_qsos as long_window_qsos,
+                        lws.prev_ts as long_window_ts,
+                        sws.prev_qsos as short_window_qsos,
+                        sws.prev_ts as short_window_ts,
+                        cs.current_ts
+                    FROM current_score cs
+                    LEFT JOIN long_window_score lws
+                    LEFT JOIN short_window_score sws
+                """
+                
+                cursor.execute(query, (
+                    callsign, contest, timestamp,
+                    callsign, contest, timestamp, timestamp,
+                    callsign, contest, timestamp, timestamp
+                ))
+                
+                result = cursor.fetchone()
+                if not result:
+                    return 0, 0
+                    
+                current_qsos, long_qsos, long_ts, short_qsos, short_ts, current_ts = result
+                
+                # Calculate long window rate (60-minute)
+                long_rate = 0
+                if long_qsos is not None and long_ts:
+                    time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                               datetime.strptime(long_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                    if time_diff > 0:
+                        qso_diff = current_qsos - long_qsos
+                        if qso_diff > 0:
+                            long_rate = int(round((qso_diff * 60) / time_diff))
+
+                # Calculate short window rate (15-minute)
+                short_rate = 0
+                if short_qsos is not None and short_ts:
+                    time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                               datetime.strptime(short_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                    if time_diff > 0:
+                        qso_diff = current_qsos - short_qsos
+                        if qso_diff > 0:
+                            short_rate = int(round((qso_diff * 60) / time_diff))
+                
+                return long_rate, short_rate
+
         except Exception as e:
             self.logger.error(f"Error in get_total_rates: {e}")
             self.logger.error(traceback.format_exc())
@@ -437,7 +511,7 @@ class ScoreReporter:
                 # Calculate both rates for all bands
                 band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
                 
-                # Calculate total rates
+                # Calculate total rates directly from QSO totals
                 total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
                 
                 # Format timestamp for display
@@ -446,7 +520,7 @@ class ScoreReporter:
                 # Add highlight class for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
                 
-                # Create table row with dual rates
+                # Create table row with both band and total rates
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
@@ -459,15 +533,10 @@ class ScoreReporter:
                     <td class="band-data">{self.format_band_data(band_breakdown.get('15'))}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('10'))}</td>
                     <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td>
-                        <span class="relative-time" 
-                              data-timestamp="{timestamp}">
-                            {ts}
-                        </span>
-                    </td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-
+                
             # Format final HTML
             html_content = template.format(
                 contest=contest,
