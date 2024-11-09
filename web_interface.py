@@ -196,26 +196,37 @@ def get_callsigns():
     try:
         with get_db() as db:
             cursor = db.cursor()
+            # Updated query to get latest score for each callsign
             cursor.execute("""
-                SELECT cs.callsign, cs.qsos AS qso_count
+                WITH latest_scores AS (
+                    SELECT cs.callsign, MAX(cs.timestamp) as max_ts
+                    FROM contest_scores cs
+                    WHERE cs.contest = ?
+                    GROUP BY cs.callsign
+                )
+                SELECT 
+                    cs.callsign as name,
+                    cs.qsos as qso_count
                 FROM contest_scores cs
-                INNER JOIN (
-                    SELECT callsign, MAX(timestamp) as max_ts
-                    FROM contest_scores
-                    WHERE contest = ?
-                    GROUP BY callsign
-                ) latest ON cs.callsign = latest.callsign 
-                    AND cs.timestamp = latest.max_ts
+                INNER JOIN latest_scores ls 
+                    ON cs.callsign = ls.callsign 
+                    AND cs.timestamp = ls.max_ts
                 WHERE cs.contest = ?
                 AND cs.qsos > 0
                 ORDER BY cs.callsign
             """, (contest, contest))
-            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
+            
+            callsigns = [{"name": row[0], "qso_count": row[1]} 
+                        for row in cursor.fetchall()]
+            
+            logger.debug(f"Found {len(callsigns)} callsigns for contest {contest}")
             return jsonify(callsigns)
+            
     except Exception as e:
         logger.error(f"Error fetching callsigns: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
-
+        
 @app.route('/livescore-pilot/api/statistics')
 def get_statistics():
     """New endpoint to get location statistics"""
