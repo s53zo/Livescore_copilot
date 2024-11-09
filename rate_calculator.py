@@ -24,7 +24,7 @@ class RateCalculator:
             self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
 
     def calculate_band_rates(self, cursor, callsign, contest, lookback_minutes=60):
-        """Calculate per-band QSO rates with closest report within time window"""
+        """Calculate per-band QSO rates prioritizing reports near the target lookback time"""
         query = """
             WITH latest_scores AS (
                 SELECT cs.id, cs.timestamp
@@ -43,12 +43,18 @@ class RateCalculator:
                 JOIN contest_scores cs ON cs.id = ls.id
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
             ),
-            previous_bands_candidates AS (
+            previous_bands_all AS (
                 SELECT 
                     bb.band,
                     bb.qsos as prev_qsos,
                     cs.timestamp as prev_ts,
-                    ABS(ROUND((JULIANDAY(cs.timestamp) - JULIANDAY(lb.current_ts)) * 24 * 60, 1)) as time_diff
+                    ABS(ROUND((JULIANDAY(cs.timestamp) - JULIANDAY(lb.current_ts)) * 24 * 60, 1)) as time_diff,
+                    -- Flag records within 5 minutes of target lookback time
+                    CASE 
+                        WHEN ABS(ROUND((JULIANDAY(cs.timestamp) - JULIANDAY(lb.current_ts)) * 24 * 60, 1) - ?) <= 5 
+                        THEN 1 
+                        ELSE 0 
+                    END as is_target_window
                 FROM latest_bands lb
                 CROSS JOIN contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
@@ -57,34 +63,48 @@ class RateCalculator:
                 AND cs.timestamp < (SELECT current_ts FROM latest_bands LIMIT 1)
                 AND cs.timestamp >= datetime((SELECT current_ts FROM latest_bands LIMIT 1), ? || ' minutes')
             ),
-            previous_bands AS (
-                SELECT 
-                    band,
-                    prev_qsos,
-                    prev_ts,
-                    time_diff
-                FROM previous_bands_candidates pbc
-                WHERE (band, time_diff) IN (
+            prioritized_previous AS (
+                -- First try to get records close to target lookback time
+                SELECT band, prev_qsos, prev_ts, time_diff
+                FROM previous_bands_all
+                WHERE is_target_window = 1
+                AND (band, time_diff) IN (
                     SELECT band, MIN(time_diff)
-                    FROM previous_bands_candidates
+                    FROM previous_bands_all
+                    WHERE is_target_window = 1
+                    GROUP BY band
+                )
+                UNION ALL
+                -- Fall back to closest available record for bands with no target window match
+                SELECT pba.band, pba.prev_qsos, pba.prev_ts, pba.time_diff
+                FROM previous_bands_all pba
+                WHERE pba.band NOT IN (
+                    SELECT band FROM previous_bands_all WHERE is_target_window = 1
+                )
+                AND (pba.band, pba.time_diff) IN (
+                    SELECT band, MIN(time_diff)
+                    FROM previous_bands_all pba2
+                    WHERE pba2.band NOT IN (
+                        SELECT band FROM previous_bands_all WHERE is_target_window = 1
+                    )
                     GROUP BY band
                 )
             )
-            SELECT 
+            SELECT DISTINCT
                 lb.band,
                 lb.current_qsos,
-                pb.prev_qsos,
+                pp.prev_qsos,
                 lb.current_ts,
-                pb.prev_ts,
-                pb.time_diff as minutes_diff
+                pp.prev_ts,
+                pp.time_diff as minutes_diff
             FROM latest_bands lb
-            LEFT JOIN previous_bands pb ON lb.band = pb.band
+            LEFT JOIN prioritized_previous pp ON lb.band = pp.band
             WHERE lb.current_qsos > 0
             ORDER BY lb.band
         """
         
         minutes_param = f"-{lookback_minutes}"
-        cursor.execute(query, (callsign, contest, callsign, contest, minutes_param))
+        cursor.execute(query, (callsign, contest, lookback_minutes, callsign, contest, minutes_param))
         results = cursor.fetchall()
         
         if self.debug:
@@ -119,7 +139,7 @@ class RateCalculator:
                     self.logger.debug("  Rate is 0 - no new QSOs")
                 band_rates[band] = 0
             else:
-                # Calculate hourly rate by scaling to 60 minutes
+                # Calculate hourly rate
                 rate = int(round((qso_diff * 60) / minutes_diff))
                 band_rates[band] = rate
                 if self.debug:
