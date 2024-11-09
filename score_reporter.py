@@ -159,41 +159,111 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Get current band breakdown
-                cursor.execute("""
-                    WITH CurrentScore AS (
+                # Enhanced query with improved rate calculation logic
+                query = """
+                    WITH latest_score AS (
                         SELECT cs.id, cs.timestamp
                         FROM contest_scores cs
-                        WHERE cs.callsign = ?
+                        WHERE cs.callsign = ? 
                         AND cs.contest = ?
                         ORDER BY cs.timestamp DESC
                         LIMIT 1
+                    ),
+                    latest_bands AS (
+                        SELECT 
+                            bb.band, 
+                            bb.qsos as current_qsos,
+                            bb.multipliers,
+                            cs.timestamp as current_ts
+                        FROM latest_score ls
+                        JOIN contest_scores cs ON cs.id = ls.id
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                    ),
+                    time_windows AS (
+                        SELECT 
+                            bb.band,
+                            bb.qsos as prev_qsos,
+                            cs.timestamp as prev_ts,
+                            ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) as time_diff,
+                            CASE
+                                WHEN ABS(ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) - ?) <= 5 THEN 1
+                                WHEN ABS(ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) - ?) <= 10 THEN 2
+                                ELSE 3
+                            END as priority
+                        FROM latest_bands lb
+                        CROSS JOIN contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        WHERE cs.callsign = ?
+                        AND cs.contest = ?
+                        AND cs.timestamp < lb.current_ts
+                        AND cs.timestamp >= datetime(lb.current_ts, ? || ' minutes')
+                        AND bb.qsos > 0
+                    ),
+                    ranked_reports AS (
+                        SELECT 
+                            band,
+                            prev_qsos,
+                            prev_ts,
+                            time_diff,
+                            priority,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY band, priority 
+                                ORDER BY ABS(time_diff - ?)
+                            ) as priority_rank
+                        FROM time_windows
+                    ),
+                    best_reports AS (
+                        SELECT band, prev_qsos, prev_ts, time_diff
+                        FROM ranked_reports rr1
+                        WHERE priority_rank = 1
+                        AND NOT EXISTS (
+                            SELECT 1 FROM ranked_reports rr2
+                            WHERE rr2.band = rr1.band
+                            AND rr2.priority < rr1.priority
+                            AND rr2.priority_rank = 1
+                        )
                     )
-                    SELECT 
-                        bb.band, 
-                        bb.qsos as band_qsos, 
-                        bb.multipliers
-                    FROM band_breakdown bb
-                    JOIN CurrentScore cs ON cs.id = bb.contest_score_id
-                    WHERE bb.qsos > 0
-                    ORDER BY bb.band
-                """, (callsign, contest))
-                current_data = cursor.fetchall()
+                    SELECT DISTINCT
+                        lb.band,
+                        lb.current_qsos,
+                        lb.multipliers,
+                        br.prev_qsos,
+                        br.time_diff as minutes_diff
+                    FROM latest_bands lb
+                    LEFT JOIN best_reports br ON lb.band = br.band
+                    WHERE lb.current_qsos > 0
+                    ORDER BY lb.band
+                """
                 
-                if not current_data:
+                minutes_param = f"-{self.rate_minutes}"
+                cursor.execute(query, (
+                    callsign, contest,
+                    self.rate_minutes, self.rate_minutes,  # For priority window calculations
+                    callsign, contest,
+                    minutes_param,
+                    self.rate_minutes  # For final time diff comparison
+                ))
+                
+                results = cursor.fetchall()
+                
+                if not results:
                     return {}
                 
-                # Calculate rates using the RateCalculator
-                rate_calc = RateCalculator(self.db_path)
-                band_rates = rate_calc.calculate_band_rates(cursor, callsign, contest, self.rate_minutes)
-                
-                # Combine current data with calculated rates
-                result = {}
-                for band, qsos, mults in current_data:
-                    result[band] = [qsos, mults, band_rates.get(band, 0)]
-                
-                return result
+                band_data = {}
+                for row in results:
+                    band, current_qsos, multipliers, prev_qsos, minutes_diff = row
                     
+                    # Calculate rate only if we have valid previous data
+                    rate = 0
+                    if prev_qsos is not None and minutes_diff and minutes_diff > 0:
+                        qso_diff = current_qsos - prev_qsos
+                        if qso_diff > 0:
+                            rate = int(round((qso_diff * 60) / minutes_diff))
+                    
+                    band_data[band] = [current_qsos, multipliers, rate]
+                
+                return band_data
+                
         except Exception as e:
             self.logger.error(f"Error in band rate calculation: {e}")
             self.logger.error(traceback.format_exc())
