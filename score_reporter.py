@@ -331,7 +331,7 @@ class ScoreReporter:
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
-
+    
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -378,6 +378,21 @@ class ScoreReporter:
                             {' | '.join(filter_parts)}
                         </div>
                         """
+            
+            # After getting band_breakdown, add the reference rates code here
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+            if reference_station:
+                reference_breakdown = self.get_band_breakdown_with_rates(
+                    reference_station[0], callsign, contest, reference_station[5]
+                )
+            else:
+                reference_breakdown = {}
+    
+            # Format band data with the added reference breakdown for each band
+            for band in ['160', '80', '40', '20', '15', '10']:
+                band_data = band_breakdown.get(band)
+                formatted_data = self.format_band_data(band_data, reference_breakdown, band)
+
 
             # Add explanatory text and styling for the rate display
             additional_css = """
