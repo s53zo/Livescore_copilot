@@ -307,21 +307,58 @@ class ScoreReporter:
                 return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
     
-    #def format_band_data(self, band_data):
-    #    """Format band data as QSO/Mults (60h/15h)"""
-    #    if band_data:
-    #        qsos, mults, long_rate, short_rate = band_data
-    #        if qsos > 0:
-    #            long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
-    #            short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
-    #            return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
-    #    return "-/- (0/0)"
-
+    
     def format_total_data(self, qsos, mults, long_rate, short_rate):
         """Format total QSO/Mults with both rates"""
         long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
         short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
         return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+
+    def generate_table_rows(self, stations, callsign):
+        """Generate table rows with dual rate display"""
+        table_rows = []
+        for i, station in enumerate(stations, 1):
+            station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+    
+            # Calculate both rates for all bands
+            band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
+    
+            # Get reference rates (from the selected station)
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+            if reference_station:
+                reference_breakdown = self.get_band_breakdown_with_rates(
+                    reference_station[0], callsign, contest, reference_station[5]
+                )
+            else:
+                reference_breakdown = {}
+    
+            # Calculate total rates directly from QSO totals
+            total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
+    
+            # Format timestamp for display
+            ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+    
+            # Add highlight class for current station
+            highlight = ' class="highlight"' if callsign_val == callsign else ''
+    
+            # Create table row with both band and total rates
+            row = f"""
+            <tr{highlight}>
+                <td>{i}</td>
+                <td>{callsign_val}</td>
+                <td>{score:,}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
+                <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+            </tr>"""
+            table_rows.append(row)
+    
+        return '\n'.join(table_rows)
 
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with dual rate display"""
