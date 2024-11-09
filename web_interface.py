@@ -227,7 +227,7 @@ def get_filters():
             cursor = db.cursor()
             cursor.execute("""
                 SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                       qi.arrl_section, qi.state_province
+                       qi.arrl_section, qi.state_province, qi.continent
                 FROM contest_scores cs
                 JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ? AND cs.callsign = ?
@@ -245,7 +245,8 @@ def get_filters():
                 'CQ Zone': row[1],
                 'IARU Zone': row[2],
                 'ARRL Section': row[3],
-                'State/Province': row[4]
+                'State/Province': row[4],
+                'Continent': row[5]
             }
 
             for filter_type, value in filter_map.items():
