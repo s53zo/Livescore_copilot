@@ -19,6 +19,39 @@
                 return num.toString().padStart(2, '0');
             }}
 
+            // Convert displayed timestamps to relative time
+            function updateRelativeTimes() {{
+                document.querySelectorAll('.relative-time').forEach(el => {{
+                    const timestamp = new Date(el.dataset.timestamp + 'Z'); // Add Z to parse as UTC
+                    const now = new Date();
+                    const diff = Math.floor((now - timestamp) / 1000 / 60); // minutes
+                    
+                    if (diff < 60) {{
+                        el.textContent = `${{diff}}m ago`;
+                    }} else if (diff < 1440) {{
+                        el.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
+                    }} else {{
+                        el.textContent = Math.floor(diff/1440) + 'd ago';
+                    }}
+                }});
+
+                // Update the main report timestamp as well
+                const reportTimeElement = document.querySelector('.report-time');
+                if (reportTimeElement) {{
+                    const timestamp = new Date(reportTimeElement.dataset.timestamp + 'Z'); // Add Z to parse as UTC
+                    const now = new Date();
+                    const diff = Math.floor((now - timestamp) / 1000 / 60); // minutes
+                    
+                    if (diff < 60) {{
+                        reportTimeElement.textContent = `${{diff}}m ago`;
+                    }} else if (diff < 1440) {{
+                        reportTimeElement.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
+                    }} else {{
+                        reportTimeElement.textContent = Math.floor(diff/1440) + 'd ago';
+                    }}
+                }}
+            }}
+
             const timer = setInterval(() => {{
                 if (minutes === 0 && seconds === 0) {{
                     clearInterval(timer);
@@ -34,21 +67,12 @@
 
                 countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
                 
-                // Update relative time displays
-                document.querySelectorAll('.relative-time').forEach(el => {{
-                    const timestamp = new Date(el.dataset.timestamp);
-                    const now = new Date();
-                    const diff = Math.floor((now - timestamp) / 1000 / 60); // minutes
-                    
-                    if (diff < 60) {{
-                        el.textContent = `${{diff}}m ago`;
-                    }} else if (diff < 1440) {{
-                        el.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
-                    }} else {{
-                        el.textContent = Math.floor(diff/1440) + 'd ago';
-                    }}
-                }});
+                // Update all timestamps
+                updateRelativeTimes();
             }}, 1000);
+
+            // Initial update
+            updateRelativeTimes();
         }}
 
         document.addEventListener('DOMContentLoaded', () => {{
