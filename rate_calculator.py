@@ -43,68 +43,78 @@ class RateCalculator:
                 JOIN contest_scores cs ON cs.id = ls.id
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
             ),
-            previous_bands_all AS (
+            time_windows AS (
+                -- Calculate time differences and assign priority
                 SELECT 
                     bb.band,
                     bb.qsos as prev_qsos,
                     cs.timestamp as prev_ts,
-                    ABS(ROUND((JULIANDAY(cs.timestamp) - JULIANDAY(lb.current_ts)) * 24 * 60, 1)) as time_diff,
-                    -- Flag records within 5 minutes of target lookback time
-                    CASE 
-                        WHEN ABS(ROUND((JULIANDAY(cs.timestamp) - JULIANDAY(lb.current_ts)) * 24 * 60, 1) - ?) <= 5 
-                        THEN 1 
-                        ELSE 0 
-                    END as is_target_window
+                    ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) as time_diff,
+                    CASE
+                        -- Highest priority: within 5 minutes of target time (55-65 minutes)
+                        WHEN ABS(ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) - ?) <= 5 THEN 1
+                        -- Medium priority: within 10 minutes of target time (50-70 minutes)
+                        WHEN ABS(ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) - ?) <= 10 THEN 2
+                        -- Lowest priority: any other time within the window
+                        ELSE 3
+                    END as priority
                 FROM latest_bands lb
                 CROSS JOIN contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                 WHERE cs.callsign = ?
                 AND cs.contest = ?
-                AND cs.timestamp < (SELECT current_ts FROM latest_bands LIMIT 1)
-                AND cs.timestamp >= datetime((SELECT current_ts FROM latest_bands LIMIT 1), ? || ' minutes')
+                AND cs.timestamp < lb.current_ts
+                AND cs.timestamp >= datetime(lb.current_ts, ? || ' minutes')
+                AND bb.qsos > 0
             ),
-            prioritized_previous AS (
-                -- First try to get records close to target lookback time
+            ranked_reports AS (
+                -- Rank reports within each priority level
+                SELECT 
+                    band,
+                    prev_qsos,
+                    prev_ts,
+                    time_diff,
+                    priority,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY band, priority 
+                        ORDER BY ABS(time_diff - ?) -- Order by closeness to target time
+                    ) as priority_rank
+                FROM time_windows
+            ),
+            best_reports AS (
+                -- Select the best report for each band based on priority
                 SELECT band, prev_qsos, prev_ts, time_diff
-                FROM previous_bands_all
-                WHERE is_target_window = 1
-                AND (band, time_diff) IN (
-                    SELECT band, MIN(time_diff)
-                    FROM previous_bands_all
-                    WHERE is_target_window = 1
-                    GROUP BY band
-                )
-                UNION ALL
-                -- Fall back to closest available record for bands with no target window match
-                SELECT pba.band, pba.prev_qsos, pba.prev_ts, pba.time_diff
-                FROM previous_bands_all pba
-                WHERE pba.band NOT IN (
-                    SELECT band FROM previous_bands_all WHERE is_target_window = 1
-                )
-                AND (pba.band, pba.time_diff) IN (
-                    SELECT band, MIN(time_diff)
-                    FROM previous_bands_all pba2
-                    WHERE pba2.band NOT IN (
-                        SELECT band FROM previous_bands_all WHERE is_target_window = 1
-                    )
-                    GROUP BY band
+                FROM ranked_reports rr1
+                WHERE priority_rank = 1
+                AND NOT EXISTS (
+                    -- Ensure there's no higher priority report for this band
+                    SELECT 1 FROM ranked_reports rr2
+                    WHERE rr2.band = rr1.band
+                    AND rr2.priority < rr1.priority
+                    AND rr2.priority_rank = 1
                 )
             )
             SELECT DISTINCT
                 lb.band,
                 lb.current_qsos,
-                pp.prev_qsos,
+                br.prev_qsos,
                 lb.current_ts,
-                pp.prev_ts,
-                pp.time_diff as minutes_diff
+                br.prev_ts,
+                br.time_diff as minutes_diff
             FROM latest_bands lb
-            LEFT JOIN prioritized_previous pp ON lb.band = pp.band
+            LEFT JOIN best_reports br ON lb.band = br.band
             WHERE lb.current_qsos > 0
             ORDER BY lb.band
         """
         
         minutes_param = f"-{lookback_minutes}"
-        cursor.execute(query, (callsign, contest, lookback_minutes, callsign, contest, minutes_param))
+        cursor.execute(query, (
+            callsign, contest,
+            lookback_minutes, lookback_minutes,  # For priority window calculations
+            callsign, contest,
+            minutes_param,
+            lookback_minutes  # For final time diff comparison
+        ))
         results = cursor.fetchall()
         
         if self.debug:
