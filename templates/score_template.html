@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Contest Progress Report - {contest}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
         function refreshPage() {{
             const params = new URLSearchParams(window.location.search);
@@ -19,7 +20,6 @@
                 return num.toString().padStart(2, '0');
             }}
 
-            // Convert displayed timestamps to relative time
             function updateRelativeTimes() {{
                 document.querySelectorAll('.relative-time').forEach(el => {{
                     const timestamp = new Date(el.dataset.timestamp + 'Z');
@@ -59,16 +59,32 @@
         document.addEventListener('DOMContentLoaded', updateCountdown);
     </script>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; padding-bottom: 40px; }}
-        h1 {{ color: #2c3e50; margin-bottom: 10px; }}
-        .info {{ color: #7f8c8d; margin-bottom: 20px; }}
+        /* Base styles */
+        body {{ 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 10px; 
+            color: #333; 
+            padding-bottom: 60px; 
+        }}
+        
+        h1 {{ 
+            color: #2c3e50; 
+            margin-bottom: 10px; 
+            font-size: 1.5rem; 
+            word-break: break-word; 
+        }}
+        
+        /* Station info styles */
         .station-info {{ 
             background-color: #f8f9fa; 
             padding: 15px; 
             border-radius: 4px; 
             margin-bottom: 20px; 
             line-height: 1.5;
+            font-size: 0.9rem;
         }}
+        
         .category-tag {{ 
             display: inline-block; 
             padding: 2px 8px; 
@@ -76,29 +92,107 @@
             border: 1px solid #cce5ff; 
             border-radius: 3px; 
             color: #0066cc; 
-            margin: 0 5px;
-            font-size: 0.9em;
+            margin: 2px;
+            font-size: 0.85rem;
         }}
-        table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        th, td {{ border: 1px solid #dee2e6; padding: 8px 4px; text-align: center; font-size: 0.9em; }}
-        th {{ background-color: #f8f9fa; font-weight: bold; color: #2c3e50; position: sticky; top: 0; z-index: 1; }}
-        tr:nth-child(even) {{ background-color: #f8f9fa; }}
-        .highlight {{ background-color: #e8f5e9 !important; font-weight: bold; }}
-        .highlight td {{ border-top: 2px solid #4caf50; border-bottom: 2px solid #4caf50; }}
-        .refresh-info {{ position: fixed; top: 10px; right: 10px; background-color: #4caf50; color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 1000; }}
-        #countdown {{ font-weight: bold; }}
-        .footer {{ position: fixed; bottom: 0; left: 0; right: 0; background-color: #f8f9fa; padding: 10px 20px; text-align: center; font-size: 0.8em; color: #666; border-top: 1px solid #dee2e6; }}
-        .band-data {{ font-family: monospace; white-space: nowrap; }}
-        .relative-time {{ color: #666; font-size: 0.8em; }}
-        .better-rate {{ color: #c71212; font-weight: bold; font-size: 1.2em; }}
-        .worse-rate {{ color: #666; }}
-        .rate-detail {{
-            font-size: 0.85em;
-            margin-top: 2px;
-            padding: 2px 4px;
-            border-radius: 2px;
+        
+        /* Table styles */
+        .table-container {{
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 20px;
+            background: linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)), 
+                        linear-gradient(to left, white 30%, rgba(255, 255, 255, 0)) 100% 0;
+            background-size: 50px 100%;
+            background-repeat: no-repeat;
+            background-attachment: local, local;
         }}
+        
+        table {{ 
+            border-collapse: collapse; 
+            width: 100%;
+            min-width: 800px;
+            margin-bottom: 20px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+        }}
+        
+        th, td {{ 
+            border: 1px solid #dee2e6; 
+            padding: 6px 4px; 
+            text-align: center; 
+            font-size: 0.85rem; 
+            white-space: nowrap;
+        }}
+        
+        th {{ 
+            background-color: #f8f9fa; 
+            font-weight: bold; 
+            color: #2c3e50; 
+            position: sticky; 
+            top: 0; 
+            z-index: 1; 
+        }}
+        
+        tr:nth-child(even) {{ 
+            background-color: #f8f9fa; 
+        }}
+        
+        .highlight {{ 
+            background-color: #e8f5e9 !important; 
+            font-weight: bold; 
+        }}
+        
+        .highlight td {{ 
+            border-top: 2px solid #4caf50; 
+            border-bottom: 2px solid #4caf50; 
+        }}
+        
+        /* Fixed elements */
+        .refresh-info {{ 
+            position: fixed; 
+            top: 10px; 
+            right: 10px; 
+            background-color: #4caf50; 
+            color: white; 
+            padding: 8px 12px; 
+            border-radius: 4px; 
+            font-size: 0.85rem; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            z-index: 1000; 
+        }}
+        
+        .footer {{ 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            right: 0; 
+            background-color: #f8f9fa; 
+            padding: 10px; 
+            text-align: center; 
+            font-size: 0.75rem; 
+            color: #666; 
+            border-top: 1px solid #dee2e6; 
+            z-index: 1000;
+        }}
+        
+        /* Rate display */
+        .band-data {{ 
+            font-family: monospace; 
+            white-space: nowrap; 
+            font-size: 0.8rem;
+        }}
+        
+        .better-rate {{ 
+            color: #c71212; 
+            font-weight: bold; 
+        }}
+        
+        .worse-rate {{ 
+            color: #666; 
+        }}
+        
         .legend {{
+            display: none;
             position: fixed;
             bottom: 40px;
             right: 10px;
@@ -106,19 +200,91 @@
             padding: 10px;
             border-radius: 4px;
             border: 1px solid #dee2e6;
-            font-size: 0.8em;
+            font-size: 0.75rem;
             z-index: 1000;
         }}
-        .legend-item {{
-            margin: 5px 0;
+        
+        /* Filter styles */
+        .filter-info {{
+            margin-top: 10px;
+            padding: 8px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            white-space: nowrap;
         }}
-        .legend-better {{ color: #c71212; font-weight: bold; }}
+        
+        .filter-label {{
+            font-weight: bold;
+            color: #666;
+        }}
+        
+        .filter-link {{
+            color: #0066cc;
+            text-decoration: none;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+            margin: 2px;
+        }}
+        
+        .active-filter {{
+            background-color: #4CAF50;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }}
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {{
+            body {{
+                padding: 5px;
+                padding-bottom: 60px;
+            }}
+            
+            h1 {{
+                font-size: 1.2rem;
+            }}
+            
+            .station-info {{
+                padding: 10px;
+                font-size: 0.8rem;
+            }}
+            
+            .refresh-info {{
+                font-size: 0.75rem;
+                padding: 6px 10px;
+            }}
+            
+            .footer {{
+                padding: 8px;
+                font-size: 0.7rem;
+            }}
+            
+            .category-tag {{
+                font-size: 0.75rem;
+                margin: 1px;
+                padding: 1px 6px;
+            }}
+        }}
+        
+        /* Print styles */
         @media print {{ 
-            .refresh-info, .footer, .legend {{ display: none; }} 
-            body {{ padding-bottom: 0; }} 
-        }}
-        @media (max-width: 768px) {{ 
-            .band-data {{ font-size: 0.8em; }} 
+            .refresh-info, .footer, .legend {{ 
+                display: none; 
+            }} 
+            body {{ 
+                padding-bottom: 0; 
+            }}
+            .table-container {{
+                overflow-x: visible;
+                background: none;
+            }}
+            table {{
+                min-width: auto;
+            }}
         }}
     </style>
     {additional_css}
@@ -133,26 +299,29 @@
     <div class="station-info">
         <div>Monitoring: {callsign} | 
         Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | 
-        Updated: {timestamp} | Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)
+        Updated: {timestamp}</div>
+        <div>Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
         {filter_info_div}
     </div>
 
-    <table>
-        <tr>
-            <th>Place</th>
-            <th>Call Sign</th>
-            <th>Score</th>
-            <th>160m</th>
-            <th>80m</th>
-            <th>40m</th>
-            <th>20m</th>
-            <th>15m</th>
-            <th>10m</th>
-            <th>Total<br>QSO/Mults</th>
-            <th>Last Update</th>
-        </tr>
-        {table_rows}
-    </table>
+    <div class="table-container">
+        <table>
+            <tr>
+                <th>Place</th>
+                <th>Call Sign</th>
+                <th>Score</th>
+                <th>160m</th>
+                <th>80m</th>
+                <th>40m</th>
+                <th>20m</th>
+                <th>15m</th>
+                <th>10m</th>
+                <th>Total<br>QSO/Mults</th>
+                <th>Last Update</th>
+            </tr>
+            {table_rows}
+        </table>
+    </div>
 
     <div class="legend">
         <div class="legend-item">Score Display Format:</div>
