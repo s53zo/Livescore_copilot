@@ -289,47 +289,43 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                # Query to get current and previous QSO counts
                 query = """
-                    WITH current_score AS (
-                        SELECT cs.qsos as current_qsos,
-                               cs.timestamp as current_ts
-                        FROM contest_scores cs
-                        WHERE cs.callsign = ? 
-                        AND cs.contest = ?
-                        AND cs.timestamp = ?
+                    WITH current_data AS (
+                        SELECT qsos, timestamp
+                        FROM contest_scores
+                        WHERE callsign = ?
+                        AND contest = ?
+                        AND timestamp = ?
                     ),
-                    long_window_score AS (
-                        SELECT cs.qsos as prev_qsos,
-                               cs.timestamp as prev_ts
-                        FROM contest_scores cs
-                        WHERE cs.callsign = ?
-                        AND cs.contest = ?
-                        AND cs.timestamp < ?
-                        AND cs.timestamp >= datetime(?, '-60 minutes')
-                        ORDER BY cs.timestamp DESC
+                    long_window_data AS (
+                        SELECT qsos
+                        FROM contest_scores
+                        WHERE callsign = ?
+                        AND contest = ?
+                        AND timestamp < ?
+                        AND timestamp >= datetime(?, '-60 minutes')
+                        ORDER BY timestamp DESC
                         LIMIT 1
                     ),
-                    short_window_score AS (
-                        SELECT cs.qsos as prev_qsos,
-                               cs.timestamp as prev_ts
-                        FROM contest_scores cs
-                        WHERE cs.callsign = ?
-                        AND cs.contest = ?
-                        AND cs.timestamp < ?
-                        AND cs.timestamp >= datetime(?, '-15 minutes')
-                        ORDER BY cs.timestamp DESC
+                    short_window_data AS (
+                        SELECT qsos
+                        FROM contest_scores
+                        WHERE callsign = ?
+                        AND contest = ?
+                        AND timestamp < ?
+                        AND timestamp >= datetime(?, '-15 minutes')
+                        ORDER BY timestamp DESC
                         LIMIT 1
                     )
                     SELECT 
-                        cs.current_qsos,
-                        lws.prev_qsos as long_window_qsos,
-                        lws.prev_ts as long_window_ts,
-                        sws.prev_qsos as short_window_qsos,
-                        sws.prev_ts as short_window_ts,
-                        cs.current_ts
-                    FROM current_score cs
-                    LEFT JOIN long_window_score lws
-                    LEFT JOIN short_window_score sws
+                        current_data.qsos as current_qsos,
+                        long_window_data.qsos as long_window_qsos,
+                        short_window_data.qsos as short_window_qsos,
+                        current_data.timestamp as current_ts
+                    FROM current_data
+                    LEFT JOIN long_window_data
+                    LEFT JOIN short_window_data
                 """
                 
                 cursor.execute(query, (
@@ -341,31 +337,28 @@ class ScoreReporter:
                 result = cursor.fetchone()
                 if not result:
                     return 0, 0
-                    
-                current_qsos, long_qsos, long_ts, short_qsos, short_ts, current_ts = result
                 
-                # Calculate long window rate (60-minute)
-                long_rate = 0
-                if long_qsos is not None and long_ts:
-                    time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
-                               datetime.strptime(long_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-                    if time_diff > 0:
-                        qso_diff = current_qsos - long_qsos
-                        if qso_diff > 0:
-                            long_rate = int(round((qso_diff * 60) / time_diff))
-
-                # Calculate short window rate (15-minute)
-                short_rate = 0
-                if short_qsos is not None and short_ts:
-                    time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
-                               datetime.strptime(short_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-                    if time_diff > 0:
-                        qso_diff = current_qsos - short_qsos
-                        if qso_diff > 0:
-                            short_rate = int(round((qso_diff * 60) / time_diff))
+                current_qsos = result[0]
+                long_window_qsos = result[1] or 0
+                short_window_qsos = result[2] or 0
+                
+                # Calculate 60-minute rate
+                long_rate = current_qsos - long_window_qsos
+                
+                # Calculate 15-minute rate
+                short_rate = current_qsos - short_window_qsos
+                if short_rate > 0:
+                    # Convert 15-minute difference to hourly rate
+                    short_rate = int(round(short_rate * 4))
+                
+                self.logger.debug(f"Total rate calculation for {callsign}:")
+                self.logger.debug(f"Current QSOs: {current_qsos}")
+                self.logger.debug(f"60-min previous QSOs: {long_window_qsos}")
+                self.logger.debug(f"15-min previous QSOs: {short_window_qsos}")
+                self.logger.debug(f"Calculated rates - 60min: {long_rate}, 15min: {short_rate}")
                 
                 return long_rate, short_rate
-
+                
         except Exception as e:
             self.logger.error(f"Error in get_total_rates: {e}")
             self.logger.error(traceback.format_exc())
@@ -383,8 +376,16 @@ class ScoreReporter:
 
     def format_total_data(self, qsos, mults, long_rate, short_rate):
         """Format total QSO/Mults with both rates"""
-        long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
-        short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
+        if long_rate > 0:
+            long_rate_str = f"+{long_rate}"
+        else:
+            long_rate_str = "0"
+            
+        if short_rate > 0:
+            short_rate_str = f"+{short_rate}"
+        else:
+            short_rate_str = "0"
+            
         return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
 
     def generate_html_content(self, template, callsign, contest, stations):
