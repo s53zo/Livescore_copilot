@@ -54,12 +54,23 @@ def index():
         with get_db() as db:
             cursor = db.cursor()
             
-            # Get contests with station counts
+            # Get contests with station counts - simplified query
             cursor.execute("""
-                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
-                FROM contest_scores
-                GROUP BY contest
-                ORDER BY contest
+                WITH latest_scores AS (
+                    SELECT callsign, contest, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    GROUP BY callsign, contest
+                )
+                SELECT 
+                    cs.contest,
+                    COUNT(DISTINCT cs.callsign) as active_stations
+                FROM contest_scores cs
+                INNER JOIN latest_scores ls 
+                    ON cs.callsign = ls.callsign 
+                    AND cs.contest = ls.contest
+                    AND cs.timestamp = ls.max_ts
+                GROUP BY cs.contest
+                ORDER BY cs.contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
             
@@ -72,19 +83,24 @@ def index():
             if selected_contest:
                 # Fetch callsigns with QSO count for the selected contest
                 cursor.execute("""
-                    SELECT cs.callsign, cs.qsos AS qso_count
-                    FROM contest_scores cs
-                    INNER JOIN (
+                    WITH latest_scores AS (
                         SELECT callsign, MAX(timestamp) as max_ts
                         FROM contest_scores
                         WHERE contest = ?
                         GROUP BY callsign
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
+                    )
+                    SELECT 
+                        cs.callsign,
+                        cs.qsos as qso_count
+                    FROM contest_scores cs
+                    INNER JOIN latest_scores ls 
+                        ON cs.callsign = ls.callsign 
+                        AND cs.timestamp = ls.max_ts
                     WHERE cs.contest = ?
                     AND cs.qsos > 0
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
+                
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
         
         return render_template('select_form.html', 
@@ -176,10 +192,21 @@ def get_contests():
         with get_db() as db:
             cursor = db.cursor()
             cursor.execute("""
-                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
-                FROM contest_scores
-                GROUP BY contest
-                ORDER BY contest
+                WITH latest_scores AS (
+                    SELECT callsign, contest, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    GROUP BY callsign, contest
+                )
+                SELECT 
+                    cs.contest,
+                    COUNT(DISTINCT cs.callsign) AS active_stations
+                FROM contest_scores cs
+                INNER JOIN latest_scores ls 
+                    ON cs.callsign = ls.callsign 
+                    AND cs.contest = ls.contest
+                    AND cs.timestamp = ls.max_ts
+                GROUP BY cs.contest
+                ORDER BY cs.contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
             return jsonify(contests)
@@ -196,16 +223,15 @@ def get_callsigns():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            # Updated query to get latest score for each callsign
             cursor.execute("""
                 WITH latest_scores AS (
-                    SELECT cs.callsign, MAX(cs.timestamp) as max_ts
-                    FROM contest_scores cs
-                    WHERE cs.contest = ?
-                    GROUP BY cs.callsign
+                    SELECT callsign, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    WHERE contest = ?
+                    GROUP BY callsign
                 )
                 SELECT 
-                    cs.callsign as name,
+                    cs.callsign,
                     cs.qsos as qso_count
                 FROM contest_scores cs
                 INNER JOIN latest_scores ls 
