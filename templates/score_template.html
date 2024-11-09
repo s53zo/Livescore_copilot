@@ -8,11 +8,11 @@
             window.location.href = '/reports/live.html?' + params.toString();
         }}
         
-        setInterval(refreshPage, 300000);
+        setInterval(refreshPage, 120000);
 
         function updateCountdown() {{
             const countdownElement = document.getElementById('countdown');
-            let minutes = 4;
+            let minutes = 1;
             let seconds = 59;
 
             function pad(num) {{
