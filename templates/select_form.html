@@ -15,7 +15,8 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // ContestForm Component
+        const { useState, useEffect } = React;  // Added this line to properly import hooks
+
         const ContestForm = () => {
             const [contests, setContests] = useState([]);
             const [selectedContest, setSelectedContest] = useState('');
@@ -25,12 +26,12 @@
             const [error, setError] = useState('');
 
             // Fetch contests on component mount
-            React.useEffect(() => {
+            useEffect(() => {  // Changed from React.useEffect
                 fetchContests();
             }, []);
 
             // Fetch callsigns when contest is selected
-            React.useEffect(() => {
+            useEffect(() => {  // Changed from React.useEffect
                 if (selectedContest) {
                     fetchCallsigns(selectedContest);
                 }
@@ -66,7 +67,7 @@
 
             const handleContestChange = (e) => {
                 setSelectedContest(e.target.value);
-                setSelectedCallsign(''); // Reset callsign when contest changes
+                setSelectedCallsign('');
             };
 
             const handleCallsignChange = (e) => {
