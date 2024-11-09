@@ -421,95 +421,96 @@
             const contestSelect = document.getElementById('contestSelect');
             const callsignSelect = document.getElementById('callsignSelect');
             const filterButtons = document.getElementById('filterButtons');
-            const locationInfo = document.getElementById('locationInfo');
             const contest = contestSelect.value;
             const callsign = callsignSelect.value;
-
+        
             filterButtons.classList.add('disabled');
-            locationInfo.style.display = 'none';
-
+        
             if (!contest || !callsign) return;
-
+        
             showLoading();
             try {
-                // Fetch location and filter information
+                // Fetch filters
                 const response = await fetch(`/livescore-pilot/api/filters?contest=${encodeURIComponent(contest)}&callsign=${encodeURIComponent(callsign)}`);
-                const filters = await response.json();
-
-                // Display location information
-                if (filters.length > 0) {
-                    locationInfo.style.display = 'block';
-                    locationInfo.innerHTML = formatLocationInfo(filters);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-
-                // Set up filter options
-                const filterOptions = document.getElementById('filterOptions');
-                filterOptions.innerHTML = formatFilterOptions(filters);
-
+                const filters = await response.json();
+        
+                // Get the button container and ensure it exists
+                const buttonContainer = filterButtons.querySelector('.generate-buttons');
+                if (!buttonContainer) {
+                    console.error('Generate buttons container not found');
+                    return;
+                }
+        
+                // Clear existing filter buttons but keep the "Generate Full Report" button
+                buttonContainer.innerHTML = `
+                    <button onclick="generateReport('none', 'none')" class="btn btn-primary">
+                        Generate Full Report
+                    </button>
+                `;
+        
+                // Add filter buttons
+                if (filters && Array.isArray(filters)) {
+                    filters.forEach(filter => {
+                        const button = document.createElement('button');
+                        button.className = 'btn btn-secondary';
+                        button.textContent = `Filter by ${filter.label}`;
+                        button.onclick = () => generateReport(filter.type, filter.value);
+                        buttonContainer.appendChild(button);
+                    });
+                }
+        
+                // Enable the filter buttons section
                 filterButtons.classList.remove('disabled');
+        
+                console.log("Filter buttons updated successfully");  // Debug log
             } catch (error) {
                 console.error('Error fetching filters:', error);
+                // Even if there's an error, we should still enable the basic report generation
+                filterButtons.classList.remove('disabled');
             } finally {
                 hideLoading();
             }
         }
-
-        function formatLocationInfo(filters) {
-            let html = '<div class="filter-list">';
+        
+        // Update the generate report function to ensure it's working
+        function generateReport(filterType, filterValue) {
+            const contest = document.getElementById('contestSelect').value;
+            const callsign = document.getElementById('callsignSelect').value;
             
-            const continentFilter = filters.find(f => f.type === 'Continent');
-            const dxccFilter = filters.find(f => f.type === 'DXCC');
-            const prefixFilter = filters.find(f => f.type === 'Prefix');
-
-            if (continentFilter) {
-                html += `<span class="location-tag continent-tag">${continentFilter.value}</span>`;
+            if (!contest || !callsign) {
+                console.error('Missing required parameters');
+                return;
             }
-            if (dxccFilter) {
-                html += `<span class="location-tag dxcc-tag">${dxccFilter.value}</span>`;
-            }
-            if (prefixFilter) {
-                html += `<span class="location-tag prefix-tag">${prefixFilter.value}</span>`;
-            }
-
-            html += '</div>';
-            return html;
+            
+            console.log(`Generating report for ${callsign} in ${contest} with filter ${filterType}`); // Debug log
+            
+            const params = new URLSearchParams({
+                contest: contest,
+                callsign: callsign,
+                filter_type: filterType || 'none',
+                filter_value: filterValue || 'none'
+            });
+        
+            window.location.href = `/reports/live.html?${params.toString()}`;
         }
-
-        function formatFilterOptions(filters) {
-            const groups = {
-                'Location': ['Continent', 'DXCC', 'Prefix'],
-                'Zone': ['CQ Zone', 'IARU Zone'],
-                'Regional': ['ARRL Section', 'State/Province']
-            };
-
-            let html = '';
-            
-            for (const [groupName, filterTypes] of Object.entries(groups)) {
-                const groupFilters = filters.filter(f => filterTypes.includes(f.type));
-                
-                if (groupFilters.length > 0) {
-                    html += `
-                        <div class="filter-group">
-                            <h3>${groupName} Filters</h3>
-                            <div class="filter-list">
-                    `;
-                    
-                    groupFilters.forEach(filter => {
-                        const tagClass = filter.type === 'Continent' ? 'continent-tag' : 
-                                       filter.type === 'DXCC' ? 'dxcc-tag' : 
-                                       filter.type === 'Prefix' ? 'prefix-tag' : '';
-                        
-                        html += `
-                            <span class="location-tag filter-option ${tagClass}"
-                                  onclick="generateReport('${filter.type}', '${filter.value}')">
-                                ${filter.label}
-                            </span>
-                        `;
-                    });
-                    
-                    html += '</div></div>';
-                }
+        
+        // Helper functions for loading state
+        function showLoading() {
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'block';
             }
+        }
+        
+        function hideLoading() {
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+        }
             
             return html;
         }
