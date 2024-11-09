@@ -19,6 +19,7 @@
                 return num.toString().padStart(2, '0');
             }}
 
+            // Convert displayed timestamps to relative time
             function updateRelativeTimes() {{
                 document.querySelectorAll('.relative-time').forEach(el => {{
                     const timestamp = new Date(el.dataset.timestamp + 'Z');
@@ -89,25 +90,13 @@
         .footer {{ position: fixed; bottom: 0; left: 0; right: 0; background-color: #f8f9fa; padding: 10px 20px; text-align: center; font-size: 0.8em; color: #666; border-top: 1px solid #dee2e6; }}
         .band-data {{ font-family: monospace; white-space: nowrap; }}
         .relative-time {{ color: #666; font-size: 0.8em; }}
+        .better-rate {{ color: #c71212; font-weight: bold; font-size: 1.2em; }}
+        .worse-rate {{ color: #666; }}
         .rate-detail {{
             font-size: 0.85em;
             margin-top: 2px;
             padding: 2px 4px;
             border-radius: 2px;
-        }}
-        /* Updated rate styling */
-        .better-rate {{ 
-            color: #2e7d32; 
-            font-weight: bold; 
-            font-size: 1.1em; 
-        }}
-        .worse-rate {{ 
-            color: #c71212; 
-            font-weight: bold;
-            font-size: 1.1em;
-        }}
-        .neutral-rate {{
-            color: #666;
         }}
         .legend {{
             position: fixed;
@@ -122,12 +111,8 @@
         }}
         .legend-item {{
             margin: 5px 0;
-            display: flex;
-            align-items: center;
-            gap: 5px;
         }}
-        .legend-better {{ color: #2e7d32; font-weight: bold; }}
-        .legend-worse {{ color: #c71212; font-weight: bold; }}
+        .legend-better {{ color: #c71212; font-weight: bold; }}
         @media print {{ 
             .refresh-info, .footer, .legend {{ display: none; }} 
             body {{ padding-bottom: 0; }} 
@@ -172,12 +157,7 @@
     <div class="legend">
         <div class="legend-item">Score Display Format:</div>
         <div class="legend-item">QSOs/Mults (60min/15min)</div>
-        <div class="legend-item">
-            <span class="legend-better">Green</span> = Your better rate
-        </div>
-        <div class="legend-item">
-            <span class="legend-worse">Red</span> = Competitor's better rate
-        </div>
+        <div class="legend-item legend-better">Red = Station has better rate</div>
     </div>
 
     <div class="footer">
