@@ -290,22 +290,21 @@ class ScoreReporter:
             qsos, mults, long_rate, short_rate = band_data
             if qsos > 0:
                 # Get reference rates for this band
-                ref_long_rate = 0
                 ref_short_rate = 0
                 if reference_rates and band in reference_rates:
-                    _, _, ref_long_rate, ref_short_rate = reference_rates[band]
+                    _, _, _, ref_short_rate = reference_rates[band]
                 
-                # Determine if rates are better
-                better_rate = (long_rate > ref_long_rate) or (short_rate > ref_short_rate)
+                # Determine if 15-minute rate is better
+                better_rate = short_rate > ref_short_rate
                 
-                # Format rates with + sign if positive
+                # Format rates
                 long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
                 short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
                 
-                # Apply CSS class based on rate comparison
+                # Apply CSS class based on 15-minute rate comparison
                 rate_class = "better-rate" if better_rate else "worse-rate"
                 
-                return f'<span class="{rate_class}">{qsos}/{mults} ({long_rate_str}/{short_rate_str})</span>'
+                return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
     
     #def format_band_data(self, band_data):
