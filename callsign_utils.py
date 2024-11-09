@@ -41,14 +41,14 @@ class CallsignLookup:
             if search_callsign in self.cty_list:
                 info = self.cty_list[search_callsign]
                 result = {
+                    "prefix": search_callsign,  # This is the actual prefix we want to use
                     "country": info.get("Country"),
                     "continent": info.get("Continent"),
                     "adif": info.get("ADIF"),
                     "cq_zone": info.get("CQZone"),
                     "itu_zone": info.get("ITUZone"),
                     "latitude": info.get("Latitude"),
-                    "longitude": info.get("Longitude"),
-                    "prefix": search_callsign
+                    "longitude": info.get("Longitude")
                 }
                 # Cache the result for future lookups
                 self._cache[callsign] = result
