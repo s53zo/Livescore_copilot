@@ -10,6 +10,7 @@ import json
 import traceback
 import sqlite3
 import re
+from callsign_utils import CallsignLookup
 
 class ContestDatabaseHandler:
     def __init__(self, db_path='contest_data.db'):
