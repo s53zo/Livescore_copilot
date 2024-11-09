@@ -54,23 +54,12 @@ def index():
         with get_db() as db:
             cursor = db.cursor()
             
-            # Get contests with station counts - simplified query
+            # Get contests with station counts
             cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT callsign, contest, MAX(timestamp) as max_ts
-                    FROM contest_scores
-                    GROUP BY callsign, contest
-                )
-                SELECT 
-                    cs.contest,
-                    COUNT(DISTINCT cs.callsign) as active_stations
-                FROM contest_scores cs
-                INNER JOIN latest_scores ls 
-                    ON cs.callsign = ls.callsign 
-                    AND cs.contest = ls.contest
-                    AND cs.timestamp = ls.max_ts
-                GROUP BY cs.contest
-                ORDER BY cs.contest
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
             
@@ -83,24 +72,19 @@ def index():
             if selected_contest:
                 # Fetch callsigns with QSO count for the selected contest
                 cursor.execute("""
-                    WITH latest_scores AS (
+                    SELECT cs.callsign, cs.qsos AS qso_count
+                    FROM contest_scores cs
+                    INNER JOIN (
                         SELECT callsign, MAX(timestamp) as max_ts
                         FROM contest_scores
                         WHERE contest = ?
                         GROUP BY callsign
-                    )
-                    SELECT 
-                        cs.callsign,
-                        cs.qsos as qso_count
-                    FROM contest_scores cs
-                    INNER JOIN latest_scores ls 
-                        ON cs.callsign = ls.callsign 
-                        AND cs.timestamp = ls.max_ts
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.timestamp = latest.max_ts
                     WHERE cs.contest = ?
                     AND cs.qsos > 0
                     ORDER BY cs.callsign
                 """, (selected_contest, selected_contest))
-                
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
         
         return render_template('select_form.html', 
@@ -137,114 +121,36 @@ def live_report():
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT COUNT(*) 
-                FROM contest_scores
+                FROM contest_scores 
                 WHERE contest = ? AND callsign = ?
             """, (contest, callsign))
             if cursor.fetchone()[0] == 0:
                 return render_template('error.html', 
                     error=f"No data found for {callsign} in {contest}")
 
-            # Get station info
-            cursor.execute("""
-                WITH latest_score AS (
-                    SELECT id, timestamp, power, assisted
-                    FROM contest_scores 
-                    WHERE callsign = ? AND contest = ?
-                    ORDER BY timestamp DESC 
-                    LIMIT 1
-                )
-                SELECT 
-                    ls.power,
-                    ls.assisted,
-                    ls.timestamp,
-                    COUNT(DISTINCT cs.callsign) as participant_count
-                FROM latest_score ls
-                CROSS JOIN contest_scores cs
-                WHERE cs.contest = ?
-                GROUP BY ls.power, ls.assisted, ls.timestamp
-            """, (callsign, contest, contest))
+        # Get station data with filters
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+
+        if stations:
+            # Generate HTML content directly
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+            with open(template_path, 'r') as f:
+                template = f.read()
+
+            html_content = reporter.generate_html_content(template, callsign, contest, stations)
             
-            station_info = cursor.fetchone()
-            if not station_info:
-                return render_template('error.html', 
-                    error=f"Could not retrieve station info for {callsign}")
-
-            power, assisted, timestamp, participant_count = station_info
-
-            # Get station data with filters
-            query = """
-                WITH latest_scores AS (
-                    SELECT cs.callsign, MAX(cs.timestamp) as max_ts
-                    FROM contest_scores cs
-                    WHERE cs.contest = ?
-                    GROUP BY cs.callsign
-                ),
-                ranked_scores AS (
-                    SELECT 
-                        cs.id,
-                        cs.callsign,
-                        cs.score,
-                        cs.power,
-                        cs.assisted,
-                        cs.timestamp,
-                        cs.qsos,
-                        cs.multipliers,
-                        CASE 
-                            WHEN cs.callsign = ? THEN 'current'
-                            WHEN cs.score > (SELECT score FROM contest_scores WHERE callsign = ? AND contest = ? ORDER BY timestamp DESC LIMIT 1) THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
-                    FROM contest_scores cs
-                    INNER JOIN latest_scores ls 
-                        ON cs.callsign = ls.callsign 
-                        AND cs.timestamp = ls.max_ts
-                    WHERE cs.contest = ?
-                    AND cs.qsos > 0
-                )
-                SELECT *
-                FROM ranked_scores
-                ORDER BY score DESC
-            """
+            # Return response with appropriate headers
+            response = make_response(html_content)
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
             
-            cursor.execute(query, (contest, callsign, callsign, contest, contest))
-            stations = cursor.fetchall()
-
-            if stations:
-                # Generate HTML content
-                template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-                with open(template_path, 'r') as f:
-                    template = f.read()
-
-                html_content = template.format(
-                    contest=contest,
-                    callsign=callsign,
-                    power=power or "Unknown",
-                    assisted=assisted or "Unknown",
-                    country="Unknown",  # Removed qth_info dependency
-                    continent="",       # Removed qth_info dependency
-                    prefix="",          # Removed qth_info dependency
-                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                    participant_count=participant_count,
-                    country_count=0,    # Removed qth_info dependency
-                    continent_count=0,  # Removed qth_info dependency
-                    location_filters="",
-                    category_filters="",
-                    table_rows=reporter.generate_table_rows(stations, callsign)
-                )
-                
-                # Return response with appropriate headers
-                response = make_response(html_content)
-                response.headers['Content-Type'] = 'text/html; charset=utf-8'
-                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                response.headers['Pragma'] = 'no-cache'
-                response.headers['Expires'] = '0'
-                
-                logger.info(f"Successfully generated report for {callsign} in {contest}")
-                return response
-            else:
-                logger.error(f"No station data found for {callsign} in {contest}")
-                return render_template('error.html', error="No data found for the selected criteria")
+            logger.info(f"Successfully generated report for {callsign} in {contest}")
+            return response
+        else:
+            logger.error(f"No station data found for {callsign} in {contest}")
+            return render_template('error.html', error="No data found for the selected criteria")
 
     except Exception as e:
         logger.error("Exception in live_report:")
@@ -268,21 +174,10 @@ def get_contests():
         with get_db() as db:
             cursor = db.cursor()
             cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT callsign, contest, MAX(timestamp) as max_ts
-                    FROM contest_scores
-                    GROUP BY callsign, contest
-                )
-                SELECT 
-                    cs.contest,
-                    COUNT(DISTINCT cs.callsign) AS active_stations
-                FROM contest_scores cs
-                INNER JOIN latest_scores ls 
-                    ON cs.callsign = ls.callsign 
-                    AND cs.contest = ls.contest
-                    AND cs.timestamp = ls.max_ts
-                GROUP BY cs.contest
-                ORDER BY cs.contest
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY contest
             """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
             return jsonify(contests)
@@ -300,82 +195,23 @@ def get_callsigns():
         with get_db() as db:
             cursor = db.cursor()
             cursor.execute("""
-                WITH latest_scores AS (
+                SELECT cs.callsign, cs.qsos AS qso_count
+                FROM contest_scores cs
+                INNER JOIN (
                     SELECT callsign, MAX(timestamp) as max_ts
                     FROM contest_scores
                     WHERE contest = ?
                     GROUP BY callsign
-                )
-                SELECT 
-                    cs.callsign,
-                    cs.qsos as qso_count
-                FROM contest_scores cs
-                INNER JOIN latest_scores ls 
-                    ON cs.callsign = ls.callsign 
-                    AND cs.timestamp = ls.max_ts
+                ) latest ON cs.callsign = latest.callsign 
+                    AND cs.timestamp = latest.max_ts
                 WHERE cs.contest = ?
                 AND cs.qsos > 0
                 ORDER BY cs.callsign
             """, (contest, contest))
-            
-            callsigns = [{"name": row[0], "qso_count": row[1]} 
-                        for row in cursor.fetchall()]
-            
-            logger.debug(f"Found {len(callsigns)} callsigns for contest {contest}")
+            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
             return jsonify(callsigns)
-            
     except Exception as e:
         logger.error(f"Error fetching callsigns: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
-        
-@app.route('/livescore-pilot/api/statistics')
-def get_statistics():
-    """New endpoint to get location statistics"""
-    contest = request.args.get('contest')
-    
-    try:
-        with get_db() as db:
-            cursor = db.cursor()
-            
-            query = """
-                WITH latest_scores AS (
-                    SELECT cs.id
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ) latest ON cs.timestamp = latest.max_ts
-                )
-                SELECT
-                    COUNT(DISTINCT qi.continent) as continents,
-                    COUNT(DISTINCT qi.dxcc_country) as countries,
-                    GROUP_CONCAT(DISTINCT qi.continent) as continent_list,
-                    COUNT(DISTINCT cs.callsign) as participants
-                FROM contest_scores cs
-                JOIN latest_scores ls ON cs.id = ls.id
-                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ?
-            """
-            
-            cursor.execute(query, (contest, contest))
-            result = cursor.fetchone()
-            
-            if result:
-                stats = {
-                    "continents": result[0],
-                    "countries": result[1],
-                    "continent_list": result[2].split(',') if result[2] else [],
-                    "participants": result[3]
-                }
-                return jsonify(stats)
-            else:
-                return jsonify({"error": "No statistics available"}), 404
-                
-    except Exception as e:
-        logger.error(f"Error fetching statistics: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/livescore-pilot/api/filters')
@@ -389,16 +225,9 @@ def get_filters():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            # Updated query to include new location fields
             cursor.execute("""
-                SELECT 
-                    qi.dxcc_country,
-                    qi.dxcc_prefix,
-                    qi.continent,
-                    qi.cq_zone,
-                    qi.iaru_zone, 
-                    qi.arrl_section,
-                    qi.state_province
+                SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                       qi.arrl_section, qi.state_province
                 FROM contest_scores cs
                 JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ? AND cs.callsign = ?
@@ -413,20 +242,17 @@ def get_filters():
             filters = []
             filter_map = {
                 'DXCC': row[0],
-                'Prefix': row[1],
-                'Continent': row[2],
-                'CQ Zone': row[3],
-                'IARU Zone': row[4],
-                'ARRL Section': row[5],
-                'State/Province': row[6]
+                'CQ Zone': row[1],
+                'IARU Zone': row[2],
+                'ARRL Section': row[3],
+                'State/Province': row[4]
             }
 
             for filter_type, value in filter_map.items():
                 if value:  # Only include non-empty values
                     filters.append({
                         "type": filter_type,
-                        "value": value,
-                        "label": f"{filter_type}: {value}"
+                        "value": value
                     })
 
             return jsonify(filters)

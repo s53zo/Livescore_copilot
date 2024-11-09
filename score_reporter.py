@@ -307,58 +307,21 @@ class ScoreReporter:
                 return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
     
-    
+    #def format_band_data(self, band_data):
+    #    """Format band data as QSO/Mults (60h/15h)"""
+    #    if band_data:
+    #        qsos, mults, long_rate, short_rate = band_data
+    #        if qsos > 0:
+    #            long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
+    #            short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
+    #            return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+    #    return "-/- (0/0)"
+
     def format_total_data(self, qsos, mults, long_rate, short_rate):
         """Format total QSO/Mults with both rates"""
         long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
         short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
         return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
-
-    def generate_table_rows(self, stations, callsign, contest):
-        """Generate table rows with dual rate display"""
-        table_rows = []
-        for i, station in enumerate(stations, 1):
-            station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-    
-            # Calculate both rates for all bands
-            band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
-    
-            # Get reference rates (from the selected station)
-            reference_station = next((s for s in stations if s[1] == callsign), None)
-            if reference_station:
-                reference_breakdown = self.get_band_breakdown_with_rates(
-                    reference_station[0], callsign, contest, reference_station[5]
-                )
-            else:
-                reference_breakdown = {}
-    
-            # Calculate total rates directly from QSO totals
-            total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
-    
-            # Format timestamp for display
-            ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-    
-            # Add highlight class for current station
-            highlight = ' class="highlight"' if callsign_val == callsign else ''
-    
-            # Create table row with both band and total rates
-            row = f"""
-            <tr{highlight}>
-                <td>{i}</td>
-                <td>{callsign_val}</td>
-                <td>{score:,}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
-                <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
-            </tr>"""
-            table_rows.append(row)
-    
-        return '\n'.join(table_rows)
 
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with dual rate display"""
@@ -367,136 +330,159 @@ class ScoreReporter:
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
-        
+    
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                    
                 cursor.execute("""
-                    SELECT 
-                        cs.power,
-                        cs.assisted,
-                        qi.dxcc_country,
-                        qi.continent,
-                        qi.dxcc_prefix
+                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                           qi.arrl_section, qi.state_province
                     FROM contest_scores cs
                     JOIN qth_info qi ON qi.contest_score_id = cs.id
                     WHERE cs.callsign = ? AND cs.contest = ?
                     ORDER BY cs.timestamp DESC
                     LIMIT 1
                 """, (callsign, contest))
+                qth_info = cursor.fetchone()
                 
-                station_info = cursor.fetchone()
-                
-                if station_info:
-                    power = station_info[0] or "Unknown"
-                    assisted = station_info[1] or "Unknown"
-                    country = station_info[2] or "Unknown"
-                    continent = station_info[3] or ""
-                    prefix = station_info[4] or ""
-                else:
-                    power = "Unknown"
-                    assisted = "Unknown"
-                    country = "Unknown"
-                    continent = ""
-                    prefix = ""
+                if qth_info:
+                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", "State/Province"]
+                    filter_parts = []
+                    
+                    for label, value in zip(filter_labels, qth_info):
+                        if value:
+                            if current_filter_type == label and current_filter_value == value:
+                                filter_parts.append(
+                                    f'<span class="active-filter">{label}: {value}</span>'
+                                )
+                            else:
+                                filter_parts.append(
+                                    f'<a href="/reports/live.html?contest={contest}'
+                                    f'&callsign={callsign}&filter_type={label}'
+                                    f'&filter_value={value}" class="filter-link">'
+                                    f'{label}: {value}</a>'
+                                )
+                    
+                    if filter_parts:
+                        if current_filter_type != 'none':
+                            filter_parts.append(
+                                f'<a href="/reports/live.html?contest={contest}'
+                                f'&callsign={callsign}&filter_type=none'
+                                f'&filter_value=none" class="filter-link clear-filter">'
+                                f'Show All</a>'
+                            )
+                        
+                        filter_info_div = f"""
+                        <div class="filter-info">
+                            <span class="filter-label">Filters:</span> 
+                            {' | '.join(filter_parts)}
+                        </div>
+                        """
     
-                # Get participation statistics
-                cursor.execute("""
-                    SELECT 
-                        COUNT(DISTINCT cs.callsign) as participants,
-                        COUNT(DISTINCT qi.dxcc_country) as countries,
-                        COUNT(DISTINCT qi.continent) as continents
-                    FROM contest_scores cs
-                    LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.contest = ?
-                """, (contest,))
-                
-                stats = cursor.fetchone()
-                participant_count = stats[0] if stats else 0
-                country_count = stats[1] if stats else 0
-                continent_count = stats[2] if stats else 0
-    
-                # Process filters
-                location_filters = []
-                category_filters = []
-                
-                if current_filter_type != 'none':
-                    filter_display = f"{current_filter_type}: {current_filter_value}"
-                    
-                    # Add 'Show All' link
-                    clear_filter = f"""<a href="/reports/live.html?contest={contest}&callsign={callsign}&filter_type=none&filter_value=none" 
-                                     class="filter-link clear-filter">Show All</a>"""
-                    
-                    if current_filter_type in ['DXCC', 'Continent', 'Prefix']:
-                        location_filters.append(f'<span class="active-filter">{filter_display}</span>')
-                        location_filters.append(clear_filter)
-                    else:
-                        category_filters.append(f'<span class="active-filter">{filter_display}</span>')
-                        category_filters.append(clear_filter)
-                
-                table_rows = []
-                for i, station in enumerate(stations, 1):
-                    station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                    
-                    # Calculate both rates for all bands
-                    band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
-                    
-                    # Get reference rates (from the selected station)
-                    reference_station = next((s for s in stations if s[1] == callsign), None)
-                    if reference_station:
-                        reference_breakdown = self.get_band_breakdown_with_rates(
-                            reference_station[0], callsign, contest, reference_station[5]
-                        )
-                    else:
-                        reference_breakdown = {}
+            # Add explanatory text and styling for the rate display
+            additional_css = """
+                <style>
+                    .band-header {
+                        white-space: nowrap;
+                    }
+                    .band-data {
+                        white-space: nowrap;
+                        font-family: monospace;
+                    }
+                    .filter-info {
+                        margin-top: 10px;
+                        padding: 8px;
+                        background-color: #f8f9fa;
+                        border-radius: 4px;
+                    }
+                    .filter-label {
+                        font-weight: bold;
+                        color: #666;
+                    }
+                    .filter-link {
+                        color: #0066cc;
+                        text-decoration: none;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                    }
+                    .filter-link:hover {
+                        background-color: #e7f3ff;
+                        text-decoration: underline;
+                    }
+                    .active-filter {
+                        background-color: #4CAF50;
+                        color: white;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-weight: bold;
+                    }
+                    .clear-filter {
+                        margin-left: 10px;
+                        color: #666;
+                        border: 1px solid #ddd;
+                    }
+                    .clear-filter:hover {
+                        background-color: #f8f9fa;
+                        border-color: #666;
+                    }
+                </style>
+            """
         
-                    # Calculate total rates directly from QSO totals
-                    total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
-                    
-                    # Format timestamp for display
-                    ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                    
-                    # Add highlight class for current station
-                    highlight = ' class="highlight"' if callsign_val == callsign else ''
-                    
-                    # Create table row with both band and total rates
-                    row = f"""
-                    <tr{highlight}>
-                        <td>{i}</td>
-                        <td>{callsign_val}</td>
-                        <td>{score:,}</td>
-                        <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
-                        <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
-                        <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
-                        <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
-                        <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
-                        <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                        <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                        <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
-                    </tr>"""
-                    table_rows.append(row)
-                    
-                # Format final HTML
-                html_content = template.format(
-                    contest=contest,
-                    callsign=callsign,
-                    country=country,
-                    continent=continent,
-                    prefix=prefix,
-                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                    power=power,
-                    assisted=assisted,
-                    participant_count=participant_count,
-                    country_count=country_count,
-                    continent_count=continent_count,
-                    filter_info_div=filter_info_div,
-                    location_filters='\n'.join(location_filters),
-                    category_filters='\n'.join(category_filters),
-                    table_rows='\n'.join(table_rows),
-                    additional_css=""
-                )
+    
+            table_rows = []
+            for i, station in enumerate(stations, 1):
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
                 
-                return html_content
+                # Calculate both rates for all bands
+                band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
+                
+                # Get reference rates (from the selected station)
+                reference_station = next((s for s in stations if s[1] == callsign), None)
+                if reference_station:
+                    reference_breakdown = self.get_band_breakdown_with_rates(
+                        reference_station[0], callsign, contest, reference_station[5]
+                    )
+                else:
+                    reference_breakdown = {}
+    
+                # Calculate total rates directly from QSO totals
+                total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
+                
+                # Format timestamp for display
+                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                
+                # Add highlight class for current station
+                highlight = ' class="highlight"' if callsign_val == callsign else ''
+                
+                # Create table row with both band and total rates
+                row = f"""
+                <tr{highlight}>
+                    <td>{i}</td>
+                    <td>{callsign_val}</td>
+                    <td>{score:,}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                </tr>"""
+                table_rows.append(row)
+                
+            # Format final HTML
+            html_content = template.format(
+                contest=contest,
+                callsign=callsign,
+                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                power=stations[0][3],
+                assisted=stations[0][4],
+                filter_info_div=filter_info_div,
+                table_rows='\n'.join(table_rows),
+                additional_css=additional_css
+            )
+            
+            return html_content
     
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
