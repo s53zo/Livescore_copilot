@@ -14,6 +14,7 @@ import re
 class ContestDatabaseHandler:
     def __init__(self, db_path='contest_data.db'):
         self.db_path = db_path
+        self.callsign_lookup = CallsignLookup()
         self.setup_database()
 
     def setup_database(self):
@@ -149,7 +150,7 @@ class ContestDatabaseHandler:
 
 
     def store_data(self, contest_data):
-        """Store contest data in the database."""
+        """Store contest data in the database with automatic QTH updates."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -175,23 +176,38 @@ class ContestDatabaseHandler:
                     contest_score_id = cursor.lastrowid
                     logging.debug(f"Stored main contest data for {data['callsign']}, ID: {contest_score_id}")
                     
-                    # Store QTH data if available
-                    if 'qth' in data:
-                        cursor.execute('''
-                            INSERT INTO qth_info (
-                                contest_score_id, dxcc_country, cq_zone, iaru_zone,
-                                arrl_section, state_province, grid6
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            contest_score_id,
-                            data['qth'].get('dxcc_country', ''),
-                            data['qth'].get('cq_zone', ''),
-                            data['qth'].get('iaru_zone', ''),
-                            data['qth'].get('arrl_section', ''),
-                            data['qth'].get('state_province', ''),
-                            data['qth'].get('grid6', '')
-                        ))
-                        logging.debug(f"Stored QTH data for {data['callsign']}")
+                    # Check for missing QTH information and update if needed
+                    qth_data = data.get('qth', {})
+                    country = qth_data.get('dxcc_country', '').strip()
+                    continent = qth_data.get('continent', '').strip()
+                    
+                    # If country or continent is missing, try to get from cty.plist
+                    if not country or not continent:
+                        callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
+                        if callsign_info:
+                            if not country:
+                                country = callsign_info['country']
+                                logging.debug(f"Updated country for {data['callsign']} to {country}")
+                            if not continent:
+                                continent = callsign_info['continent']
+                                logging.debug(f"Updated continent for {data['callsign']} to {continent}")
+                    
+                    # Store QTH data with any updates
+                    cursor.execute('''
+                        INSERT INTO qth_info (
+                            contest_score_id, dxcc_country, continent, cq_zone, 
+                            iaru_zone, arrl_section, state_province, grid6
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        contest_score_id,
+                        country,
+                        continent,
+                        qth_data.get('cq_zone', ''),
+                        qth_data.get('iaru_zone', ''),
+                        qth_data.get('arrl_section', ''),
+                        qth_data.get('state_province', ''),
+                        qth_data.get('grid6', '')
+                    ))
                     
                     # Insert band breakdown data
                     for band_data in data.get('band_breakdown', []):
@@ -205,9 +221,11 @@ class ContestDatabaseHandler:
                             band_data['multipliers']
                         ))
                         logging.debug(f"Stored band data for {data['callsign']}, band: {band_data['band']}")
+                        
                 except Exception as e:
                     logging.error(f"Error storing data for {data['callsign']}: {e}")
-
+                    raise
+    
     def cleanup_old_data(self, days=3):
         """Remove data older than specified number of days."""
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
@@ -219,14 +237,20 @@ class ContestDatabaseHandler:
             cursor.execute('SELECT id FROM contest_scores WHERE timestamp < ?', (cutoff_date,))
             old_ids = [row[0] for row in cursor.fetchall()]
             
-            # Delete related band breakdown records
-            cursor.execute('DELETE FROM band_breakdown WHERE contest_score_id IN (SELECT id FROM contest_scores WHERE timestamp < ?)', 
-                         (cutoff_date,))
-            
-            # Delete old main records
-            cursor.execute('DELETE FROM contest_scores WHERE timestamp < ?', (cutoff_date,))
-            
-            logging.debug(f"Cleaned up {len(old_ids)} old records")
+            if old_ids:
+                # Delete related records from all tables
+                cursor.execute('DELETE FROM band_breakdown WHERE contest_score_id IN (SELECT id FROM contest_scores WHERE timestamp < ?)', 
+                             (cutoff_date,))
+                cursor.execute('DELETE FROM qth_info WHERE contest_score_id IN (SELECT id FROM contest_scores WHERE timestamp < ?)', 
+                             (cutoff_date,))
+                cursor.execute('DELETE FROM contest_scores WHERE timestamp < ?', (cutoff_date,))
+                
+                logging.debug(f"Cleaned up {len(old_ids)} old records")
+                
+                # Clear the callsign lookup cache periodically
+                self.callsign_lookup.clear_cache()
+                logging.debug("Cleared callsign lookup cache")
+                
             return len(old_ids)
 
 class ContestRequestHandler(BaseHTTPRequestHandler):
