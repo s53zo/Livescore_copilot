@@ -162,11 +162,17 @@ class ContestDatabaseHandler:
         for xml_doc in xml_docs:
             try:
                 root = ET.fromstring(xml_doc)
+                callsign = root.findtext('call', '')
+                
+                # Get callsign info early to use prefix for country
+                callsign_info = None
+                if callsign:
+                    callsign_info = self.callsign_lookup.get_callsign_info(callsign)
                 
                 # Extract basic contest data
                 contest_data = {
                     'contest': root.findtext('contest', ''),
-                    'callsign': root.findtext('call', ''),
+                    'callsign': callsign,
                     'timestamp': root.findtext('timestamp', ''),
                     'club': root.findtext('club', '').strip(),
                     'section': root.find('.//qth/arrlsection').text if root.find('.//qth/arrlsection') is not None else '',
@@ -185,19 +191,28 @@ class ContestDatabaseHandler:
                         'mode': class_elem.get('mode', '')
                     })
                 
-                # Extract QTH data
+                # Extract QTH data and use prefix instead of country name
                 qth_elem = root.find('qth')
                 if qth_elem is not None:
-                    contest_data['qth'] = {
-                        'dxcc_country': qth_elem.findtext('dxcccountry', ''),
+                    qth_data = {
                         'cq_zone': qth_elem.findtext('cqzone', ''),
                         'iaru_zone': qth_elem.findtext('iaruzone', ''),
                         'arrl_section': qth_elem.findtext('arrlsection', ''),
                         'state_province': qth_elem.findtext('stprvoth', ''),
                         'grid6': qth_elem.findtext('grid6', '')
                     }
+                    
+                    # Use prefix from callsign_info instead of country name
+                    if callsign_info:
+                        qth_data['dxcc_country'] = callsign_info['prefix']
+                        qth_data['continent'] = callsign_info['continent']
+                    else:
+                        qth_data['dxcc_country'] = ''
+                        qth_data['continent'] = ''
+                    
+                    contest_data['qth'] = qth_data
                 
-                # Extract breakdown totals
+                # Extract breakdown totals [rest of the code remains the same]
                 breakdown = root.find('breakdown')
                 if breakdown is not None:
                     # Get total QSOs, points, and multipliers
@@ -209,7 +224,6 @@ class ContestDatabaseHandler:
                     bands = ['160', '80', '40', '20', '15', '10']
                     contest_data['band_breakdown'] = []
                     for band in bands:
-                        # Sum over all modes for each band
                         qsos = sum(int(elem.text) for elem in breakdown.findall(f'qso[@band="{band}"]'))
                         points = sum(int(elem.text) for elem in breakdown.findall(f'point[@band="{band}"]'))
                         multipliers = sum(int(elem.text) for elem in breakdown.findall(f'mult[@band="{band}"]'))
@@ -217,7 +231,7 @@ class ContestDatabaseHandler:
                         if qsos > 0:
                             band_data = {
                                 'band': band,
-                                'mode': 'ALL',  # Since we're summing over all modes
+                                'mode': 'ALL',
                                 'qsos': qsos,
                                 'points': points,
                                 'multipliers': multipliers
@@ -230,6 +244,7 @@ class ContestDatabaseHandler:
                 logging.error(f"Error parsing XML: {e}")
             except Exception as e:
                 logging.error(f"Error processing data: {e}")
+                logging.error(traceback.format_exc())
                     
         return results
 
