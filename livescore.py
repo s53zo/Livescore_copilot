@@ -250,7 +250,7 @@ class ContestDatabaseHandler:
 
 
     def store_data(self, contest_data):
-        """Store contest data in the database with automatic QTH updates."""
+        """Store contest data in the database with normalized country codes (prefixes)."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -274,25 +274,15 @@ class ContestDatabaseHandler:
                     ))
                     
                     contest_score_id = cursor.lastrowid
-                    logging.debug(f"Stored main contest data for {data['callsign']}, ID: {contest_score_id}")
                     
-                    # Check for missing QTH information and update if needed
-                    qth_data = data.get('qth', {})
-                    country = qth_data.get('dxcc_country', '').strip()
-                    continent = qth_data.get('continent', '').strip()
+                    # Get callsign information - this will return the prefix
+                    callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
                     
-                    # If country or continent is missing, try to get from cty.plist
-                    if not country or not continent:
-                        callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
-                        if callsign_info:
-                            if not country:
-                                country = callsign_info['country']
-                                logging.debug(f"Updated country for {data['callsign']} to {country}")
-                            if not continent:
-                                continent = callsign_info['continent']
-                                logging.debug(f"Updated continent for {data['callsign']} to {continent}")
+                    # Use prefix from callsign info or fallback to empty string
+                    country_prefix = callsign_info['prefix'] if callsign_info else ''
+                    continent = callsign_info['continent'] if callsign_info else ''
                     
-                    # Store QTH data with any updates
+                    # Store QTH data with prefix as country code
                     cursor.execute('''
                         INSERT INTO qth_info (
                             contest_score_id, dxcc_country, continent, cq_zone, 
@@ -300,13 +290,13 @@ class ContestDatabaseHandler:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         contest_score_id,
-                        country,
+                        country_prefix,  # Use prefix here, not country name
                         continent,
-                        qth_data.get('cq_zone', ''),
-                        qth_data.get('iaru_zone', ''),
-                        qth_data.get('arrl_section', ''),
-                        qth_data.get('state_province', ''),
-                        qth_data.get('grid6', '')
+                        data.get('qth', {}).get('cq_zone', ''),
+                        data.get('qth', {}).get('iaru_zone', ''),
+                        data.get('qth', {}).get('arrl_section', ''),
+                        data.get('qth', {}).get('state_province', ''),
+                        data.get('qth', {}).get('grid6', '')
                     ))
                     
                     # Insert band breakdown data
@@ -320,10 +310,10 @@ class ContestDatabaseHandler:
                             band_data['qsos'], band_data['points'],
                             band_data['multipliers']
                         ))
-                        logging.debug(f"Stored band data for {data['callsign']}, band: {band_data['band']}")
-                        
+                            
                 except Exception as e:
                     logging.error(f"Error storing data for {data['callsign']}: {e}")
+                    logging.debug("Error details:", exc_info=True)
                     raise
     
     def cleanup_old_data(self, days=3):
