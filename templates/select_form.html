@@ -3,154 +3,378 @@
 <head>
     <title>Livescore Pilot</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- React and ReactDOM -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-    <!-- Babel for JSX -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Base styles */
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+            background-color: #f5f7fa;
+        }
+
+        /* Mobile-first approach */
+        h1 {
+            color: #2c3e50;
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+        }
+
+        p {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            margin-bottom: 20px;
+            color: #666;
+        }
+
+        /* Step containers */
+        .step {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        }
+
+        .step:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .step.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            background-color: #f5f5f5;
+        }
+
+        .step h2 {
+            margin-top: 0;
+            color: #4CAF50;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .chevron-right {
+            color: #4CAF50;
+            font-size: 1rem;
+        }
+
+        /* Form elements */
+        select {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            background-color: white;
+            transition: border-color 0.3s;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 16px;
+            padding-right: 40px;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+        }
+
+        select:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+        }
+
+        /* Button grid */
+        .generate-buttons {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            padding: 12px 15px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        .btn-primary {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .btn-secondary {
+            background-color: #2196F3;
+            color: white;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Loading indicator */
+        .loading {
+            text-align: center;
+            color: #666;
+            margin: 10px 0;
+            display: none;
+            font-size: 0.9rem;
+            padding: 10px;
+            border-radius: 6px;
+            background-color: #fff;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #666;
+            font-size: 0.8rem;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        /* Tablet and desktop adjustments */
+        @media (min-width: 768px) {
+            body {
+                padding: 40px;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .step {
+                padding: 25px;
+            }
+
+            .step h2 {
+                font-size: 1.2rem;
+            }
+
+            .generate-buttons {
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            }
+
+            select {
+                font-size: 1rem;
+            }
+
+            .btn {
+                font-size: 1rem;
+            }
+        }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #1a1a1a;
+                color: #e0e0e0;
+            }
+
+            .step {
+                background-color: #2d2d2d;
+                border-color: #404040;
+            }
+
+            select {
+                background-color: #2d2d2d;
+                border-color: #404040;
+                color: #e0e0e0;
+            }
+
+            select:disabled {
+                background-color: #242424;
+            }
+
+            .loading {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+            }
+        }
+    </style>
 </head>
 <body>
-    <div id="root"></div>
+    <h1>Livescore Pilot</h1>
+    <p>Online tool to follow your progress on the Contest Livescores.</p>
+    
+    <div id="loadingIndicator" class="loading">Loading...</div>
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;  // Added this line to properly import hooks
+    <div class="step">
+        <h2><span class="chevron-right">▶</span> Step 1: Select Contest</h2>
+        <select id="contestSelect" onchange="handleContestChange()">
+            <option value="">-- Select Contest --</option>
+            {% for contest in contests %}
+            <option value="{{ contest.name }}" {% if selected_contest == contest.name %}selected{% endif %}>
+                {{ contest.name }} ({{ contest.count }} OPs)
+            </option>
+            {% endfor %}
+        </select>
+    </div>
 
-        const ContestForm = () => {
-            const [contests, setContests] = useState([]);
-            const [selectedContest, setSelectedContest] = useState('');
-            const [callsigns, setCallsigns] = useState([]);
-            const [selectedCallsign, setSelectedCallsign] = useState('');
-            const [loading, setLoading] = useState(false);
-            const [error, setError] = useState('');
+    <div class="step {% if not selected_contest %}disabled{% endif %}" id="callsignStep">
+        <h2><span class="chevron-right">▶</span> Step 2: Select Callsign</h2>
+        <select id="callsignSelect" onchange="handleCallsignChange()" {% if not selected_contest %}disabled{% endif %}>
+            <option value="">-- Select Callsign --</option>
+            {% for callsign in callsigns %}
+            <option value="{{ callsign.name }}" {% if selected_callsign == callsign.name %}selected{% endif %}>
+                {{ callsign.name }} ({{ callsign.qso_count }} QSOs)
+            </option>
+            {% endfor %}
+        </select>
+    </div>
 
-            // Fetch contests on component mount
-            useEffect(() => {  // Changed from React.useEffect
-                fetchContests();
-            }, []);
+    <div class="step disabled" id="filterButtons">
+        <h2><span class="chevron-right">▶</span> Step 3: Generate Report</h2>
+        <div class="generate-buttons">
+            <button onclick="generateReport('none', 'none')" class="btn btn-primary">
+                Generate Full Report
+            </button>
+            <!-- Filter buttons will be added here dynamically -->
+        </div>
+    </div>
 
-            // Fetch callsigns when contest is selected
-            useEffect(() => {  // Changed from React.useEffect
-                if (selectedContest) {
-                    fetchCallsigns(selectedContest);
-                }
-            }, [selectedContest]);
+    <div class="footer">
+        Code by Simon, S53ZO and his LLM friend, contest data from competitors via Contest score distribution network
+    </div>
 
-            const fetchContests = async () => {
-                try {
-                    const response = await fetch('/livescore-pilot/api/contests');
-                    if (!response.ok) throw new Error('Failed to fetch contests');
-                    const data = await response.json();
-                    setContests(data);
-                } catch (err) {
-                    setError('Error loading contests');
-                    console.error(err);
-                }
-            };
+    <script>
+        function showLoading() {
+            document.getElementById('loadingIndicator').style.display = 'block';
+        }
 
-            const fetchCallsigns = async (contest) => {
-                setLoading(true);
-                try {
-                    const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
-                    if (!response.ok) throw new Error('Failed to fetch callsigns');
-                    const data = await response.json();
-                    setCallsigns(data);
-                    setError('');
-                } catch (err) {
-                    setError('Error loading callsigns');
-                    console.error(err);
-                } finally {
-                    setLoading(false);
-                }
-            };
+        function hideLoading() {
+            document.getElementById('loadingIndicator').style.display = 'none';
+        }
 
-            const handleContestChange = (e) => {
-                setSelectedContest(e.target.value);
-                setSelectedCallsign('');
-            };
+        async function handleContestChange() {
+            const contestSelect = document.getElementById('contestSelect');
+            const callsignSelect = document.getElementById('callsignSelect');
+            const filterButtons = document.getElementById('filterButtons');
+            const contest = contestSelect.value;
 
-            const handleCallsignChange = (e) => {
-                setSelectedCallsign(e.target.value);
-            };
+            // Reset subsequent steps
+            callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
+            filterButtons.classList.add('disabled');
+            document.getElementById('callsignStep').classList.add('disabled');
 
-            const handleSubmit = () => {
-                if (selectedContest && selectedCallsign) {
-                    window.location.href = `/reports/live.html?contest=${encodeURIComponent(selectedContest)}&callsign=${encodeURIComponent(selectedCallsign)}`;
-                }
-            };
+            if (!contest) return;
 
-            return (
-                <div className="max-w-2xl mx-auto p-4">
-                    <div className="bg-white rounded-lg shadow p-6">
-                        <h1 className="text-2xl font-bold mb-6">Livescore Pilot</h1>
-                        
-                        {error && (
-                            <div className="bg-red-50 text-red-600 p-3 rounded-md mb-4">
-                                {error}
-                            </div>
-                        )}
+            showLoading();
+            try {
+                const response = await fetch(`/livescore-pilot/api/callsigns?contest=${encodeURIComponent(contest)}`);
+                const callsigns = await response.json();
 
-                        <div className="space-y-6">
-                            {/* Contest Selection */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Select Contest
-                                </label>
-                                <select
-                                    value={selectedContest}
-                                    onChange={handleContestChange}
-                                    className="w-full p-2 border rounded-md bg-white"
-                                >
-                                    <option value="">-- Select Contest --</option>
-                                    {contests.map(contest => (
-                                        <option key={contest.name} value={contest.name}>
-                                            {contest.name} ({contest.count} OPs)
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
+                callsignSelect.innerHTML = '<option value="">-- Select Callsign --</option>';
+                callsigns.forEach(call => {
+                    const option = document.createElement('option');
+                    option.value = call.name;
+                    option.textContent = `${call.name} (${call.qso_count} QSOs)`;
+                    callsignSelect.appendChild(option);
+                });
 
-                            {/* Callsign Selection */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Select Callsign
-                                </label>
-                                <select
-                                    value={selectedCallsign}
-                                    onChange={handleCallsignChange}
-                                    disabled={!selectedContest || loading}
-                                    className="w-full p-2 border rounded-md bg-white"
-                                >
-                                    <option value="">-- Select Callsign --</option>
-                                    {callsigns.map(call => (
-                                        <option key={call.name} value={call.name}>
-                                            {call.name} ({call.qso_count} QSOs)
-                                        </option>
-                                    ))}
-                                </select>
-                                {loading && (
-                                    <div className="text-sm text-gray-500 mt-1">Loading callsigns...</div>
-                                )}
-                            </div>
+                document.getElementById('callsignStep').classList.remove('disabled');
+                callsignSelect.disabled = false;
+            } catch (error) {
+                console.error('Error fetching callsigns:', error);
+            } finally {
+                hideLoading();
+            }
+        }
 
-                            {/* Generate Report Button */}
-                            <button
-                                onClick={handleSubmit}
-                                disabled={!selectedContest || !selectedCallsign}
-                                className="w-full bg-green-600 text-white p-3 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Generate Report
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
+        async function handleCallsignChange() {
+            const contestSelect = document.getElementById('contestSelect');
+            const callsignSelect = document.getElementById('callsignSelect');
+            const filterButtons = document.getElementById('filterButtons');
+            const contest = contestSelect.value;
+            const callsign = callsignSelect.value;
 
-        // Mount the React application
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<ContestForm />);
+            filterButtons.classList.add('disabled');
+
+            if (!contest || !callsign) return;
+
+            showLoading();
+            try {
+                const response = await fetch(`/livescore-pilot/api/filters?contest=${encodeURIComponent(contest)}&callsign=${encodeURIComponent(callsign)}`);
+                const filters = await response.json();
+
+                const buttonContainer = filterButtons.querySelector('.generate-buttons');
+                // Clear existing filter buttons but keep the "Generate Full Report" button
+                const fullReportButton = buttonContainer.firstElementChild;
+                buttonContainer.innerHTML = '';
+                buttonContainer.appendChild(fullReportButton);
+
+                filters.forEach(filter => {
+                    const button = document.createElement('button');
+                    button.className = 'btn btn-secondary';
+                    button.textContent = `Filter by ${filter.type}`;
+                    button.onclick = () => generateReport(filter.type, filter.value);
+                    buttonContainer.appendChild(button);
+                });
+
+                filterButtons.classList.remove('disabled');
+                filterButtons.style.display = 'block';
+            } catch (error) {
+                console.error('Error fetching filters:', error);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function generateReport(filterType, filterValue) {
+            const contest = document.getElementById('contestSelect').value;
+            const callsign = document.getElementById('callsignSelect').value;
+            
+            const params = new URLSearchParams({
+                contest: contest,
+                callsign: callsign,
+                filter_type: filterType,
+                filter_value: filterValue
+            });
+
+            window.location.href = `/reports/live.html?${params.toString()}`;
+        }
+
+        // Initialize the form based on any existing selections
+        document.addEventListener('DOMContentLoaded', () => {
+            if (document.getElementById('contestSelect').value) {
+                handleContestChange();
+            }
+        });
     </script>
 </body>
 </html>

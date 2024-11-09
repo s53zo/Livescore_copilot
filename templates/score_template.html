@@ -95,40 +95,6 @@
             margin: 2px;
             font-size: 0.85rem;
         }}
-
-        .location-info {
-            display: inline-block;
-            margin-left: 10px;
-            padding: 2px 8px;
-            background-color: #f0f7ff;
-            border: 1px solid #cce5ff;
-            border-radius: 3px;
-            color: #0066cc;
-            font-size: 0.85rem;
-        }
-        
-        .location-tag {
-            display: inline-block;
-            padding: 2px 6px;
-            margin: 2px;
-            background-color: #e7f3ff;
-            border: 1px solid #cce5ff;
-            border-radius: 3px;
-            color: #0066cc;
-            font-size: 0.8rem;
-        }
-        
-        .continent-tag {
-            background-color: #e8f5e9;
-            border-color: #c8e6c9;
-            color: #2e7d32;
-        }
-        
-        .prefix-tag {
-            background-color: #fff3e0;
-            border-color: #ffe0b2;
-            color: #e65100;
-        }
         
         /* Table styles */
         .table-container {{
@@ -239,51 +205,6 @@
         }}
         
         /* Filter styles */
-        .filter-section {
-            margin-top: 10px;
-            padding: 10px;
-            background-color: #f8f9fa;
-            border-radius: 4px;
-        }
-        
-        .filter-group {
-            display: inline-block;
-            margin-right: 15px;
-            vertical-align: top;
-        }
-        
-        .filter-group-label {
-            font-weight: bold;
-            color: #666;
-            margin-bottom: 5px;
-            font-size: 0.85rem;
-        }
-        
-        .filter-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-        }
-        
-        .statistics-bar {
-            margin-top: 10px;
-            padding: 8px;
-            background-color: #f8f9fa;
-            border-radius: 4px;
-            font-size: 0.85rem;
-            display: flex;
-            justify-content: space-between;
-            flex-wrap: wrap;
-        }
-        
-        .stat-item {
-            padding: 4px 8px;
-            background-color: #fff;
-            border-radius: 3px;
-            margin: 2px;
-        }
-
-        
         .filter-info {{
             margin-top: 10px;
             padding: 8px;
@@ -341,17 +262,7 @@
                 padding: 8px;
                 font-size: 0.7rem;
             }}
-
-            .filter-group {
-                display: block;
-                margin-bottom: 10px;
-            }
             
-            .statistics-bar {
-                flex-direction: column;
-                gap: 5px;
-            }
-        
             .category-tag {{
                 font-size: 0.75rem;
                 margin: 1px;
@@ -386,40 +297,11 @@
     <h1>Contest Progress Report - {contest}</h1>
     
     <div class="station-info">
-        <div>
-            Monitoring: {callsign}
-            <span class="location-info">{country}</span>
-            <span class="location-tag continent-tag">{continent}</span>
-            <span class="location-tag prefix-tag">{prefix}</span>
-        </div>
-        <div>
-            Operating Category: 
-            <span class="category-tag">Power: {power}</span> 
-            <span class="category-tag">Assisted: {assisted}</span>
-        </div>
+        <div>Monitoring: {callsign} | 
+        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | 
+        Updated: {timestamp}</div>
         <div>Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
-    </div>
-
-    <div class="filter-section">
-        <div class="filter-group">
-            <div class="filter-group-label">Location Filters:</div>
-            <div class="filter-tags">
-                {location_filters}
-            </div>
-        </div>
-        <div class="filter-group">
-            <div class="filter-group-label">Category Filters:</div>
-            <div class="filter-tags">
-                {category_filters}
-            </div>
-        </div>
-    </div>
-
-    <div class="statistics-bar">
-        <div class="stat-item">Participants: {participant_count}</div>
-        <div class="stat-item">Countries: {country_count}</div>
-        <div class="stat-item">Continents: {continent_count}</div>
-        <div class="stat-item">Last Update: {timestamp}</div>
+        {filter_info_div}
     </div>
 
     <div class="table-container">
@@ -427,7 +309,6 @@
             <tr>
                 <th>Place</th>
                 <th>Call Sign</th>
-                <th>Location</th>
                 <th>Score</th>
                 <th>160m</th>
                 <th>80m</th>
