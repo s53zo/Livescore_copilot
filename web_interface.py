@@ -135,40 +135,116 @@ def live_report():
         # Verify contest and callsign exist in database
         with get_db() as conn:
             cursor = conn.cursor()
-            # Updated query to include QTH info
             cursor.execute("""
                 SELECT COUNT(*) 
-                FROM contest_scores cs
-                LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ? AND cs.callsign = ?
+                FROM contest_scores
+                WHERE contest = ? AND callsign = ?
             """, (contest, callsign))
             if cursor.fetchone()[0] == 0:
                 return render_template('error.html', 
                     error=f"No data found for {callsign} in {contest}")
 
-        # Get station data with filters
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
-
-        if stations:
-            # Generate HTML content
-            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-            with open(template_path, 'r') as f:
-                template = f.read()
-
-            html_content = reporter.generate_html_content(template, callsign, contest, stations)
+            # Get station info
+            cursor.execute("""
+                WITH latest_score AS (
+                    SELECT id, timestamp, power, assisted
+                    FROM contest_scores 
+                    WHERE callsign = ? AND contest = ?
+                    ORDER BY timestamp DESC 
+                    LIMIT 1
+                )
+                SELECT 
+                    ls.power,
+                    ls.assisted,
+                    ls.timestamp,
+                    COUNT(DISTINCT cs.callsign) as participant_count
+                FROM latest_score ls
+                CROSS JOIN contest_scores cs
+                WHERE cs.contest = ?
+                GROUP BY ls.power, ls.assisted, ls.timestamp
+            """, (callsign, contest, contest))
             
-            # Return response with appropriate headers
-            response = make_response(html_content)
-            response.headers['Content-Type'] = 'text/html; charset=utf-8'
-            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
+            station_info = cursor.fetchone()
+            if not station_info:
+                return render_template('error.html', 
+                    error=f"Could not retrieve station info for {callsign}")
+
+            power, assisted, timestamp, participant_count = station_info
+
+            # Get station data with filters
+            query = """
+                WITH latest_scores AS (
+                    SELECT cs.callsign, MAX(cs.timestamp) as max_ts
+                    FROM contest_scores cs
+                    WHERE cs.contest = ?
+                    GROUP BY cs.callsign
+                ),
+                ranked_scores AS (
+                    SELECT 
+                        cs.id,
+                        cs.callsign,
+                        cs.score,
+                        cs.power,
+                        cs.assisted,
+                        cs.timestamp,
+                        cs.qsos,
+                        cs.multipliers,
+                        CASE 
+                            WHEN cs.callsign = ? THEN 'current'
+                            WHEN cs.score > (SELECT score FROM contest_scores WHERE callsign = ? AND contest = ? ORDER BY timestamp DESC LIMIT 1) THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
+                    FROM contest_scores cs
+                    INNER JOIN latest_scores ls 
+                        ON cs.callsign = ls.callsign 
+                        AND cs.timestamp = ls.max_ts
+                    WHERE cs.contest = ?
+                    AND cs.qsos > 0
+                )
+                SELECT *
+                FROM ranked_scores
+                ORDER BY score DESC
+            """
             
-            logger.info(f"Successfully generated report for {callsign} in {contest}")
-            return response
-        else:
-            logger.error(f"No station data found for {callsign} in {contest}")
-            return render_template('error.html', error="No data found for the selected criteria")
+            cursor.execute(query, (contest, callsign, callsign, contest, contest))
+            stations = cursor.fetchall()
+
+            if stations:
+                # Generate HTML content
+                template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+                with open(template_path, 'r') as f:
+                    template = f.read()
+
+                html_content = template.format(
+                    contest=contest,
+                    callsign=callsign,
+                    power=power or "Unknown",
+                    assisted=assisted or "Unknown",
+                    country="Unknown",  # Removed qth_info dependency
+                    continent="",       # Removed qth_info dependency
+                    prefix="",          # Removed qth_info dependency
+                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                    participant_count=participant_count,
+                    country_count=0,    # Removed qth_info dependency
+                    continent_count=0,  # Removed qth_info dependency
+                    location_filters="",
+                    category_filters="",
+                    table_rows=reporter.generate_table_rows(stations, callsign)
+                )
+                
+                # Return response with appropriate headers
+                response = make_response(html_content)
+                response.headers['Content-Type'] = 'text/html; charset=utf-8'
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+                
+                logger.info(f"Successfully generated report for {callsign} in {contest}")
+                return response
+            else:
+                logger.error(f"No station data found for {callsign} in {contest}")
+                return render_template('error.html', error="No data found for the selected criteria")
 
     except Exception as e:
         logger.error("Exception in live_report:")
