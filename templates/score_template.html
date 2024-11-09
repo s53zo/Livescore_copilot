@@ -22,9 +22,9 @@
             // Convert displayed timestamps to relative time
             function updateRelativeTimes() {{
                 document.querySelectorAll('.relative-time').forEach(el => {{
-                    const timestamp = new Date(el.dataset.timestamp + 'Z'); // Add Z to parse as UTC
+                    const timestamp = new Date(el.dataset.timestamp + 'Z');
                     const now = new Date();
-                    const diff = Math.floor((now - timestamp) / 1000 / 60); // minutes
+                    const diff = Math.floor((now - timestamp) / 1000 / 60);
                     
                     if (diff < 60) {{
                         el.textContent = `${{diff}}m ago`;
@@ -34,22 +34,6 @@
                         el.textContent = Math.floor(diff/1440) + 'd ago';
                     }}
                 }});
-
-                // Update the main report timestamp as well
-                const reportTimeElement = document.querySelector('.report-time');
-                if (reportTimeElement) {{
-                    const timestamp = new Date(reportTimeElement.dataset.timestamp + 'Z'); // Add Z to parse as UTC
-                    const now = new Date();
-                    const diff = Math.floor((now - timestamp) / 1000 / 60); // minutes
-                    
-                    if (diff < 60) {{
-                        reportTimeElement.textContent = `${{diff}}m ago`;
-                    }} else if (diff < 1440) {{
-                        reportTimeElement.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
-                    }} else {{
-                        reportTimeElement.textContent = Math.floor(diff/1440) + 'd ago';
-                    }}
-                }}
             }}
 
             const timer = setInterval(() => {{
@@ -66,31 +50,13 @@
                 }}
 
                 countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
-                
-                // Update all timestamps
                 updateRelativeTimes();
             }}, 1000);
 
-            // Initial update
             updateRelativeTimes();
         }}
 
-        document.addEventListener('DOMContentLoaded', () => {{
-            updateCountdown();
-            
-            // Add hover effect for rate details
-            document.querySelectorAll('.rate-cell').forEach(cell => {{
-                const detailsEl = cell.querySelector('.rate-details');
-                if (detailsEl) {{
-                    cell.addEventListener('mouseover', () => {{
-                        detailsEl.style.display = 'block';
-                    }});
-                    cell.addEventListener('mouseout', () => {{
-                        detailsEl.style.display = 'none';
-                    }});
-                }}
-            }});
-        }});
+        document.addEventListener('DOMContentLoaded', updateCountdown);
     </script>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; padding-bottom: 40px; }}
@@ -122,13 +88,38 @@
         .refresh-info {{ position: fixed; top: 10px; right: 10px; background-color: #4caf50; color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 1000; }}
         #countdown {{ font-weight: bold; }}
         .footer {{ position: fixed; bottom: 0; left: 0; right: 0; background-color: #f8f9fa; padding: 10px 20px; text-align: center; font-size: 0.8em; color: #666; border-top: 1px solid #dee2e6; }}
-        .rate-cell {{ position: relative; }}
-        .rate-details {{ display: none; position: absolute; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 2; width: 200px; text-align: left; }}
-        .positive-rate {{ color: #4caf50; }}
-        .negative-rate {{ color: #f44336; }}
+        .band-data {{ font-family: monospace; white-space: nowrap; }}
         .relative-time {{ color: #666; font-size: 0.8em; }}
-        @media print {{ .refresh-info, .footer {{ display: none; }} body {{ padding-bottom: 0; }} }}
-        @media (max-width: 768px) {{ .band-data {{ font-size: 0.8em; }} .rate-details {{ width: 150px; }} }}
+        .better-rate {{ color: #2e7d32; font-weight: bold; }}
+        .worse-rate {{ color: #666; }}
+        .rate-detail {{
+            font-size: 0.85em;
+            margin-top: 2px;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }}
+        .legend {{
+            position: fixed;
+            bottom: 40px;
+            right: 10px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            font-size: 0.8em;
+            z-index: 1000;
+        }}
+        .legend-item {{
+            margin: 5px 0;
+        }}
+        .legend-better {{ color: #2e7d32; font-weight: bold; }}
+        @media print {{ 
+            .refresh-info, .footer, .legend {{ display: none; }} 
+            body {{ padding-bottom: 0; }} 
+        }}
+        @media (max-width: 768px) {{ 
+            .band-data {{ font-size: 0.8em; }} 
+        }}
     </style>
     {additional_css}
 </head>
@@ -142,7 +133,7 @@
     <div class="station-info">
         <div>Monitoring: {callsign} | 
         Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | 
-        Updated: {timestamp} | Cell format: QSOs/Multipliers (60-minute rate/15-minute rate) </div>
+        Updated: {timestamp} | Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
         {filter_info_div}
     </div>
 
@@ -162,6 +153,12 @@
         </tr>
         {table_rows}
     </table>
+
+    <div class="legend">
+        <div class="legend-item">Rate Display Format:</div>
+        <div class="legend-item">QSOs/Mults (60min/15min)</div>
+        <div class="legend-item legend-better">Bold green = Better rate</div>
+    </div>
 
     <div class="footer">
         Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network | <a href="https://azure.s53m.com/livescore-pilot">https://azure.s53m.com/livescore-pilot</a>
