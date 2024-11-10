@@ -41,7 +41,7 @@ class CallsignLookup:
             if search_callsign in self.cty_list:
                 info = self.cty_list[search_callsign]
                 result = {
-                    "prefix": search_callsign,  # This is the actual prefix we want to use
+                    "prefix": info.get("Prefix", search_callsign),  # Use Prefix from cty.plist if available
                     "country": info.get("Country"),
                     "continent": info.get("Continent"),
                     "adif": info.get("ADIF"),
