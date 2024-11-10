@@ -9,6 +9,7 @@ from datetime import datetime
 import sqlite3
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
+import ssl
 
 class AsyncMQTTForwarder:
     def __init__(self, db_path: str, mqtt_host: str, mqtt_port: int = 1883,
@@ -50,7 +51,7 @@ class AsyncMQTTForwarder:
                     port=self.mqtt_port,
                     username=self.mqtt_username,
                     password=self.mqtt_password,
-                    tls=self.mqtt_use_tls
+                    tls_context=ssl_context
                 )
                 await self.mqtt_client.connect()
                 self.logger.info("Connected to MQTT broker")
