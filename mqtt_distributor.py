@@ -170,15 +170,7 @@ class ContestDataSubscriber:
         pass
 
 class ContestMQTTPublisher(ContestDataSubscriber):
-    def __init__(self, db_path, mqtt_config, debug=False):
-        """
-        Initialize publisher with MQTT configuration
-        
-        Args:
-            db_path: Path to SQLite database
-            mqtt_config: Dict containing MQTT connection settings
-            debug: Boolean to enable debug logging
-        """
+    def __init__(self, db_path, mqtt_config, debug=False, polling_interval=5):
         # Setup enhanced logging first
         self.setup_logging(debug)
         self.logger.debug("Initializing ContestMQTTPublisher")
@@ -187,12 +179,12 @@ class ContestMQTTPublisher(ContestDataSubscriber):
         # Store MQTT config
         self.mqtt_config = mqtt_config
         
-        # Initialize superclass
-        super().__init__(db_path)
+        # Initialize superclass with polling interval
+        super().__init__(db_path, polling_interval)
         
         # Setup MQTT client
         self.setup_mqtt()
-
+        
     def setup_logging(self, debug=False):
         """Configure detailed logging"""
         self.logger = logging.getLogger('ContestMQTTPublisher')
@@ -581,18 +573,13 @@ def main():
         'use_tls': args.tls
     }
     
-    # Setup basic logging for initialization errors
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                       format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
-    logger = logging.getLogger('main')
-    
-    publisher = None
     try:
-        # Create publisher instance
+        # Create publisher instance with polling interval
         publisher = ContestMQTTPublisher(
             db_path=args.db,
             mqtt_config=mqtt_config,
-            debug=args.debug
+            debug=args.debug,
+            polling_interval=args.poll_interval  # Pass the polling interval
         )
         
         # Log startup information
@@ -603,6 +590,7 @@ def main():
             publisher.logger.debug(f"  MQTT Host: {args.host}")
             publisher.logger.debug(f"  MQTT Port: {args.port}")
             publisher.logger.debug(f"  MQTT TLS: {args.tls}")
+            publisher.logger.debug(f"  Polling Interval: {args.poll_interval} seconds")
             publisher.logger.debug(f"  Debug Mode: ON")
         
         # Run the publisher
