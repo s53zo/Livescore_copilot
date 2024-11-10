@@ -386,7 +386,7 @@ class ScoreReporter:
 
     
     def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display"""
+        """Generate HTML content with updated category display and rate comparisons"""
         try:
             # Get filter information for the header if available
             filter_info_div = ""
@@ -472,6 +472,21 @@ class ScoreReporter:
                 </style>
             """
     
+            # Get reference station (the monitored station) for rate comparisons
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+            reference_total_rates = (0, 0)  # Default if not found
+            reference_breakdown = {}
+            
+            if reference_station:
+                # Get reference station's total rates
+                reference_total_rates = self.get_total_rates(
+                    reference_station[0], callsign, contest, reference_station[5]
+                )
+                # Get reference station's band breakdown
+                reference_breakdown = self.get_band_breakdown_with_rates(
+                    reference_station[0], callsign, contest, reference_station[5]
+                )
+    
             table_rows = []
             for i, station in enumerate(stations, 1):
                 station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
@@ -496,7 +511,7 @@ class ScoreReporter:
                 # Format power class tag
                 power_class = power.upper() if power else 'Unknown'
                 display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
+                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
                 
                 # Create category display
                 category_html = f"""
@@ -511,16 +526,7 @@ class ScoreReporter:
                     station_id, callsign_val, contest, timestamp
                 )
                 
-                # Get reference station for rate comparison
-                reference_station = next((s for s in stations if s[1] == callsign), None)
-                if reference_station:
-                    reference_breakdown = self.get_band_breakdown_with_rates(
-                        reference_station[0], callsign, contest, reference_station[5]
-                    )
-                else:
-                    reference_breakdown = {}
-    
-                # Calculate total rates
+                # Calculate total rates for this station
                 total_long_rate, total_short_rate = self.get_total_rates(
                     station_id, callsign_val, contest, timestamp
                 )
@@ -528,12 +534,9 @@ class ScoreReporter:
                 # Format timestamp
                 ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
                 
-                # Add highlight for current station
-                highlight = ' class="highlight"' if callsign_val == callsign else ''
-                
                 # Generate table row
                 row = f"""
-                <tr{highlight}>
+                <tr{' class="highlight"' if callsign_val == callsign else ''}>
                     <td>{i}</td>
                     <td>{callsign_val}</td>
                     <td>{category_html}</td>
@@ -544,11 +547,12 @@ class ScoreReporter:
                     <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate, 
+                        reference_total_rates[0], reference_total_rates[1])}</td>
                     <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-                
+    
             # Format final HTML
             html_content = template.format(
                 contest=contest,
