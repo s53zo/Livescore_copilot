@@ -175,11 +175,12 @@ class ContestMQTTPublisher(ContestDataSubscriber):
         """Initialize MQTT client with detailed logging"""
         self.logger.debug("Setting up MQTT client")
         
+        # Create MQTT client
+        self.mqtt_client = mqtt.Client(client_id=self.mqtt_config.get('client_id'))
+        
         # Enable MQTT client logging if in debug mode
         if self.logger.getEffectiveLevel() == logging.DEBUG:
-            mqtt.Client.enable_logger(self.logger)
-        
-        self.mqtt_client = mqtt.Client(client_id=self.mqtt_config.get('client_id'))
+            self.mqtt_client.enable_logger()  # Changed: removed self.logger argument
         
         # Set up callbacks with enhanced logging
         self.mqtt_client.on_connect = self.on_connect
@@ -207,6 +208,7 @@ class ContestMQTTPublisher(ContestDataSubscriber):
                 self.mqtt_config['port']
             )
             self.mqtt_client.loop_start()
+            self.logger.info("MQTT client started successfully")
         except Exception as e:
             self.logger.error(f"Failed to connect to MQTT broker: {e}")
             self.logger.debug(traceback.format_exc())
@@ -525,6 +527,12 @@ def main():
         'use_tls': args.tls
     }
     
+    # Setup basic logging for initialization errors
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
+                       format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
+    logger = logging.getLogger('main')
+    
+    publisher = None
     try:
         # Create publisher instance
         publisher = ContestMQTTPublisher(
@@ -547,14 +555,22 @@ def main():
         publisher.run()
         
     except KeyboardInterrupt:
-        publisher.logger.info("Shutting down...")
+        if publisher:
+            publisher.logger.info("Shutting down...")
+        else:
+            logger.info("Shutting down...")
     except Exception as e:
-        publisher.logger.error(f"Fatal error: {e}")
-        if args.debug:
-            publisher.logger.debug(traceback.format_exc())
+        if publisher:
+            publisher.logger.error(f"Fatal error: {e}")
+            if args.debug:
+                publisher.logger.debug(traceback.format_exc())
+        else:
+            logger.error(f"Fatal error during initialization: {e}")
+            if args.debug:
+                logger.debug(traceback.format_exc())
         sys.exit(1)
     finally:
-        if 'publisher' in locals():
+        if publisher:
             publisher.cleanup()
 
 if __name__ == "__main__":
