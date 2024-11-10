@@ -12,10 +12,12 @@ import traceback
 
 class ContestDataSubscriber:
     """Base class for subscribing to contest database updates"""
-    def __init__(self, db_path):
+    def __init__(self, db_path, polling_interval=5):
         self.db_path = db_path
+        self.polling_interval = polling_interval
         self.last_processed_id = 0
         self.running = True
+        self.last_check_time = datetime.now()
         
         # Setup signal handlers
         signal.signal(signal.SIGINT, self.handle_shutdown)
@@ -123,25 +125,45 @@ class ContestDataSubscriber:
         raise NotImplementedError("Subclasses must implement process_record")
 
     def run(self):
-        """Main processing loop"""
-        self.logger.info("Starting data subscriber...")
+        """Main processing loop with improved polling"""
+        self.logger.info(f"Starting data subscriber (polling every {self.polling_interval} seconds)...")
         
         while self.running:
             try:
+                start_time = datetime.now()
+                
                 # Get new records
                 records = self.get_new_records()
                 
                 if records:
                     self.logger.info(f"Found {len(records)} new records")
+                    process_start = datetime.now()
+                    
                     for record in records:
                         self.process_record(record)
+                    
+                    process_time = (datetime.now() - process_start).total_seconds()
+                    self.logger.debug(f"Processed {len(records)} records in {process_time:.2f} seconds")
                 
-                # Wait before next check
-                time.sleep(5)  # 5 second polling interval
+                # Calculate time until next check
+                elapsed = (datetime.now() - start_time).total_seconds()
+                wait_time = max(0, self.polling_interval - elapsed)
+                
+                if wait_time > 0:
+                    if self.logger.isEnabledFor(logging.DEBUG):
+                        self.logger.debug(f"Waiting {wait_time:.2f} seconds until next check")
+                    time.sleep(wait_time)
+                    
+                # Log polling stats in debug mode
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    total_time = (datetime.now() - self.last_check_time).total_seconds()
+                    self.logger.debug(f"Poll cycle completed in {total_time:.2f} seconds")
+                    self.last_check_time = datetime.now()
                 
             except Exception as e:
                 self.logger.error(f"Error in processing loop: {e}")
-                time.sleep(5)
+                self.logger.debug(traceback.format_exc())
+                time.sleep(self.polling_interval)  # Wait before retry
 
     def cleanup(self):
         """Cleanup resources"""
@@ -539,6 +561,9 @@ Examples:
     
     parser.add_argument('--debug', action='store_true',
                        help='Enable debug logging')
+    
+    parser.add_argument('--poll-interval', type=int, default=5,
+                       help='Database polling interval in seconds (default: 5)')
 
     return parser.parse_args()
 
