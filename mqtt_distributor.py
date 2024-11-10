@@ -292,15 +292,15 @@ class ContestMQTTPublisher(ContestDataSubscriber):
         self.logger.debug(f"MQTT Log: {buf}")
 
     def build_topic(self, record):
-    """
-    Build MQTT topic hierarchy from contest record.
-    Format: contest/live/v1/{contest}/{callsign}
-    """
-    score_data = record['score_data']
-    contest = score_data[2].replace(' ', '_')
-    callsign = score_data[3]
-    
-    return f"contest/live/v1/{contest}/{callsign}"
+        """
+        Build MQTT topic hierarchy from contest record.
+        Format: contest/live/v1/{contest}/{callsign}
+        """
+        score_data = record['score_data']
+        contest = score_data[2].replace(' ', '_')
+        callsign = score_data[3]
+        
+        return f"contest/live/v1/{contest}/{callsign}"
 
     def get_contest_totals(self, contest, timestamp):
         """Get current contest totals including band breakdowns"""
