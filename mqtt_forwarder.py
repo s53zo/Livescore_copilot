@@ -45,13 +45,16 @@ class AsyncMQTTForwarder:
         """Create and connect MQTT client"""
         while True:
             try:
+                # Initialize SSL context only if TLS is required
+                ssl_context = ssl.create_default_context() if self.mqtt_use_tls else None
+    
                 # Create new client for each connection attempt
                 self.mqtt_client = aiomqtt.Client(
                     hostname=self.mqtt_host,
                     port=self.mqtt_port,
                     username=self.mqtt_username,
                     password=self.mqtt_password,
-                    tls_context=ssl_context
+                    tls_context=ssl_context  # Pass the SSL context here
                 )
                 await self.mqtt_client.connect()
                 self.logger.info("Connected to MQTT broker")
