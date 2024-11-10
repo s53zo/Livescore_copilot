@@ -309,13 +309,13 @@ class ScoreReporter:
                 return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
     
-       def format_total_data(self, qsos, mults, long_rate, short_rate):
-        """Format total QSO/Mults with both rates"""
-        long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
-        short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
-        return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+    def format_total_data(self, qsos, mults, long_rate, short_rate):
+            """Format total QSO/Mults with both rates"""
+            long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
+            short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
+            return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
 
-        def get_operator_category(operator, transmitter, assisted):
+    def get_operator_category(operator, transmitter, assisted):
             """Map operation categories based on defined rules"""
             category_map = {
                 ('SINGLE-OP', 'ONE', 'ASSISTED'): 'SOA',
@@ -328,8 +328,8 @@ class ScoreReporter:
                 ('MULTI-OP', 'MULTI', 'NON-ASSISTED'): 'M/M'
             }
             return category_map.get((operator, transmitter, assisted), 'Unknown')
-        
-        def generate_html_content(self, template, callsign, contest, stations):
+
+    def generate_html_content(self, template, callsign, contest, stations):
             """Generate HTML content with updated category display"""
             try:
                 # [Previous filter_info_div code remains the same...]
