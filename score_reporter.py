@@ -5,6 +5,7 @@ import logging
 import traceback
 from datetime import datetime
 from flask import request
+import sys
 
 class RateCalculator:
     def __init__(self, db_path):
@@ -158,7 +159,7 @@ class RateCalculator:
         return band_data
 
 class ScoreReporter:
-     def __init__(self, db_path=None, template_path=None, rate_minutes=60):
+    def __init__(self, db_path=None, template_path=None, rate_minutes=60):
         """Initialize the ScoreReporter class"""
         self.db_path = db_path or 'contest_data.db'
         self.template_path = template_path or 'templates/score_template.html'
