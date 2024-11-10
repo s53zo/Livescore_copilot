@@ -5,14 +5,15 @@ import logging
 import paho.mqtt.client as mqtt
 
 class AsyncMQTTForwarder:
-    def __init__(self, db_path, mqtt_host, mqtt_port, mqtt_username, mqtt_password, mqtt_use_tls):
+    def __init__(self):
         logging.debug("Initializing AsyncMQTTForwarder")
-        self.db_path = db_path
-        self.mqtt_host = mqtt_host
-        self.mqtt_port = mqtt_port
-        self.mqtt_username = mqtt_username
-        self.mqtt_password = mqtt_password
-        self.mqtt_use_tls = mqtt_use_tls
+
+        # MQTT broker settings
+        self.mqtt_host = "localhost"
+        self.mqtt_port = 1883
+        self.mqtt_username = "s53zo"
+        self.mqtt_password = "mqtt"
+        self.mqtt_use_tls = False
 
         self.message_queue = asyncio.Queue()
         self.loop = asyncio.get_event_loop()
@@ -28,6 +29,7 @@ class AsyncMQTTForwarder:
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_disconnect = self.on_disconnect
 
+     
     async def start(self):
         logging.info("Starting MQTT forwarder")
         # Connect to MQTT broker in a separate thread
