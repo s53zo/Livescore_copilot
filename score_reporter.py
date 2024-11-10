@@ -354,18 +354,28 @@ class ScoreReporter:
     @staticmethod
     def get_operator_category(operator, transmitter, assisted):
         """Map operation categories based on defined rules"""
+        # Handle empty/NULL assisted value - default to NON-ASSISTED
+        assisted = assisted if assisted else 'NON-ASSISTED'
+        
         category_map = {
             ('SINGLE-OP', 'ONE', 'ASSISTED'): 'SOA',
             ('SINGLE-OP', 'ONE', 'NON-ASSISTED'): 'SO',
+            ('SINGLE-OP', 'TWO', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'TWO', 'NON-ASSISTED'): 'SO',
+            ('SINGLE-OP', 'UNLIMITED', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'UNLIMITED', 'NON-ASSISTED'): 'SO',
+            ('CHECKLOG', 'ONE', 'NON-ASSISTED'): 'SO',
+            ('CHECKLOG', 'ONE', 'ASSISTED'): 'SOA',
             ('MULTI-OP', 'ONE', 'ASSISTED'): 'M/S',
             ('MULTI-OP', 'ONE', 'NON-ASSISTED'): 'M/S',
             ('MULTI-OP', 'TWO', 'ASSISTED'): 'M/S',
             ('MULTI-OP', 'TWO', 'NON-ASSISTED'): 'M/S',
-            ('MULTI-OP', 'MULTI', 'ASSISTED'): 'M/M',
-            ('MULTI-OP', 'MULTI', 'NON-ASSISTED'): 'M/M'
+            ('MULTI-OP', 'UNLIMITED', 'ASSISTED'): 'M/M',
+            ('MULTI-OP', 'UNLIMITED', 'NON-ASSISTED'): 'M/M'
         }
         return category_map.get((operator, transmitter, assisted), 'Unknown')
 
+    
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with updated category display"""
         try:
