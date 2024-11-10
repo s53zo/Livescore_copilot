@@ -4,16 +4,166 @@ import os
 import logging
 import traceback
 from datetime import datetime
+from flask import request
 import sys
-from rate_calculator import RateCalculator
-from qso_rate import QsoRateCalculator 
+
+class RateCalculator:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        
+    def calculate_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
+        """Calculate QSO rates for both long and short time windows"""
+        query = """
+            WITH current_score AS (
+                SELECT qsos, timestamp
+                FROM contest_scores
+                WHERE callsign = ? 
+                AND contest = ?
+                AND timestamp = ?
+            ),
+            long_window_score AS (
+                SELECT qsos
+                FROM contest_scores
+                WHERE callsign = ?
+                AND contest = ?
+                AND timestamp <= datetime(?, '-60 minutes')
+                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(datetime(?, '-60 minutes')))
+                LIMIT 1
+            ),
+            short_window_score AS (
+                SELECT qsos
+                FROM contest_scores
+                WHERE callsign = ?
+                AND contest = ?
+                AND timestamp <= datetime(?, '-15 minutes')
+                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(datetime(?, '-15 minutes')))
+                LIMIT 1
+            )
+            SELECT 
+                cs.qsos as current_qsos,
+                lws.qsos as long_window_qsos,
+                sws.qsos as short_window_qsos
+            FROM current_score cs
+            LEFT JOIN long_window_score lws
+            LEFT JOIN short_window_score sws
+        """
+        
+        cursor.execute(query, (
+            callsign, contest, current_ts,
+            callsign, contest, current_ts, current_ts,
+            callsign, contest, current_ts, current_ts
+        ))
+        
+        result = cursor.fetchone()
+        if not result:
+            return 0, 0
+            
+        current_qsos, long_window_qsos, short_window_qsos = result
+        
+        # Calculate 60-minute rate
+        long_rate = 0
+        if long_window_qsos is not None:
+            qso_diff = current_qsos - long_window_qsos
+            if qso_diff > 0:
+                long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
+                
+        # Calculate 15-minute rate
+        short_rate = 0
+        if short_window_qsos is not None:
+            qso_diff = current_qsos - short_window_qsos
+            if qso_diff > 0:
+                short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
+                
+        return long_rate, short_rate
+
+    def calculate_band_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
+        """Calculate per-band QSO rates for both time windows"""
+        query = """
+            WITH current_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as current_qsos,
+                    bb.multipliers,
+                    cs.timestamp as current_ts
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ? 
+                AND cs.contest = ?
+                AND cs.timestamp = ?
+            ),
+            long_window_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as long_window_qsos
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= ?
+                AND cs.timestamp >= datetime(?, ? || ' minutes')
+                ORDER BY cs.timestamp DESC
+            ),
+            short_window_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as short_window_qsos
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= ?
+                AND cs.timestamp >= datetime(?, ? || ' minutes')
+                ORDER BY cs.timestamp DESC
+            )
+            SELECT 
+                cb.band,
+                cb.current_qsos,
+                cb.multipliers,
+                lwb.long_window_qsos,
+                swb.short_window_qsos
+            FROM current_bands cb
+            LEFT JOIN long_window_bands lwb ON cb.band = lwb.band
+            LEFT JOIN short_window_bands swb ON cb.band = swb.band
+            WHERE cb.current_qsos > 0
+            ORDER BY cb.band
+        """
+        
+        cursor.execute(query, (
+            callsign, contest, current_ts,
+            callsign, contest, current_ts, current_ts, f"-{long_window}",
+            callsign, contest, current_ts, current_ts, f"-{short_window}"
+        ))
+        
+        results = cursor.fetchall()
+        band_data = {}
+        
+        for row in results:
+            band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
+            
+            # Calculate long window rate (60-minute)
+            long_rate = 0
+            if long_window_qsos is not None:
+                qso_diff = current_qsos - long_window_qsos
+                if qso_diff > 0:
+                    long_rate = int(round((qso_diff * 60) / long_window))
+            
+            # Calculate short window rate (15-minute)
+            short_rate = 0
+            if short_window_qsos is not None:
+                qso_diff = current_qsos - short_window_qsos
+                if qso_diff > 0:
+                    short_rate = int(round((qso_diff * 60) / short_window))
+            
+            band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
+        
+        return band_data
 
 class ScoreReporter:
     def __init__(self, db_path=None, template_path=None, rate_minutes=60):
         """Initialize the ScoreReporter class"""
         self.db_path = db_path or 'contest_data.db'
         self.template_path = template_path or 'templates/score_template.html'
-        self.rate_calculator = QsoRateCalculator(self.db_path)
+        self.rate_calculator = RateCalculator(self.db_path)
         self.setup_logging()
         self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
 
@@ -63,7 +213,7 @@ class ScoreReporter:
             print(f"Error setting up logging: {e}", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)
             raise
-
+        
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """Get station details and all competitors with optional filtering"""
         try:
@@ -171,8 +321,8 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return 0, 0
 
-    @staticmethod
-    def format_band_data(band_data, reference_rates=None, band=None):
+
+    def format_band_data(self, band_data, reference_rates=None, band=None):
         """Format band data as QSO/Mults (60h/15h) with rate comparison"""
         if band_data:
             qsos, mults, long_rate, short_rate = band_data
@@ -195,27 +345,17 @@ class ScoreReporter:
                 return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
     
-    def format_total_data(self, qsos, mults, long_rate, short_rate, reference_long_rate=0, reference_short_rate=0):
-        """Format total QSO/Mults with both rates, coloring short rate based on comparison"""
-        # Format the rates with + sign if positive
-        long_rate_str = f"{long_rate:+d}" if long_rate > 0 else "0"
-        short_rate_str = f"{short_rate:+d}" if short_rate > 0 else "0"
-        
-        # Determine if current station's rate is better than reference
-        better_rate = short_rate > reference_short_rate
-        
-        # Apply rate class based on comparison
-        rate_class = "better-rate" if better_rate else "worse-rate"
-        
-        return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
+    def format_total_data(self, qsos, mults, long_rate, short_rate):
+            """Format total QSO/Mults with both rates"""
+            long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
+            short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
+            return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
 
     @staticmethod
     def get_operator_category(operator, transmitter, assisted):
         """Map operation categories based on defined rules"""
-        # Ensure all values have defaults if None
-        operator = (operator or 'SINGLE-OP').upper()
-        transmitter = (transmitter or 'ONE').upper()
-        assisted = (assisted or 'NON-ASSISTED').upper()
+        # Handle empty/NULL assisted value - default to NON-ASSISTED
+        assisted = assisted if assisted else 'NON-ASSISTED'
         
         category_map = {
             ('SINGLE-OP', 'ONE', 'ASSISTED'): 'SOA',
@@ -233,30 +373,95 @@ class ScoreReporter:
             ('MULTI-OP', 'UNLIMITED', 'ASSISTED'): 'M/M',
             ('MULTI-OP', 'UNLIMITED', 'NON-ASSISTED'): 'M/M'
         }
-        
-        # Create lookup key with the standardized values
-        lookup_key = (operator, transmitter, assisted)
-        
-        # Return mapped category or default to 'SO' if no match
-        return category_map.get(lookup_key, 'SO')
+        return category_map.get((operator, transmitter, assisted), 'Unknown')
 
+    
     def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display and rate comparisons"""
+        """Generate HTML content with updated category display"""
         try:
-            # Get reference station (the monitored station) for rate comparisons
-            reference_station = next((s for s in stations if s[1] == callsign), None)
-            reference_total_rates = (0, 0)  # Default if not found
-            reference_breakdown = {}
-            
-            if reference_station:
-                # Get reference station's total rates
-                reference_total_rates = self.get_total_rates(
-                    reference_station[0], callsign, contest, reference_station[5]
-                )
-                # Get reference station's band breakdown
-                reference_breakdown = self.get_band_breakdown_with_rates(
-                    reference_station[0], callsign, contest, reference_station[5]
-                )
+            # Get filter information for the header if available
+            filter_info_div = ""
+            current_filter_type = request.args.get('filter_type', 'none')
+            current_filter_value = request.args.get('filter_value', 'none')
+    
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                           qi.arrl_section, qi.state_province, qi.continent
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.callsign = ? AND cs.contest = ?
+                    ORDER BY cs.timestamp DESC
+                    LIMIT 1
+                """, (callsign, contest))
+                qth_info = cursor.fetchone()
+                
+                if qth_info:
+                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
+                                   "State/Province", "Continent"]
+                    filter_parts = []
+                    
+                    for label, value in zip(filter_labels, qth_info):
+                        if value:
+                            if current_filter_type == label and current_filter_value == value:
+                                filter_parts.append(
+                                    f'<span class="active-filter">{label}: {value}</span>'
+                                )
+                            else:
+                                filter_parts.append(
+                                    f'<a href="/reports/live.html?contest={contest}'
+                                    f'&callsign={callsign}&filter_type={label}'
+                                    f'&filter_value={value}" class="filter-link">'
+                                    f'{label}: {value}</a>'
+                                )
+                    
+                    if filter_parts:
+                        if current_filter_type != 'none':
+                            filter_parts.append(
+                                f'<a href="/reports/live.html?contest={contest}'
+                                f'&callsign={callsign}&filter_type=none'
+                                f'&filter_value=none" class="filter-link clear-filter">'
+                                f'Show All</a>'
+                            )
+                        
+                        filter_info_div = f"""
+                        <div class="filter-info">
+                            <span class="filter-label">Filters:</span> 
+                            {' | '.join(filter_parts)}
+                        </div>
+                        """
+    
+            # Add category-specific CSS
+            additional_css = """
+                <style>
+                    .category-group {
+                        display: inline-flex;
+                        gap: 4px;
+                        font-size: 0.75rem;
+                        line-height: 1;
+                        align-items: center;
+                    }
+                    
+                    .category-tag {
+                        display: inline-block;
+                        padding: 3px 6px;
+                        border-radius: 3px;
+                        white-space: nowrap;
+                        font-family: monospace;
+                    }
+                    
+                    /* Category colors */
+                    .cat-power-high { background: #ffebee; color: #c62828; }
+                    .cat-power-low { background: #e8f5e9; color: #2e7d32; }
+                    .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
+                    
+                    .cat-soa { background: #e3f2fd; color: #1565c0; }
+                    .cat-so { background: #f3e5f5; color: #6a1b9a; }
+                    .cat-ms { background: #fff8e1; color: #ff8f00; }
+                    .cat-mm { background: #f1f8e9; color: #558b2f; }
+                </style>
+            """
     
             table_rows = []
             for i, station in enumerate(stations, 1):
@@ -280,14 +485,10 @@ class ScoreReporter:
                                                        assisted or 'NON-ASSISTED')
                 
                 # Format power class tag
-                power_class = (power.upper() if power else 'UNKNOWN')
-                display_power = {
-                    'HIGH': 'H',
-                    'LOW': 'L',
-                    'QRP': 'Q'
-                }.get(power_class, 'U')
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
-
+                power_class = power.upper() if power else 'Unknown'
+                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
+                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
+                
                 # Create category display
                 category_html = f"""
                     <div class="category-group">
@@ -301,7 +502,16 @@ class ScoreReporter:
                     station_id, callsign_val, contest, timestamp
                 )
                 
-                # Calculate total rates for this station
+                # Get reference station for rate comparison
+                reference_station = next((s for s in stations if s[1] == callsign), None)
+                if reference_station:
+                    reference_breakdown = self.get_band_breakdown_with_rates(
+                        reference_station[0], callsign, contest, reference_station[5]
+                    )
+                else:
+                    reference_breakdown = {}
+    
+                # Calculate total rates
                 total_long_rate, total_short_rate = self.get_total_rates(
                     station_id, callsign_val, contest, timestamp
                 )
@@ -309,9 +519,12 @@ class ScoreReporter:
                 # Format timestamp
                 ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
                 
+                # Add highlight for current station
+                highlight = ' class="highlight"' if callsign_val == callsign else ''
+                
                 # Generate table row
                 row = f"""
-                <tr{' class="highlight"' if callsign_val == callsign else ''}>
+                <tr{highlight}>
                     <td>{i}</td>
                     <td>{callsign_val}</td>
                     <td>{category_html}</td>
@@ -322,12 +535,11 @@ class ScoreReporter:
                     <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate, 
-                        reference_total_rates[0], reference_total_rates[1])}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
                     <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-    
+                
             # Format final HTML
             html_content = template.format(
                 contest=contest,
@@ -335,9 +547,9 @@ class ScoreReporter:
                 timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
                 power=stations[0][3],
                 assisted=stations[0][4],
-                filter_info_div=self._get_filter_info_div(contest, callsign),
+                filter_info_div=filter_info_div,
                 table_rows='\n'.join(table_rows),
-                additional_css=self._get_additional_css()
+                additional_css=additional_css
             )
             
             return html_content
@@ -346,103 +558,3 @@ class ScoreReporter:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
             raise
-    
-    def _get_additional_css(self):
-        """Return additional CSS styles for the report"""
-        return """
-            <style>
-                .category-group {
-                    display: inline-flex;
-                    gap: 4px;
-                    font-size: 0.75rem;
-                    line-height: 1;
-                    align-items: center;
-                }
-                
-                .category-tag {
-                    display: inline-block;
-                    padding: 3px 6px;
-                    border-radius: 3px;
-                    white-space: nowrap;
-                    font-family: monospace;
-                }
-                
-                /* Category colors */
-                .cat-power-high { background: #ffebee; color: #c62828; }
-                .cat-power-low { background: #e8f5e9; color: #2e7d32; }
-                .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
-                
-                .cat-soa { background: #e3f2fd; color: #1565c0; }
-                .cat-so { background: #f3e5f5; color: #6a1b9a; }
-                .cat-ms { background: #fff8e1; color: #ff8f00; }
-                .cat-mm { background: #f1f8e9; color: #558b2f; }
-            </style>
-        """
-    
-    def _get_filter_info_div(self, contest, callsign):
-        """Generate filter information div"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                           qi.arrl_section, qi.state_province, qi.continent
-                    FROM contest_scores cs
-                    JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.callsign = ? AND cs.contest = ?
-                    ORDER BY cs.timestamp DESC
-                    LIMIT 1
-                """, (callsign, contest))
-                qth_info = cursor.fetchone()
-                
-                if not qth_info:
-                    return ""
-                    
-                filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
-                               "State/Province", "Continent"]
-                filter_parts = []
-                
-                # Get current filter from request object if available
-                try:
-                    from flask import request
-                    current_filter_type = request.args.get('filter_type', 'none')
-                    current_filter_value = request.args.get('filter_value', 'none')
-                except:
-                    current_filter_type = 'none'
-                    current_filter_value = 'none'
-                
-                for label, value in zip(filter_labels, qth_info):
-                    if value:
-                        if current_filter_type == label and current_filter_value == value:
-                            filter_parts.append(
-                                f'<span class="active-filter">{label}: {value}</span>'
-                            )
-                        else:
-                            filter_parts.append(
-                                f'<a href="/reports/live.html?contest={contest}'
-                                f'&callsign={callsign}&filter_type={label}'
-                                f'&filter_value={value}" class="filter-link">'
-                                f'{label}: {value}</a>'
-                            )
-                
-                if filter_parts:
-                    if current_filter_type != 'none':
-                        filter_parts.append(
-                            f'<a href="/reports/live.html?contest={contest}'
-                            f'&callsign={callsign}&filter_type=none'
-                            f'&filter_value=none" class="filter-link clear-filter">'
-                            f'Show All</a>'
-                        )
-                    
-                    return f"""
-                    <div class="filter-info">
-                        <span class="filter-label">Filters:</span> 
-                        {' | '.join(filter_parts)}
-                    </div>
-                    """
-                
-                return ""
-                
-        except Exception as e:
-            self.logger.error(f"Error generating filter info: {e}")
-            return ""
