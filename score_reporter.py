@@ -315,134 +315,134 @@ class ScoreReporter:
         short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
         return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
 
-    def get_operator_category(operator, transmitter, assisted):
-        """Map operation categories based on defined rules"""
-        category_map = {
-            ('SINGLE-OP', 'ONE', 'ASSISTED'): 'SOA',
-            ('SINGLE-OP', 'ONE', 'NON-ASSISTED'): 'SO',
-            ('MULTI-OP', 'ONE', 'ASSISTED'): 'M/S',
-            ('MULTI-OP', 'ONE', 'NON-ASSISTED'): 'M/S',
-            ('MULTI-OP', 'TWO', 'ASSISTED'): 'M/S',
-            ('MULTI-OP', 'TWO', 'NON-ASSISTED'): 'M/S',
-            ('MULTI-OP', 'MULTI', 'ASSISTED'): 'M/M',
-            ('MULTI-OP', 'MULTI', 'NON-ASSISTED'): 'M/M'
-        }
-        return category_map.get((operator, transmitter, assisted), 'Unknown')
-    
-    def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display"""
-        try:
-            # [Previous filter_info_div code remains the same...]
-    
-            # Add category-specific CSS
-            additional_css = """
-                <style>
-                    .category-group {
-                        display: inline-flex;
-                        gap: 4px;
-                        font-size: 0.75rem;
-                        line-height: 1;
-                        align-items: center;
-                    }
-                    
-                    .category-tag {
-                        display: inline-block;
-                        padding: 3px 6px;
-                        border-radius: 3px;
-                        white-space: nowrap;
-                        font-family: monospace;
-                    }
-                    
-                    /* Category colors */
-                    .cat-power-high { background: #ffebee; color: #c62828; }
-                    .cat-power-low { background: #e8f5e9; color: #2e7d32; }
-                    .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
-                    
-                    .cat-soa { background: #e3f2fd; color: #1565c0; }
-                    .cat-so { background: #f3e5f5; color: #6a1b9a; }
-                    .cat-ms { background: #fff8e1; color: #ff8f00; }
-                    .cat-mm { background: #f1f8e9; color: #558b2f; }
-                </style>
-            """
-    
-            table_rows = []
-            for i, station in enumerate(stations, 1):
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                
-                # Get additional category information from database
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT ops, transmitter
-                        FROM contest_scores
-                        WHERE id = ?
-                    """, (station_id,))
-                    ops, transmitter = cursor.fetchone()
-    
-                # Calculate operator category
-                op_category = self.get_operator_category(ops, transmitter, assisted)
-                
-                # Format power class tag
-                power_class = power.upper() if power else 'Unknown'
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{power_class}</span>'
-                
-                # Create category display
-                category_html = f"""
-                    <div class="category-group">
-                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
-                        {power_tag}
-                    </div>
+        def get_operator_category(operator, transmitter, assisted):
+            """Map operation categories based on defined rules"""
+            category_map = {
+                ('SINGLE-OP', 'ONE', 'ASSISTED'): 'SOA',
+                ('SINGLE-OP', 'ONE', 'NON-ASSISTED'): 'SO',
+                ('MULTI-OP', 'ONE', 'ASSISTED'): 'M/S',
+                ('MULTI-OP', 'ONE', 'NON-ASSISTED'): 'M/S',
+                ('MULTI-OP', 'TWO', 'ASSISTED'): 'M/S',
+                ('MULTI-OP', 'TWO', 'NON-ASSISTED'): 'M/S',
+                ('MULTI-OP', 'MULTI', 'ASSISTED'): 'M/M',
+                ('MULTI-OP', 'MULTI', 'NON-ASSISTED'): 'M/M'
+            }
+            return category_map.get((operator, transmitter, assisted), 'Unknown')
+        
+        def generate_html_content(self, template, callsign, contest, stations):
+            """Generate HTML content with updated category display"""
+            try:
+                # [Previous filter_info_div code remains the same...]
+        
+                # Add category-specific CSS
+                additional_css = """
+                    <style>
+                        .category-group {
+                            display: inline-flex;
+                            gap: 4px;
+                            font-size: 0.75rem;
+                            line-height: 1;
+                            align-items: center;
+                        }
+                        
+                        .category-tag {
+                            display: inline-block;
+                            padding: 3px 6px;
+                            border-radius: 3px;
+                            white-space: nowrap;
+                            font-family: monospace;
+                        }
+                        
+                        /* Category colors */
+                        .cat-power-high { background: #ffebee; color: #c62828; }
+                        .cat-power-low { background: #e8f5e9; color: #2e7d32; }
+                        .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
+                        
+                        .cat-soa { background: #e3f2fd; color: #1565c0; }
+                        .cat-so { background: #f3e5f5; color: #6a1b9a; }
+                        .cat-ms { background: #fff8e1; color: #ff8f00; }
+                        .cat-mm { background: #f1f8e9; color: #558b2f; }
+                    </style>
                 """
+        
+                table_rows = []
+                for i, station in enumerate(stations, 1):
+                    station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+                    
+                    # Get additional category information from database
+                    with sqlite3.connect(self.db_path) as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT ops, transmitter
+                            FROM contest_scores
+                            WHERE id = ?
+                        """, (station_id,))
+                        ops, transmitter = cursor.fetchone()
+        
+                    # Calculate operator category
+                    op_category = self.get_operator_category(ops, transmitter, assisted)
+                    
+                    # Format power class tag
+                    power_class = power.upper() if power else 'Unknown'
+                    power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{power_class}</span>'
+                    
+                    # Create category display
+                    category_html = f"""
+                        <div class="category-group">
+                            <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
+                            {power_tag}
+                        </div>
+                    """
+                    
+                    # Calculate band breakdown and rates as before
+                    band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
+                    
+                    reference_station = next((s for s in stations if s[1] == callsign), None)
+                    if reference_station:
+                        reference_breakdown = self.get_band_breakdown_with_rates(
+                            reference_station[0], callsign, contest, reference_station[5]
+                        )
+                    else:
+                        reference_breakdown = {}
+        
+                    total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
+                    
+                    ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                    
+                    highlight = ' class="highlight"' if callsign_val == callsign else ''
+                    
+                    row = f"""
+                    <tr{highlight}>
+                        <td>{i}</td>
+                        <td>{callsign_val}</td>
+                        <td>{category_html}</td>
+                        <td>{score:,}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                        <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
+                        <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                    </tr>"""
+                    table_rows.append(row)
+                    
+                # Format final HTML
+                html_content = template.format(
+                    contest=contest,
+                    callsign=callsign,
+                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                    power=stations[0][3],
+                    assisted=stations[0][4],
+                    filter_info_div=filter_info_div,
+                    table_rows='\n'.join(table_rows),
+                    additional_css=additional_css
+                )
                 
-                # Calculate band breakdown and rates as before
-                band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
-                
-                reference_station = next((s for s in stations if s[1] == callsign), None)
-                if reference_station:
-                    reference_breakdown = self.get_band_breakdown_with_rates(
-                        reference_station[0], callsign, contest, reference_station[5]
-                    )
-                else:
-                    reference_breakdown = {}
-    
-                total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
-                
-                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                
-                highlight = ' class="highlight"' if callsign_val == callsign else ''
-                
-                row = f"""
-                <tr{highlight}>
-                    <td>{i}</td>
-                    <td>{callsign_val}</td>
-                    <td>{category_html}</td>
-                    <td>{score:,}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
-                </tr>"""
-                table_rows.append(row)
-                
-            # Format final HTML
-            html_content = template.format(
-                contest=contest,
-                callsign=callsign,
-                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                power=stations[0][3],
-                assisted=stations[0][4],
-                filter_info_div=filter_info_div,
-                table_rows='\n'.join(table_rows),
-                additional_css=additional_css
-            )
-            
-            return html_content
-    
-        except Exception as e:
-            self.logger.error(f"Error generating HTML content: {e}")
-            self.logger.error(traceback.format_exc())
-            raise
+                return html_content
+        
+            except Exception as e:
+                self.logger.error(f"Error generating HTML content: {e}")
+                self.logger.error(traceback.format_exc())
+                raise
