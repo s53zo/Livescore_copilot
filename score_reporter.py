@@ -345,11 +345,20 @@ class ScoreReporter:
                 return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
     
-    def format_total_data(self, qsos, mults, long_rate, short_rate):
-            """Format total QSO/Mults with both rates"""
-            long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
-            short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
-            return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+    def format_total_data(self, qsos, mults, long_rate, short_rate, reference_long_rate=0, reference_short_rate=0):
+        """Format total QSO/Mults with both rates, coloring short rate based on comparison"""
+        # Format the rates with + sign if positive
+        long_rate_str = f"{long_rate:+d}" if long_rate > 0 else "0"
+        short_rate_str = f"{short_rate:+d}" if short_rate > 0 else "0"
+        
+        # Determine if current station's rate is better than reference
+        better_rate = short_rate > reference_short_rate
+        
+        # Apply rate class based on comparison
+        rate_class = "better-rate" if better_rate else "worse-rate"
+        
+        return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
+
 
     @staticmethod
     def get_operator_category(operator, transmitter, assisted):
