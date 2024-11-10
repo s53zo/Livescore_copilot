@@ -204,8 +204,8 @@ class ContestDatabaseHandler:
                     
                     # Use prefix from callsign_info instead of country name
                     if callsign_info:
-                        qth_data['dxcc_country'] = callsign_info['prefix']
-                        qth_data['continent'] = callsign_info['continent']
+                        qth_data['dxcc_country'] = callsign_info.get('prefix')  # This will now use the correct Prefix from cty.plist
+                        qth_data['continent'] = callsign_info.get('continent')
                     else:
                         qth_data['dxcc_country'] = ''
                         qth_data['continent'] = ''
