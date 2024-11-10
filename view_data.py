@@ -6,6 +6,155 @@ from display_utils import format_qth_statistics, format_qth_details
 from tabulate import tabulate
 import logging
 
+def show_operating_categories(db_path, contest=None):
+    """Display operating category statistics"""
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Base query for category statistics
+            query = """
+                WITH latest_scores AS (
+                    SELECT cs.id, cs.callsign, cs.contest, cs.timestamp,
+                           cs.power, cs.assisted, cs.transmitter, cs.ops, cs.bands
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, contest, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        GROUP BY callsign, contest
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.contest = latest.contest
+                        AND cs.timestamp = latest.max_ts
+                )
+            """
+            
+            if contest:
+                query += " WHERE contest = ?"
+                params = (contest,)
+            else:
+                params = ()
+            
+            # Power category statistics
+            cursor.execute(query + """
+                SELECT 
+                    contest,
+                    power,
+                    COUNT(*) as count,
+                    GROUP_CONCAT(callsign) as stations
+                FROM latest_scores
+                WHERE power IS NOT NULL
+                GROUP BY contest, power
+                ORDER BY contest, power
+            """, params)
+            power_stats = cursor.fetchall()
+            
+            # Assisted category statistics
+            cursor.execute(query + """
+                SELECT 
+                    contest,
+                    assisted,
+                    COUNT(*) as count,
+                    GROUP_CONCAT(callsign) as stations
+                FROM latest_scores
+                WHERE assisted IS NOT NULL
+                GROUP BY contest, assisted
+                ORDER BY contest, assisted
+            """, params)
+            assisted_stats = cursor.fetchall()
+            
+            # Transmitter category statistics
+            cursor.execute(query + """
+                SELECT 
+                    contest,
+                    transmitter,
+                    COUNT(*) as count,
+                    GROUP_CONCAT(callsign) as stations
+                FROM latest_scores
+                WHERE transmitter IS NOT NULL
+                GROUP BY contest, transmitter
+                ORDER BY contest, transmitter
+            """, params)
+            transmitter_stats = cursor.fetchall()
+            
+            # Operator category statistics
+            cursor.execute(query + """
+                SELECT 
+                    contest,
+                    ops,
+                    COUNT(*) as count,
+                    GROUP_CONCAT(callsign) as stations
+                FROM latest_scores
+                WHERE ops IS NOT NULL
+                GROUP BY contest, ops
+                ORDER BY contest, ops
+            """, params)
+            operator_stats = cursor.fetchall()
+            
+            # Band category statistics
+            cursor.execute(query + """
+                SELECT 
+                    contest,
+                    bands,
+                    COUNT(*) as count,
+                    GROUP_CONCAT(callsign) as stations
+                FROM latest_scores
+                WHERE bands IS NOT NULL
+                GROUP BY contest, bands
+                ORDER BY contest, bands
+            """, params)
+            band_stats = cursor.fetchall()
+            
+            # Display results
+            contest_str = f" for {contest}" if contest else ""
+            print(f"\n=== Operating Category Statistics{contest_str} ===\n")
+            
+            # Function to format statistics
+            def format_category_stats(stats, category_name):
+                if not stats:
+                    return
+                
+                print(f"\n{category_name} Categories:")
+                print("-" * (len(category_name) + 11))
+                
+                current_contest = None
+                data = []
+                
+                for row in stats:
+                    if not contest and current_contest != row[0]:
+                        if data:
+                            print(tabulate(data, headers=['Category', 'Count', 'Stations'], 
+                                        tablefmt='grid'))
+                            data = []
+                        current_contest = row[0]
+                        print(f"\nContest: {current_contest}")
+                    
+                    # Truncate station list if too long
+                    stations = row[3].split(',')
+                    station_str = ', '.join(stations[:5])
+                    if len(stations) > 5:
+                        station_str += f" (and {len(stations)-5} more)"
+                    
+                    data.append([row[1] or 'Unknown', row[2], station_str])
+                
+                if data:
+                    print(tabulate(data, headers=['Category', 'Count', 'Stations'], 
+                                tablefmt='grid'))
+            
+            # Display all category statistics
+            format_category_stats(power_stats, "Power")
+            format_category_stats(assisted_stats, "Assisted")
+            format_category_stats(transmitter_stats, "Transmitter")
+            format_category_stats(operator_stats, "Operator")
+            format_category_stats(band_stats, "Band")
+            
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return False
+    return True
+
 def show_database_structure(db_path):
     """Display the database structure including tables, columns, and indexes"""
     try:
@@ -143,8 +292,14 @@ def main():
                       help='Show QTH statistics')
     parser.add_argument('--structure', action='store_true',
                       help='Show database structure')
+    parser.add_argument('--categories', action='store_true',
+                      help='Show operating category statistics')
 
     args = parser.parse_args()
+
+    if args.categories:
+        show_operating_categories(args.db, args.contest)
+        return
 
     if args.structure:
         show_database_structure(args.db)
