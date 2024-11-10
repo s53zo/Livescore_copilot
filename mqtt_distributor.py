@@ -374,48 +374,16 @@ class ContestMQTTPublisher(ContestDataSubscriber):
             return []
 
     def build_payload(self, record):
-        """Build JSON payload including record details and contest totals"""
+        """Build JSON payload with just the station's contest data"""
         try:
             score_data = record['score_data']
             qth_data = record['qth_data']
-            
-            # Get contest and timestamp from the record
-            contest = score_data[2]
-            timestamp = score_data[1]
-            
-            # Get current totals for this contest
-            contest_totals = self.get_contest_totals(contest, timestamp)
-            
-            # Build band breakdown
-            bands = {}
-            if record['band_data']:
-                for band_info in record['band_data']:
-                    bands[f"{band_info[0]}m"] = {
-                        "mode": band_info[1],
-                        "qsos": band_info[2],
-                        "points": band_info[3],
-                        "mults": band_info[4]
-                    }
-
-            # Calculate standings
-            overall_rank = 1
-            category_rank = 1
-            total_participants = len(contest_totals)
-            
-            for idx, entry in enumerate(contest_totals):
-                if entry['callsign'] == score_data[3]:
-                    overall_rank = idx + 1
-                    category_rank = sum(1 for x in contest_totals[:idx] 
-                                      if x['power'] == score_data[7] and 
-                                         x['assisted'] == score_data[8] and
-                                         x['transmitter'] == score_data[9]) + 1
-                    break
-
-            # Build main payload
+                
+            # Build payload with just the essential station data
             payload = {
                 "sq": score_data[0],
-                "t": int(datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').timestamp()),
-                "contest": contest,
+                "t": int(datetime.strptime(score_data[1], '%Y-%m-%d %H:%M:%S').timestamp()),
+                "contest": score_data[2],
                 "callsign": score_data[3],
                 "score": score_data[4],
                 "qsos": score_data[5],
@@ -423,27 +391,21 @@ class ContestMQTTPublisher(ContestDataSubscriber):
                 "power": score_data[7],
                 "assisted": score_data[8],
                 "tx": score_data[9],
-                "bands": bands,
-                
-                "standings": {
-                    "overall_rank": overall_rank,
-                    "category_rank": category_rank,
-                    "total_participants": total_participants,
-                    "leading_scores": [
-                        {
-                            "callsign": entry['callsign'],
-                            "score": entry['score'],
-                            "qsos": entry['qsos'],
-                            "power": entry['power'],
-                            "assisted": entry['assisted'],
-                            "transmitter": entry['transmitter'],
-                            "band_qsos": entry['band_qsos']
-                        }
-                        for entry in contest_totals[:10]  # Top 10 scores
-                    ]
-                }
+                "bands": {},
             }
-                        
+    
+            # Add band breakdown if available
+            if record['band_data']:
+                for band_info in record['band_data']:
+                    band_key = f"{band_info[0]}m"
+                    payload["bands"][band_key] = {
+                        "mode": band_info[1],
+                        "qsos": band_info[2],
+                        "points": band_info[3],
+                        "mults": band_info[4]
+                    }
+    
+            # Add QTH info if available
             if qth_data:
                 payload["qth"] = {
                     "dxcc": qth_data[0],
@@ -453,9 +415,9 @@ class ContestMQTTPublisher(ContestDataSubscriber):
                     "state": qth_data[4],
                     "grid": qth_data[5]
                 }
-            
+    
             return json.dumps(payload)
-            
+                
         except Exception as e:
             self.logger.error(f"Error building payload: {e}")
             self.logger.debug(traceback.format_exc())
