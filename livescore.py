@@ -14,6 +14,7 @@ import threading
 import time
 import queue
 from callsign_utils import CallsignLookup
+import asyncio
 
 # Add BatchProcessor class at the top level, before ContestDatabaseHandler
 class BatchProcessor:
