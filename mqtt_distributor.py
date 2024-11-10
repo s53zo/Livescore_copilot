@@ -292,30 +292,15 @@ class ContestMQTTPublisher(ContestDataSubscriber):
         self.logger.debug(f"MQTT Log: {buf}")
 
     def build_topic(self, record):
-        """
-        Build MQTT topic hierarchy from contest record.
-        Format: contest/live/v1/{contest}/{band}/{mode}/{callsign}/{power}/{category}
-        """
-        score_data = record['score_data']
-        contest = score_data[2].replace(' ', '_')
-        callsign = score_data[3]
-        power = score_data[7] or 'unknown'
-        assisted = score_data[8] or 'unknown'
-        transmitter = score_data[9] or 'unknown'
-        
-        # Get band and mode from band breakdown if available
-        band = "unknown"
-        mode = "unknown"
-        if record['band_data']:
-            first_band = record['band_data'][0]
-            band = f"{first_band[0]}m"
-            mode = first_band[1]
-        
-        # Normalize category components
-        power = power.lower()
-        category = f"{assisted.lower()}_{transmitter.lower()}"
-        
-        return f"contest/live/v1/{contest}/{band}/{mode}/{callsign}/{power}/{category}"
+    """
+    Build MQTT topic hierarchy from contest record.
+    Format: contest/live/v1/{contest}/{callsign}
+    """
+    score_data = record['score_data']
+    contest = score_data[2].replace(' ', '_')
+    callsign = score_data[3]
+    
+    return f"contest/live/v1/{contest}/{callsign}"
 
     def get_contest_totals(self, contest, timestamp):
         """Get current contest totals including band breakdowns"""
