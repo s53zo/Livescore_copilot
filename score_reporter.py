@@ -210,7 +210,6 @@ class ScoreReporter:
         return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
 
     @staticmethod
-    @staticmethod
     def get_operator_category(operator, transmitter, assisted):
         """Map operation categories based on defined rules"""
         # Ensure all values have defaults if None
