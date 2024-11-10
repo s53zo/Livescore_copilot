@@ -87,10 +87,10 @@ class BatchProcessor:
             time.sleep(sleep_time)
 
 class ContestDatabaseHandler:
-    def __init__(self, db_path='contest_data.db'):
+    def __init__(self, db_path='contest_data.db', mqtt_host='localhost', mqtt_port=1883,
+                 mqtt_username=None, mqtt_password=None, mqtt_use_tls=False):
         self.db_path = db_path
         self.callsign_lookup = CallsignLookup()
-        self.mqtt_forwarder = mqtt_forwarder
         self.setup_database()
         self.batch_processor = BatchProcessor(self)
         self.batch_processor.start()
@@ -98,12 +98,19 @@ class ContestDatabaseHandler:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
 
+        # Create MQTT forwarder instance
+        self.mqtt_forwarder = AsyncMQTTForwarder(
+            self.db_path, mqtt_host, mqtt_port, mqtt_username, mqtt_password, mqtt_use_tls
+        )
+        self.mqtt_forwarder.start()
+
     def process_submission(self, xml_data):
         """Add submission to batch instead of processing immediately"""
         self.batch_processor.add_to_batch(xml_data)
 
     def cleanup(self):
         self.batch_processor.stop()
+        self.mqtt_forwarder.stop()
         if hasattr(self, 'loop'):
             self.loop.close()
 
