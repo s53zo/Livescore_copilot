@@ -166,19 +166,53 @@ class ScoreReporter:
         self.setup_logging()
         self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
 
-
     def setup_logging(self):
-        """Setup logging configuration"""
-        self.logger = logging.getLogger('ScoreReporter')
-        if not self.logger.handlers:
-            formatter = logging.Formatter(
+        """Setup logging configuration with both file and console handlers"""
+        try:
+            # Create logger
+            self.logger = logging.getLogger('ScoreReporter')
+            self.logger.setLevel(logging.DEBUG)
+            
+            # Clear any existing handlers
+            if self.logger.handlers:
+                self.logger.handlers.clear()
+            
+            # Create logs directory if it doesn't exist
+            log_dir = '/opt/livescore/logs'
+            os.makedirs(log_dir, exist_ok=True)
+            
+            # Create formatters
+            detailed_formatter = logging.Formatter(
                 '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
             )
-            file_handler = logging.FileHandler('/opt/livescore/logs/score_reporter.log')
-            file_handler.setFormatter(formatter)
+            console_formatter = logging.Formatter(
+                '%(asctime)s - %(levelname)s - %(message)s'
+            )
+            
+            # File handler for detailed debugging
+            debug_log = os.path.join(log_dir, 'score_reporter.log')
+            file_handler = logging.FileHandler(debug_log)
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(detailed_formatter)
+            
+            # Console handler for basic info
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(logging.INFO)
+            console_handler.setFormatter(console_formatter)
+            
+            # Add handlers to logger
             self.logger.addHandler(file_handler)
-            self.logger.setLevel(logging.DEBUG)
-
+            self.logger.addHandler(console_handler)
+            
+            # Log startup message
+            self.logger.info("Score Reporter logging initialized")
+            self.logger.debug(f"Debug log file: {debug_log}")
+            
+        except Exception as e:
+            print(f"Error setting up logging: {e}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
+            raise
+        
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """Get station details and all competitors with optional filtering"""
         try:
