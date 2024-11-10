@@ -214,3 +214,206 @@ class ScoreReporter:
         """Map operation categories based on defined rules"""
         # Handle empty/NULL assisted value - default to NON-ASSISTED
         assisted = assisted if assisted else 'NON-ASSISTED'
+
+    def generate_html_content(self, template, callsign, contest, stations):
+        """Generate HTML content with updated category display and rate comparisons"""
+        try:
+            # Get reference station (the monitored station) for rate comparisons
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+            reference_total_rates = (0, 0)  # Default if not found
+            reference_breakdown = {}
+            
+            if reference_station:
+                # Get reference station's total rates
+                reference_total_rates = self.get_total_rates(
+                    reference_station[0], callsign, contest, reference_station[5]
+                )
+                # Get reference station's band breakdown
+                reference_breakdown = self.get_band_breakdown_with_rates(
+                    reference_station[0], callsign, contest, reference_station[5]
+                )
+    
+            table_rows = []
+            for i, station in enumerate(stations, 1):
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+                
+                # Get additional category information from database
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT ops, transmitter
+                        FROM contest_scores
+                        WHERE id = ?
+                    """, (station_id,))
+                    result = cursor.fetchone()
+                    ops = result[0] if result else None
+                    transmitter = result[1] if result else None
+    
+                # Calculate operator category
+                op_category = self.get_operator_category(ops or 'SINGLE-OP', 
+                                                       transmitter or 'ONE', 
+                                                       assisted or 'NON-ASSISTED')
+                
+                # Format power class tag
+                power_class = power.upper() if power else 'Unknown'
+                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
+                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
+                
+                # Create category display
+                category_html = f"""
+                    <div class="category-group">
+                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
+                        {power_tag}
+                    </div>
+                """
+                
+                # Get band breakdown with rates
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                
+                # Calculate total rates for this station
+                total_long_rate, total_short_rate = self.get_total_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                
+                # Format timestamp
+                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                
+                # Generate table row
+                row = f"""
+                <tr{' class="highlight"' if callsign_val == callsign else ''}>
+                    <td>{i}</td>
+                    <td>{callsign_val}</td>
+                    <td>{category_html}</td>
+                    <td>{score:,}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate, 
+                        reference_total_rates[0], reference_total_rates[1])}</td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                </tr>"""
+                table_rows.append(row)
+    
+            # Format final HTML
+            html_content = template.format(
+                contest=contest,
+                callsign=callsign,
+                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                power=stations[0][3],
+                assisted=stations[0][4],
+                filter_info_div=self._get_filter_info_div(contest, callsign),
+                table_rows='\n'.join(table_rows),
+                additional_css=self._get_additional_css()
+            )
+            
+            return html_content
+    
+        except Exception as e:
+            self.logger.error(f"Error generating HTML content: {e}")
+            self.logger.error(traceback.format_exc())
+            raise
+    
+    def _get_additional_css(self):
+        """Return additional CSS styles for the report"""
+        return """
+            <style>
+                .category-group {
+                    display: inline-flex;
+                    gap: 4px;
+                    font-size: 0.75rem;
+                    line-height: 1;
+                    align-items: center;
+                }
+                
+                .category-tag {
+                    display: inline-block;
+                    padding: 3px 6px;
+                    border-radius: 3px;
+                    white-space: nowrap;
+                    font-family: monospace;
+                }
+                
+                /* Category colors */
+                .cat-power-high { background: #ffebee; color: #c62828; }
+                .cat-power-low { background: #e8f5e9; color: #2e7d32; }
+                .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
+                
+                .cat-soa { background: #e3f2fd; color: #1565c0; }
+                .cat-so { background: #f3e5f5; color: #6a1b9a; }
+                .cat-ms { background: #fff8e1; color: #ff8f00; }
+                .cat-mm { background: #f1f8e9; color: #558b2f; }
+            </style>
+        """
+    
+    def _get_filter_info_div(self, contest, callsign):
+        """Generate filter information div"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                           qi.arrl_section, qi.state_province, qi.continent
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.callsign = ? AND cs.contest = ?
+                    ORDER BY cs.timestamp DESC
+                    LIMIT 1
+                """, (callsign, contest))
+                qth_info = cursor.fetchone()
+                
+                if not qth_info:
+                    return ""
+                    
+                filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
+                               "State/Province", "Continent"]
+                filter_parts = []
+                
+                # Get current filter from request object if available
+                try:
+                    from flask import request
+                    current_filter_type = request.args.get('filter_type', 'none')
+                    current_filter_value = request.args.get('filter_value', 'none')
+                except:
+                    current_filter_type = 'none'
+                    current_filter_value = 'none'
+                
+                for label, value in zip(filter_labels, qth_info):
+                    if value:
+                        if current_filter_type == label and current_filter_value == value:
+                            filter_parts.append(
+                                f'<span class="active-filter">{label}: {value}</span>'
+                            )
+                        else:
+                            filter_parts.append(
+                                f'<a href="/reports/live.html?contest={contest}'
+                                f'&callsign={callsign}&filter_type={label}'
+                                f'&filter_value={value}" class="filter-link">'
+                                f'{label}: {value}</a>'
+                            )
+                
+                if filter_parts:
+                    if current_filter_type != 'none':
+                        filter_parts.append(
+                            f'<a href="/reports/live.html?contest={contest}'
+                            f'&callsign={callsign}&filter_type=none'
+                            f'&filter_value=none" class="filter-link clear-filter">'
+                            f'Show All</a>'
+                        )
+                    
+                    return f"""
+                    <div class="filter-info">
+                        <span class="filter-label">Filters:</span> 
+                        {' | '.join(filter_parts)}
+                    </div>
+                    """
+                
+                return ""
+                
+        except Exception as e:
+            self.logger.error(f"Error generating filter info: {e}")
+            return ""
