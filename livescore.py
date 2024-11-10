@@ -15,6 +15,7 @@ import time
 import queue
 from callsign_utils import CallsignLookup
 import asyncio
+from mqtt_forwarder import AsyncMQTTForwarder
 
 # Add BatchProcessor class at the top level, before ContestDatabaseHandler
 class BatchProcessor:
