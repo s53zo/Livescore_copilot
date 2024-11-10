@@ -486,7 +486,8 @@ class ScoreReporter:
                 
                 # Format power class tag
                 power_class = power.upper() if power else 'Unknown'
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{power_class}</span>'
+                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
+                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
                 
                 # Create category display
                 category_html = f"""
