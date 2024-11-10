@@ -90,9 +90,13 @@ class ContestDatabaseHandler:
     def __init__(self, db_path='contest_data.db'):
         self.db_path = db_path
         self.callsign_lookup = CallsignLookup()
+        self.mqtt_forwarder = mqtt_forwarder
         self.setup_database()
         self.batch_processor = BatchProcessor(self)
         self.batch_processor.start()
+        # Create event loop for async operations
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
 
     def process_submission(self, xml_data):
         """Add submission to batch instead of processing immediately"""
@@ -310,7 +314,13 @@ class ContestDatabaseHandler:
                             band_data['qsos'], band_data['points'],
                             band_data['multipliers']
                         ))
-                            
+
+                    if self.mqtt_forwarder:
+                        asyncio.run_coroutine_threadsafe(
+                            self.mqtt_forwarder.add_message(data),
+                            self.loop
+                        )
+                          
                 except Exception as e:
                     logging.error(f"Error storing data for {data['callsign']}: {e}")
                     logging.debug("Error details:", exc_info=True)
