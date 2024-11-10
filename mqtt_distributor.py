@@ -31,27 +31,52 @@ class ContestDataSubscriber:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # Get new contest_scores records
-                cursor.execute("""
-                    SELECT 
-                        cs.id,
-                        cs.timestamp,
-                        cs.contest,
-                        cs.callsign,
-                        cs.score,
-                        cs.qsos,
-                        cs.multipliers,
-                        cs.power,
-                        cs.assisted,
-                        cs.transmitter
-                    FROM contest_scores cs
-                    WHERE cs.id > ?
-                    ORDER BY cs.id
-                """, (self.last_processed_id,))
+
+                # On first run (last_processed_id = 0), get records from last 5 minutes only
+                if self.last_processed_id == 0:
+                    self.logger.info("First run - getting records from last 5 minutes only")
+                    cursor.execute("""
+                        SELECT 
+                            cs.id,
+                            cs.timestamp,
+                            cs.contest,
+                            cs.callsign,
+                            cs.score,
+                            cs.qsos,
+                            cs.multipliers,
+                            cs.power,
+                            cs.assisted,
+                            cs.transmitter
+                        FROM contest_scores cs
+                        WHERE cs.timestamp >= datetime('now', '-5 minutes')
+                        ORDER BY cs.id
+                    """)
+                else:
+                    # After first run, get records since last processed ID
+                    cursor.execute("""
+                        SELECT 
+                            cs.id,
+                            cs.timestamp,
+                            cs.contest,
+                            cs.callsign,
+                            cs.score,
+                            cs.qsos,
+                            cs.multipliers,
+                            cs.power,
+                            cs.assisted,
+                            cs.transmitter
+                        FROM contest_scores cs
+                        WHERE cs.id > ?
+                        ORDER BY cs.id
+                    """, (self.last_processed_id,))
                 
                 scores = cursor.fetchall()
                 
+                if scores:
+                    self.logger.info(f"Found {len(scores)} new records")
+                    if self.last_processed_id == 0:
+                        self.logger.info("Processing initial records from last 5 minutes")
+                    
                 # If we have new scores, get their associated data
                 results = []
                 for score in scores:
@@ -293,11 +318,11 @@ class ContestMQTTPublisher(ContestDataSubscriber):
                         WHERE cs.contest = ? 
                         AND cs.timestamp <= ?
                         AND (cs.callsign, cs.timestamp) IN (
-                            SELECT callsign, MAX(timestamp)
-                            FROM contest_scores
-                            WHERE contest = ?
-                            AND timestamp <= ?
-                            GROUP BY callsign
+                            SELECT cs2.callsign, MAX(cs2.timestamp)
+                            FROM contest_scores cs2
+                            WHERE cs2.contest = ?
+                            AND cs2.timestamp <= ?
+                            GROUP BY cs2.callsign
                         )
                     )
                     SELECT 
@@ -319,11 +344,14 @@ class ContestMQTTPublisher(ContestDataSubscriber):
                     
                     # Get band breakdown
                     cursor.execute("""
-                        SELECT band, SUM(qsos) as total_qsos
+                        SELECT bb.band, SUM(bb.qsos) as total_qsos
                         FROM contest_scores cs
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                        WHERE cs.callsign = ? AND cs.contest = ? AND cs.timestamp = ?
+                        WHERE cs.callsign = ? 
+                        AND cs.contest = ? 
+                        AND cs.timestamp = ?
                         GROUP BY bb.band
+                        ORDER BY bb.band
                     """, (callsign, contest, ts))
                     
                     band_qsos = {row[0]: row[1] for row in cursor.fetchall()}
@@ -338,6 +366,7 @@ class ContestMQTTPublisher(ContestDataSubscriber):
                         'band_qsos': band_qsos
                     })
                 
+                self.logger.debug(f"Retrieved scores for {len(results)} stations in {contest}")
                 return results
                 
         except Exception as e:
