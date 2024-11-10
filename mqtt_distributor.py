@@ -10,6 +10,118 @@ import sqlite3
 import argparse
 import traceback
 
+class ContestDataSubscriber:
+    """Base class for subscribing to contest database updates"""
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self.last_processed_id = 0
+        self.running = True
+        
+        # Setup signal handlers
+        signal.signal(signal.SIGINT, self.handle_shutdown)
+        signal.signal(signal.SIGTERM, self.handle_shutdown)
+
+    def handle_shutdown(self, signum, frame):
+        """Handle shutdown signals gracefully"""
+        self.logger.info("Received shutdown signal, stopping...")
+        self.running = False
+
+    def get_new_records(self):
+        """Fetch new records from the database since last check"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get new contest_scores records
+                cursor.execute("""
+                    SELECT 
+                        cs.id,
+                        cs.timestamp,
+                        cs.contest,
+                        cs.callsign,
+                        cs.score,
+                        cs.qsos,
+                        cs.multipliers,
+                        cs.power,
+                        cs.assisted,
+                        cs.transmitter
+                    FROM contest_scores cs
+                    WHERE cs.id > ?
+                    ORDER BY cs.id
+                """, (self.last_processed_id,))
+                
+                scores = cursor.fetchall()
+                
+                # If we have new scores, get their associated data
+                results = []
+                for score in scores:
+                    score_id = score[0]
+                    
+                    # Get band breakdown
+                    cursor.execute("""
+                        SELECT band, mode, qsos, points, multipliers
+                        FROM band_breakdown
+                        WHERE contest_score_id = ?
+                    """, (score_id,))
+                    band_data = cursor.fetchall()
+                    
+                    # Get QTH info
+                    cursor.execute("""
+                        SELECT dxcc_country, cq_zone, iaru_zone, 
+                               arrl_section, state_province, grid6
+                        FROM qth_info
+                        WHERE contest_score_id = ?
+                    """, (score_id,))
+                    qth_data = cursor.fetchone()
+                    
+                    # Combine all data
+                    results.append({
+                        'score_data': score,
+                        'band_data': band_data,
+                        'qth_data': qth_data
+                    })
+                    
+                    # Update last processed ID
+                    self.last_processed_id = score_id
+                
+                return results
+                    
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error fetching new records: {e}")
+            return None
+
+    def process_record(self, record):
+        """Process a new contest record - override this in subclasses"""
+        raise NotImplementedError("Subclasses must implement process_record")
+
+    def run(self):
+        """Main processing loop"""
+        self.logger.info("Starting data subscriber...")
+        
+        while self.running:
+            try:
+                # Get new records
+                records = self.get_new_records()
+                
+                if records:
+                    self.logger.info(f"Found {len(records)} new records")
+                    for record in records:
+                        self.process_record(record)
+                
+                # Wait before next check
+                time.sleep(5)  # 5 second polling interval
+                
+            except Exception as e:
+                self.logger.error(f"Error in processing loop: {e}")
+                time.sleep(5)
+
+    def cleanup(self):
+        """Cleanup resources"""
+        pass
+
 class ContestMQTTPublisher(ContestDataSubscriber):
     def __init__(self, db_path, mqtt_config, debug=False):
         """
@@ -33,7 +145,7 @@ class ContestMQTTPublisher(ContestDataSubscriber):
         
         # Setup MQTT client
         self.setup_mqtt()
-        
+
     def setup_logging(self, debug=False):
         """Configure detailed logging"""
         self.logger = logging.getLogger('ContestMQTTPublisher')
@@ -138,6 +250,187 @@ class ContestMQTTPublisher(ContestDataSubscriber):
         """Callback for MQTT client logging"""
         self.logger.debug(f"MQTT Log: {buf}")
 
+    def build_topic(self, record):
+        """
+        Build MQTT topic hierarchy from contest record.
+        Format: contest/live/v1/{contest}/{band}/{mode}/{callsign}/{power}/{category}
+        """
+        score_data = record['score_data']
+        contest = score_data[2].replace(' ', '_')
+        callsign = score_data[3]
+        power = score_data[7] or 'unknown'
+        assisted = score_data[8] or 'unknown'
+        transmitter = score_data[9] or 'unknown'
+        
+        # Get band and mode from band breakdown if available
+        band = "unknown"
+        mode = "unknown"
+        if record['band_data']:
+            first_band = record['band_data'][0]
+            band = f"{first_band[0]}m"
+            mode = first_band[1]
+        
+        # Normalize category components
+        power = power.lower()
+        category = f"{assisted.lower()}_{transmitter.lower()}"
+        
+        return f"contest/live/v1/{contest}/{band}/{mode}/{callsign}/{power}/{category}"
+
+    def get_contest_totals(self, contest, timestamp):
+        """Get current contest totals including band breakdowns"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get latest scores for all stations in this contest
+                cursor.execute("""
+                    WITH latest_scores AS (
+                        SELECT cs.id, cs.callsign, cs.score, cs.qsos, cs.power,
+                               cs.timestamp, cs.assisted, cs.transmitter
+                        FROM contest_scores cs
+                        WHERE cs.contest = ? 
+                        AND cs.timestamp <= ?
+                        AND (cs.callsign, cs.timestamp) IN (
+                            SELECT callsign, MAX(timestamp)
+                            FROM contest_scores
+                            WHERE contest = ?
+                            AND timestamp <= ?
+                            GROUP BY callsign
+                        )
+                    )
+                    SELECT 
+                        ls.callsign,
+                        ls.score,
+                        ls.qsos,
+                        ls.power,
+                        ls.assisted,
+                        ls.transmitter,
+                        ls.id,
+                        ls.timestamp
+                    FROM latest_scores ls
+                    ORDER BY ls.score DESC
+                """, (contest, timestamp, contest, timestamp))
+                
+                results = []
+                for row in cursor.fetchall():
+                    callsign, score, qsos, power, assisted, transmitter, score_id, ts = row
+                    
+                    # Get band breakdown
+                    cursor.execute("""
+                        SELECT band, SUM(qsos) as total_qsos
+                        FROM contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        WHERE cs.callsign = ? AND cs.contest = ? AND cs.timestamp = ?
+                        GROUP BY bb.band
+                    """, (callsign, contest, ts))
+                    
+                    band_qsos = {row[0]: row[1] for row in cursor.fetchall()}
+                    
+                    results.append({
+                        'callsign': callsign,
+                        'score': score,
+                        'qsos': qsos,
+                        'power': power,
+                        'assisted': assisted,
+                        'transmitter': transmitter,
+                        'band_qsos': band_qsos
+                    })
+                
+                return results
+                
+        except Exception as e:
+            self.logger.error(f"Error getting contest totals: {e}")
+            self.logger.debug(traceback.format_exc())
+            return []
+
+    def build_payload(self, record):
+        """Build JSON payload including record details and contest totals"""
+        try:
+            score_data = record['score_data']
+            qth_data = record['qth_data']
+            
+            # Get contest and timestamp from the record
+            contest = score_data[2]
+            timestamp = score_data[1]
+            
+            # Get current totals for this contest
+            contest_totals = self.get_contest_totals(contest, timestamp)
+            
+            # Build band breakdown
+            bands = {}
+            if record['band_data']:
+                for band_info in record['band_data']:
+                    bands[f"{band_info[0]}m"] = {
+                        "mode": band_info[1],
+                        "qsos": band_info[2],
+                        "points": band_info[3],
+                        "mults": band_info[4]
+                    }
+
+            # Calculate standings
+            overall_rank = 1
+            category_rank = 1
+            total_participants = len(contest_totals)
+            
+            for idx, entry in enumerate(contest_totals):
+                if entry['callsign'] == score_data[3]:
+                    overall_rank = idx + 1
+                    category_rank = sum(1 for x in contest_totals[:idx] 
+                                      if x['power'] == score_data[7] and 
+                                         x['assisted'] == score_data[8] and
+                                         x['transmitter'] == score_data[9]) + 1
+                    break
+
+            # Build main payload
+            payload = {
+                "sq": score_data[0],
+                "t": int(datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').timestamp()),
+                "contest": contest,
+                "callsign": score_data[3],
+                "score": score_data[4],
+                "qsos": score_data[5],
+                "mults": score_data[6],
+                "power": score_data[7],
+                "assisted": score_data[8],
+                "tx": score_data[9],
+                "bands": bands,
+                
+                "standings": {
+                    "overall_rank": overall_rank,
+                    "category_rank": category_rank,
+                    "total_participants": total_participants,
+                    "leading_scores": [
+                        {
+                            "callsign": entry['callsign'],
+                            "score": entry['score'],
+                            "qsos": entry['qsos'],
+                            "power": entry['power'],
+                            "assisted": entry['assisted'],
+                            "transmitter": entry['transmitter'],
+                            "band_qsos": entry['band_qsos']
+                        }
+                        for entry in contest_totals[:10]  # Top 10 scores
+                    ]
+                }
+            }
+                        
+            if qth_data:
+                payload["qth"] = {
+                    "dxcc": qth_data[0],
+                    "cqz": qth_data[1],
+                    "ituz": qth_data[2],
+                    "section": qth_data[3],
+                    "state": qth_data[4],
+                    "grid": qth_data[5]
+                }
+            
+            return json.dumps(payload)
+            
+        except Exception as e:
+            self.logger.error(f"Error building payload: {e}")
+            self.logger.debug(traceback.format_exc())
+            return None
+
     def process_record(self, record):
         """Process and publish contest record with enhanced logging"""
         try:
@@ -147,19 +440,31 @@ class ContestMQTTPublisher(ContestDataSubscriber):
             topic = self.build_topic(record)
             payload = self.build_payload(record)
             
-            self.logger.debug(f"Publishing to topic: {topic}")
-            self.logger.debug(f"Payload: {payload}")
-            
-            # Publish with QoS 1 and get message info
-            info = self.mqtt_client.publish(topic, payload, qos=1)
-            
-            if info.rc == mqtt.MQTT_ERR_SUCCESS:
-                self.logger.debug(f"Message queued successfully with ID: {info.mid}")
-            else:
-                self.logger.error(f"Failed to queue message, error code: {info.rc}")
-            
+            if payload:
+                self.logger.debug(f"Publishing to topic: {topic}")
+                self.logger.debug(f"Payload: {payload}")
+                
+                # Publish with QoS 1 and get message info
+                info = self.mqtt_client.publish(topic, payload, qos=1)
+                
+                if info.rc == mqtt.MQTT_ERR_SUCCESS:
+                    self.logger.debug(f"Message queued successfully with ID: {info.mid}")
+                else:
+                    self.logger.error(f"Failed to queue message, error code: {info.rc}")
+                
         except Exception as e:
             self.logger.error(f"Error publishing record: {e}")
+            self.logger.debug(traceback.format_exc())
+
+    def cleanup(self):
+        """Cleanup resources and stop MQTT client"""
+        try:
+            self.logger.info("Stopping MQTT client...")
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
+            self.logger.info("MQTT client stopped")
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
             self.logger.debug(traceback.format_exc())
 
 def parse_arguments():
