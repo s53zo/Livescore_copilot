@@ -103,8 +103,9 @@ class ContestDatabaseHandler:
         self.batch_processor.add_to_batch(xml_data)
 
     def cleanup(self):
-        """Cleanup resources"""
         self.batch_processor.stop()
+        if hasattr(self, 'loop'):
+            self.loop.close()
 
     def setup_database(self):
         """Create the database tables if they don't exist."""
