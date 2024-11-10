@@ -210,10 +210,36 @@ class ScoreReporter:
         return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
 
     @staticmethod
+    @staticmethod
     def get_operator_category(operator, transmitter, assisted):
         """Map operation categories based on defined rules"""
-        # Handle empty/NULL assisted value - default to NON-ASSISTED
-        assisted = assisted if assisted else 'NON-ASSISTED'
+        # Ensure all values have defaults if None
+        operator = (operator or 'SINGLE-OP').upper()
+        transmitter = (transmitter or 'ONE').upper()
+        assisted = (assisted or 'NON-ASSISTED').upper()
+        
+        category_map = {
+            ('SINGLE-OP', 'ONE', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'ONE', 'NON-ASSISTED'): 'SO',
+            ('SINGLE-OP', 'TWO', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'TWO', 'NON-ASSISTED'): 'SO',
+            ('SINGLE-OP', 'UNLIMITED', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'UNLIMITED', 'NON-ASSISTED'): 'SO',
+            ('CHECKLOG', 'ONE', 'NON-ASSISTED'): 'SO',
+            ('CHECKLOG', 'ONE', 'ASSISTED'): 'SOA',
+            ('MULTI-OP', 'ONE', 'ASSISTED'): 'M/S',
+            ('MULTI-OP', 'ONE', 'NON-ASSISTED'): 'M/S',
+            ('MULTI-OP', 'TWO', 'ASSISTED'): 'M/S',
+            ('MULTI-OP', 'TWO', 'NON-ASSISTED'): 'M/S',
+            ('MULTI-OP', 'UNLIMITED', 'ASSISTED'): 'M/M',
+            ('MULTI-OP', 'UNLIMITED', 'NON-ASSISTED'): 'M/M'
+        }
+        
+        # Create lookup key with the standardized values
+        lookup_key = (operator, transmitter, assisted)
+        
+        # Return mapped category or default to 'SO' if no match
+        return category_map.get(lookup_key, 'SO')
 
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with updated category display and rate comparisons"""
@@ -255,10 +281,14 @@ class ScoreReporter:
                                                        assisted or 'NON-ASSISTED')
                 
                 # Format power class tag
-                power_class = power.upper() if power else 'Unknown'
-                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
+                power_class = (power.upper() if power else 'UNKNOWN')
+                display_power = {
+                    'HIGH': 'H',
+                    'LOW': 'L',
+                    'QRP': 'Q'
+                }.get(power_class, 'U')
                 power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
-                
+
                 # Create category display
                 category_html = f"""
                     <div class="category-group">
