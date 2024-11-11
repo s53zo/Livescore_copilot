@@ -354,6 +354,36 @@ class ScoreReporter:
             return 0, 0
 
 
+    def generate_html(self, callsign, contest, stations, output_dir):
+        """Generate HTML report and save it to the output directory"""
+        if not stations:
+            self.logger.error("No station data available")
+            return False
+    
+        try:
+            # Load template
+            with open(self.template_path, 'r', encoding='utf-8') as f:
+                template = f.read()
+    
+            # Generate HTML content
+            html_content = self.generate_html_content(template, callsign, contest, stations)
+    
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Write HTML file
+            output_file = os.path.join(output_dir, 'live.html')
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+                
+            self.logger.info(f"Report generated successfully: {output_file}")
+            return True
+    
+        except Exception as e:
+            self.logger.error(f"Error generating HTML report: {e}")
+            self.logger.error(traceback.format_exc())
+            return False
+            
     def format_band_data(self, band_data, reference_rates=None, band=None):
         """Format band data as QSO/Mults (60h/15h) with rate comparison"""
         if band_data:
