@@ -215,11 +215,37 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details and all competitors with optional filtering"""
+        """Get station details and all competitors in the same category with optional filtering"""
+        self.logger.debug("=" * 50)
+        self.logger.debug("get_station_details called with parameters:")
+        self.logger.debug(f"Contest: {contest}")
+        self.logger.debug(f"Callsign: {callsign}")
+        self.logger.debug(f"Filter type: {filter_type}")
+        self.logger.debug(f"Filter value: {filter_value}")
+        self.logger.debug("=" * 50)
+    
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-    
+                
+                # First get the reference station's details
+                cursor.execute("""
+                    SELECT cs.id, cs.power, cs.assisted
+                    FROM contest_scores cs
+                    WHERE cs.contest = ? 
+                    AND cs.callsign = ?
+                    ORDER BY cs.timestamp DESC
+                    LIMIT 1
+                """, (contest, callsign))
+                
+                station_record = cursor.fetchone()
+                if not station_record:
+                    self.logger.error(f"No records found for {callsign} in {contest}")
+                    return None
+                
+                station_id, station_power, station_assisted = station_record
+                self.logger.debug(f"Reference station - Power: {station_power}, Assisted: {station_assisted}")
+                
                 # Base query with QTH info join
                 query = """
                     WITH latest_scores AS (
@@ -235,8 +261,7 @@ class ScoreReporter:
                             qi.cq_zone,
                             qi.iaru_zone,
                             qi.arrl_section,
-                            qi.state_province,
-                            qi.continent
+                            qi.state_province
                         FROM contest_scores cs
                         INNER JOIN latest_scores ls 
                             ON cs.callsign = ls.callsign 
@@ -244,20 +269,21 @@ class ScoreReporter:
                         LEFT JOIN qth_info qi 
                             ON qi.contest_score_id = cs.id
                         WHERE cs.contest = ?
-                        AND cs.qsos > 0
+                        AND (cs.callsign = ? 
+                             OR (cs.power = ? AND cs.assisted = ?))
                 """
                 
-                params = [contest, contest]
+                params = [contest, contest, callsign, station_power, station_assisted]
     
-                # Add filter conditions if specified
-                if filter_type and filter_value and filter_type.lower() != 'none':
+                # Add filter conditions only if both type and value are provided and not 'none'
+                if (filter_type and filter_value and 
+                    filter_type.lower() != 'none' and filter_value.lower() != 'none'):
                     filter_map = {
                         'DXCC': 'dxcc_country',
                         'CQ Zone': 'cq_zone',
                         'IARU Zone': 'iaru_zone',
                         'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province',
-                        'Continent': 'continent'
+                        'State/Province': 'state_province'
                     }
                     
                     db_field = filter_map.get(filter_type)
@@ -286,12 +312,18 @@ class ScoreReporter:
                     ORDER BY ss.score DESC
                 """
                 
+                # Add callsign parameters for the CASE statement
                 params.extend([callsign, callsign])
+                
+                self.logger.debug(f"Executing query with params: {params}")
                 cursor.execute(query, params)
-                return cursor.fetchall()
-                    
+                stations = cursor.fetchall()
+                
+                self.logger.debug(f"Query returned {len(stations)} stations")
+                return stations
+                        
         except Exception as e:
-            self.logger.error(f"Error in get_station_details: {e}")
+            self.logger.error(f"Unexpected error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
             return None
 
