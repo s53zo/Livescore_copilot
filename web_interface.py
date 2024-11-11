@@ -104,8 +104,8 @@ def live_report():
         # Get parameters from URL
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type', 'none')
-        filter_value = request.args.get('filter_value', 'none')
+        filter_type = request.args.get('filter_type', 'none')  # Default to 'none' if not provided
+        filter_value = request.args.get('filter_value', 'none')  # Default to 'none' if not provided
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
@@ -116,41 +116,38 @@ def live_report():
         # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
 
-        # Verify contest and callsign exist in database
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) 
-                FROM contest_scores 
-                WHERE contest = ? AND callsign = ?
-            """, (contest, callsign))
-            if cursor.fetchone()[0] == 0:
-                return render_template('error.html', 
-                    error=f"No data found for {callsign} in {contest}")
-
-        # Get station data with filters
+        # Get station data
         stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
-        if stations:
-            # Generate HTML content directly
-            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-            with open(template_path, 'r') as f:
-                template = f.read()
+        if not stations:
+            return render_template('error.html', 
+                error=f"No data found for {callsign} in {contest}")
 
-            html_content = reporter.generate_html_content(template, callsign, contest, stations)
-            
-            # Return response with appropriate headers
-            response = make_response(html_content)
-            response.headers['Content-Type'] = 'text/html; charset=utf-8'
-            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
-            
-            logger.info(f"Successfully generated report for {callsign} in {contest}")
-            return response
+        success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+        if success:
+            try:
+                # First check if file exists
+                report_path = os.path.join(Config.OUTPUT_DIR, 'live.html')
+                if not os.path.exists(report_path):
+                    logger.error(f"Report file not found at {report_path}")
+                    return render_template('error.html', error="Report file not found")
+
+                # Read and return the file content directly instead of using send_from_directory
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                response = app.make_response(content)
+                response.headers['Content-Type'] = 'text/html'
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                return response
+
+            except Exception as e:
+                logger.error(f"Error serving report file: {e}")
+                logger.error(traceback.format_exc())
+                return render_template('error.html', error="Error serving report file")
         else:
-            logger.error(f"No station data found for {callsign} in {contest}")
-            return render_template('error.html', error="No data found for the selected criteria")
+            logger.error(f"Failed to generate report for {callsign} in {contest}")
+            return render_template('error.html', error="Failed to generate report")
 
     except Exception as e:
         logger.error("Exception in live_report:")
