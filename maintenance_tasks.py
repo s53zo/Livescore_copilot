@@ -472,6 +472,160 @@ class DatabaseMaintenance:
         except Exception as e:
             self.logger.error(f"Error during maintenance: {e}")
 
+    def setup_indexes(self):
+        """Create optimized indexes on the contest database"""
+        try:
+            self.logger.info("Setting up database indexes...")
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                index_commands = [
+                    # Contest Scores indexes
+                    """CREATE INDEX IF NOT EXISTS idx_scores_callsign 
+                       ON contest_scores(callsign)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_contest 
+                       ON contest_scores(contest)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_timestamp 
+                       ON contest_scores(timestamp)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_callsign_contest 
+                       ON contest_scores(callsign, contest)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_contest_timestamp 
+                       ON contest_scores(contest, timestamp)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_callsign_timestamp 
+                       ON contest_scores(callsign, timestamp)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_combined 
+                       ON contest_scores(callsign, contest, timestamp)""",
+                    # For scores filtering
+                    """CREATE INDEX IF NOT EXISTS idx_scores_qsos 
+                       ON contest_scores(qsos)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_score 
+                       ON contest_scores(score)""",
+                    # Band Breakdown indexes
+                    """CREATE INDEX IF NOT EXISTS idx_band_contest_score_id 
+                       ON band_breakdown(contest_score_id)""",
+                    """CREATE INDEX IF NOT EXISTS idx_band_band 
+                       ON band_breakdown(band)""",
+                    """CREATE INDEX IF NOT EXISTS idx_band_combined 
+                       ON band_breakdown(contest_score_id, band)""",
+                    # QTH Info indexes
+                    """CREATE INDEX IF NOT EXISTS idx_qth_contest_score_id 
+                       ON qth_info(contest_score_id)""",
+                    """CREATE INDEX IF NOT EXISTS idx_qth_dxcc 
+                       ON qth_info(dxcc_country)""",
+                    """CREATE INDEX IF NOT EXISTS idx_qth_continent 
+                       ON qth_info(continent)""",
+                    """CREATE INDEX IF NOT EXISTS idx_qth_cq_zone 
+                       ON qth_info(cq_zone)""",
+                    """CREATE INDEX IF NOT EXISTS idx_qth_section 
+                       ON qth_info(arrl_section)""",
+                    """CREATE INDEX IF NOT EXISTS idx_qth_combined 
+                       ON qth_info(dxcc_country, continent, cq_zone)"""
+                ]
+                
+                for cmd in index_commands:
+                    try:
+                        self.logger.info(f"Creating index: {cmd}")
+                        cursor.execute(cmd)
+                        self.logger.info("Success!")
+                    except sqlite3.OperationalError as e:
+                        if "already exists" in str(e):
+                            self.logger.debug(f"Index already exists: {cmd}")
+                        else:
+                            raise
+                
+                self.logger.info("All indexes created successfully!")
+                
+        except Exception as e:
+            self.logger.error(f"Error creating indexes: {e}")
+            raise
+    
+    def explain_query(self, query_name):
+        """Analyze execution plan for common queries"""
+        common_queries = {
+            "latest_scores": """
+                WITH latest_records AS (
+                    SELECT MAX(id) as latest_id
+                    FROM contest_scores cs1
+                    GROUP BY callsign, contest
+                )
+                SELECT cs.callsign, cs.contest, cs.timestamp, cs.score
+                FROM contest_scores cs
+                INNER JOIN latest_records lr ON cs.id = lr.latest_id
+                ORDER BY cs.timestamp DESC
+                LIMIT 10
+            """,
+            "band_breakdown": """
+                SELECT cs.callsign, bb.band, bb.qsos, bb.points
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = 'W1AW'
+                ORDER BY cs.timestamp DESC
+            """,
+            "contest_summary": """
+                SELECT 
+                    contest,
+                    COUNT(DISTINCT callsign) as participants,
+                    SUM(qsos) as total_qsos,
+                    MAX(score) as top_score
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY COUNT(DISTINCT callsign) DESC
+            """
+        }
+        
+        if query_name not in common_queries:
+            self.logger.error(f"Unknown query: {query_name}")
+            return
+            
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get execution plan
+                self.logger.info(f"\nAnalyzing query: {query_name}")
+                cursor.execute(f"EXPLAIN QUERY PLAN {common_queries[query_name]}")
+                plan = cursor.fetchall()
+                
+                self.logger.info("\nExecution Plan:")
+                for step in plan:
+                    self.logger.info(f"id: {step[0]}, parent: {step[1]}, action: {step[3]}")
+                
+        except Exception as e:
+            self.logger.error(f"Error analyzing query: {e}")
+    
+    def perform_maintenance(self):
+        """Perform all maintenance tasks including index optimization"""
+        self.logger.info("Starting weekly database maintenance")
+        
+        try:
+            # First perform integrity checks
+            if not self.check_database_integrity():
+                self.logger.error("Integrity checks failed, skipping further maintenance")
+                return
+                
+            # Setup/verify indexes
+            self.setup_indexes()
+            
+            # Perform regular cleanup tasks
+            self.cleanup_small_contests(10)
+            self.cleanup_old_records(3)
+            
+            # Optimize performance
+            self.optimize_performance()
+            
+            # Finally vacuum and reindex
+            self.vacuum_database()
+            self.reindex_database()
+            
+            # Analyze common queries
+            for query in ["latest_scores", "band_breakdown", "contest_summary"]:
+                self.explain_query(query)
+            
+            self.logger.info("Weekly maintenance completed successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error during maintenance: {e}")
+
 def create_dummy_app():
     """Create a minimal Flask app for command line usage"""
     return Flask("maintenance")
