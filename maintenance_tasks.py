@@ -250,6 +250,16 @@ class DatabaseMaintenance:
                 
                 if inconsistent_qsos:
                     self.logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count inconsistencies")
+                    # Print only first 5 examples
+                    for record in inconsistent_qsos[:5]:
+                        self.logger.warning(f"ID: {record[0]}, Call: {record[1]}, Contest: {record[2]}, "
+                                          f"Score QSOs: {record[3]}, Band QSOs: {record[4]}")
+                    if len(inconsistent_qsos) > 5:
+                        self.logger.warning(f"... and {len(inconsistent_qsos) - 5} more inconsistencies")
+
+                
+                if inconsistent_qsos:
+                    self.logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count inconsistencies")
                     for record in inconsistent_qsos:
                         self.logger.warning(f"ID: {record[0]}, Call: {record[1]}, Contest: {record[2]}, "
                                           f"Score QSOs: {record[3]}, Band QSOs: {record[4]}")
