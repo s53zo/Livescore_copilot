@@ -364,6 +364,10 @@ class DatabaseMaintenance:
 
     def save_integrity_stats(self, stats):
         """Save integrity check statistics to file"""
+        if not self.stats_path:  # Skip if no stats path configured
+            self.logger.debug("No stats path configured, skipping integrity stats save")
+            return
+            
         try:
             existing_stats = []
             if os.path.exists(self.stats_path):
@@ -379,9 +383,13 @@ class DatabaseMaintenance:
                 
         except Exception as e:
             self.logger.error(f"Error saving integrity stats: {e}")
-
+    
     def save_performance_stats(self, stats):
         """Save performance statistics to file"""
+        if not self.stats_path:  # Skip if no stats path configured
+            self.logger.debug("No stats path configured, skipping performance stats save")
+            return
+            
         try:
             stats_file = self.stats_path.replace('.json', '_performance.json')
             existing_stats = []
@@ -398,7 +406,7 @@ class DatabaseMaintenance:
                 
         except Exception as e:
             self.logger.error(f"Error saving performance stats: {e}")
-
+            
     def perform_maintenance(self):
         """Perform all maintenance tasks"""
         self.logger.info("Starting weekly database maintenance")
