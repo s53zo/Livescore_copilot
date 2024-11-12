@@ -545,7 +545,82 @@ class DatabaseMaintenance:
         except Exception as e:
             self.logger.error(f"Error creating indexes: {e}")
             raise
-    
+
+    def analyze_index_efficiency(self):
+        """Analyze and report on index efficiency with detailed metrics"""
+        self.logger.info("\nAnalyzing index efficiency:")
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get all indexes with their stats
+                cursor.execute("""
+                    SELECT m.name as index_name,
+                           m.tbl_name as table_name,
+                           s.stat as stat_value
+                    FROM sqlite_master m
+                    LEFT JOIN sqlite_stat1 s ON s.idx = m.name
+                    WHERE m.type = 'index'
+                      AND m.sql IS NOT NULL
+                    ORDER BY m.tbl_name, m.name
+                """)
+                
+                index_stats = cursor.fetchall()
+                
+                # Analyze each index
+                for index_name, table_name, stat in index_stats:
+                    if not stat:
+                        continue
+                        
+                    values = [int(x) for x in stat.split()]
+                    total_rows = values[0]
+                    selectivity = []
+                    
+                    # Calculate selectivity for each column
+                    for i, value in enumerate(values[1:], 1):
+                        ratio = total_rows / value if value > 0 else float('inf')
+                        selectivity.append({
+                            'column': i,
+                            'unique_values': value,
+                            'rows_per_value': ratio
+                        })
+                    
+                    # Report findings
+                    self.logger.info(f"\nIndex: {index_name}")
+                    self.logger.info(f"Table: {table_name}")
+                    self.logger.info(f"Total rows: {total_rows:,}")
+                    
+                    for sel in selectivity:
+                        efficiency = "Excellent" if sel['rows_per_value'] < 10 else \
+                                   "Good" if sel['rows_per_value'] < 100 else \
+                                   "Fair" if sel['rows_per_value'] < 1000 else "Poor"
+                                   
+                        self.logger.info(
+                            f"Column {sel['column']}: "
+                            f"{sel['unique_values']:,} unique values, "
+                            f"{sel['rows_per_value']:.1f} rows per value "
+                            f"({efficiency} selectivity)"
+                        )
+                    
+                    # Recommendations
+                    if selectivity:
+                        worst_selectivity = max(s['rows_per_value'] for s in selectivity)
+                        if worst_selectivity > 1000:
+                            self.logger.warning(
+                                f"Consider restructuring {index_name} - "
+                                f"poor selectivity ({worst_selectivity:.1f} rows per value)"
+                            )
+                        elif worst_selectivity < 10:
+                            self.logger.info(
+                                f"Index {index_name} is performing well "
+                                f"({worst_selectivity:.1f} rows per value)"
+                            )
+                
+        except Exception as e:
+            self.logger.error(f"Error analyzing index efficiency: {e}")
+            raise
+            
     def explain_query(self, query_name):
         """Analyze execution plan for common queries"""
         common_queries = {
