@@ -571,9 +571,10 @@ def parse_arguments():
     return parser.parse_args()
 
 class CustomServer(HTTPServer):
-    def __init__(self, *args, db_path='contest_data.db', **kwargs):
+    def __init__(self, *args, db_path='contest_data.db', debug=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.db_handler = ContestDatabaseHandler(db_path)
+        self.debug = debug  # Store debug setting
         # Initialize maintenance scheduler
         self.maintenance = DatabaseMaintenance(
             db_path=db_path,
@@ -595,11 +596,13 @@ class CustomServer(HTTPServer):
 
 class CustomHandler(ContestRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, debug_mode=debug, **kwargs)
+        # Get the debug setting from the server
+        debug_mode = args[2].debug if len(args) > 2 else False
+        super().__init__(*args, debug_mode=debug_mode, **kwargs)
 
 def run_server(host='127.0.0.1', port=8088, debug=False, db_path='contest_data.db'):
     server_address = (host, port)
-    httpd = CustomServer(server_address, CustomHandler, db_path=db_path)
+    httpd = CustomServer(server_address, CustomHandler, db_path=db_path, debug=debug)
     
     logging.info(f"Starting server on {host}:{port} with batch processing")
     try:
