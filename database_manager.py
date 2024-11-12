@@ -115,13 +115,13 @@ class DatabaseManager:
                
             # Combined indexes for frequent queries
             """CREATE INDEX IF NOT EXISTS idx_qth_multi_location 
-               ON qth_info(dxcc_country, continent, cq_zone)"""
+               ON qth_info(dxcc_country, continent, cq_zone)""",
 
             """CREATE INDEX IF NOT EXISTS idx_scores_contest_ts 
-               ON contest_scores(contest, timestamp)"""
+               ON contest_scores(contest, timestamp)""",
                 
             """CREATE INDEX IF NOT EXISTS idx_scores_call_contest 
-               ON contest_scores(callsign, contest)"""
+               ON contest_scores(callsign, contest)""",
                 
             """CREATE INDEX IF NOT EXISTS idx_band_contest_band 
                ON band_breakdown(contest_score_id, band)"""
