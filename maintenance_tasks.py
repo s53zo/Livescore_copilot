@@ -518,10 +518,17 @@ class DatabaseMaintenance:
                        ON qth_info(cq_zone)""",
                     """CREATE INDEX IF NOT EXISTS idx_qth_section 
                        ON qth_info(arrl_section)""",
-                    """CREATE INDEX IF NOT EXISTS idx_qth_combined 
-                       ON qth_info(dxcc_country, continent, cq_zone)"""
+                    """CREATE INDEX IF NOT EXISTS idx_scores_contest_ts 
+                       ON contest_scores(contest,timestamp)""",
+                    """CREATE INDEX IF NOT EXISTS idx_scores_call_contest 
+                       ON contest_scores(callsign,contest)""",
+                    """CREATE INDEX IF NOT EXISTS idx_qth_section 
+                       ON qth_info(arrl_section)""",
+                    """CREATE INDEX IF NOT EXISTS idx_band_contest_band 
+                       ON band_breakdown(contest_score_id,band)"""                       
                 ]
-                
+
+               
                 for cmd in index_commands:
                     try:
                         self.logger.info(f"Creating index: {cmd}")
