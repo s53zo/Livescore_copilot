@@ -7,6 +7,7 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
+import time
 
 # Set up detailed logging
 logging.basicConfig(
