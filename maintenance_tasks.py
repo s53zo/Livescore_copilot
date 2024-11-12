@@ -214,7 +214,7 @@ class DatabaseMaintenance:
                 if integrity_result != "ok":
                     self.logger.error(f"Database integrity check failed: {integrity_result}")
                     return False
-
+    
                 # 2. Check for orphaned records
                 self.logger.info("Checking for orphaned records")
                 cursor.execute("""
@@ -228,42 +228,71 @@ class DatabaseMaintenance:
                     WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)
                 """)
                 orphaned_qth = cursor.fetchone()[0]
-
+    
                 if orphaned_bb > 0 or orphaned_qth > 0:
                     self.logger.warning(f"Found orphaned records: {orphaned_bb} band_breakdown, {orphaned_qth} qth_info")
-                    # Clean up orphaned records
                     cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
                     cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
                     conn.commit()
                     self.logger.info("Cleaned up orphaned records")
-
-                # 3. Check for data consistency
+    
+                # 3. Check for data consistency with summary information
                 self.logger.info("Checking data consistency")
                 cursor.execute("""
-                    SELECT cs.id, cs.callsign, cs.contest, cs.qsos,
-                           (SELECT SUM(bb.qsos) FROM band_breakdown bb WHERE bb.contest_score_id = cs.id)
-                    FROM contest_scores cs
+                    WITH inconsistent_records AS (
+                        SELECT 
+                            cs.id, cs.callsign, cs.contest, cs.qsos as score_qsos,
+                            (SELECT SUM(bb.qsos) FROM band_breakdown bb WHERE bb.contest_score_id = cs.id) as band_qsos
+                        FROM contest_scores cs
+                        WHERE cs.qsos != (SELECT SUM(bb.qsos) FROM band_breakdown bb WHERE bb.contest_score_id = cs.id)
+                        OR cs.qsos IS NULL
+                    ),
+                    callsign_summary AS (
+                        SELECT 
+                            callsign,
+                            COUNT(*) as occurrence_count,
+                            COUNT(DISTINCT contest) as contest_count
+                        FROM inconsistent_records
+                        GROUP BY callsign
+                        ORDER BY occurrence_count DESC
+                    )
+                    SELECT * FROM inconsistent_records
+                    ORDER BY callsign, contest, id LIMIT 5;
+                """)
+                example_records = cursor.fetchall()
+    
+                # Get summary counts
+                cursor.execute("""
+                    SELECT COUNT(*) FROM contest_scores cs
                     WHERE cs.qsos != (SELECT SUM(bb.qsos) FROM band_breakdown bb WHERE bb.contest_score_id = cs.id)
                     OR cs.qsos IS NULL
                 """)
-                inconsistent_qsos = cursor.fetchall()
-                
-                if inconsistent_qsos:
-                    self.logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count inconsistencies")
-                    # Print only first 5 examples
-                    for record in inconsistent_qsos[:5]:
+                total_inconsistencies = cursor.fetchone()[0]
+    
+                if total_inconsistencies > 0:
+                    self.logger.warning(f"\nFound {total_inconsistencies} total QSO count inconsistencies")
+                    self.logger.warning("Example inconsistencies (first 5):")
+                    for record in example_records:
                         self.logger.warning(f"ID: {record[0]}, Call: {record[1]}, Contest: {record[2]}, "
                                           f"Score QSOs: {record[3]}, Band QSOs: {record[4]}")
-                    if len(inconsistent_qsos) > 5:
-                        self.logger.warning(f"... and {len(inconsistent_qsos) - 5} more inconsistencies")
-
-                
-                if inconsistent_qsos:
-                    self.logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count inconsistencies")
-                    for record in inconsistent_qsos:
-                        self.logger.warning(f"ID: {record[0]}, Call: {record[1]}, Contest: {record[2]}, "
-                                          f"Score QSOs: {record[3]}, Band QSOs: {record[4]}")
-
+    
+                    # Get and display callsign summary
+                    cursor.execute("""
+                        SELECT callsign, COUNT(*) as count
+                        FROM contest_scores cs
+                        WHERE cs.qsos != (SELECT SUM(bb.qsos) FROM band_breakdown bb WHERE bb.contest_score_id = cs.id)
+                        OR cs.qsos IS NULL
+                        GROUP BY callsign
+                        HAVING count > 10
+                        ORDER BY count DESC
+                        LIMIT 5
+                    """)
+                    callsign_summary = cursor.fetchall()
+                    if callsign_summary:
+                        self.logger.warning("\nTop 5 callsigns with most inconsistencies:")
+                        for call, count in callsign_summary:
+                            self.logger.warning(f"Callsign {call}: {count} inconsistencies")
+    
                 # 4. Check foreign key integrity
                 self.logger.info("Checking foreign key integrity")
                 cursor.execute("PRAGMA foreign_key_check")
@@ -271,21 +300,21 @@ class DatabaseMaintenance:
                 if fk_violations:
                     self.logger.error(f"Found {len(fk_violations)} foreign key violations")
                     return False
-
-                # 5. Save integrity check stats
+    
+                # Save integrity check stats
                 self.save_integrity_stats({
                     'timestamp': datetime.now().isoformat(),
                     'integrity_check': integrity_result == "ok",
                     'orphaned_records_cleaned': orphaned_bb + orphaned_qth,
-                    'inconsistent_qsos': len(inconsistent_qsos)
+                    'inconsistent_qsos': total_inconsistencies
                 })
-
+    
                 self.logger.info("Database integrity checks completed successfully")
                 return True
-
-        except Exception as e:
-            self.logger.error(f"Error during integrity check: {e}")
-            return False
+    
+            except Exception as e:
+                self.logger.error(f"Error during integrity check: {e}")
+                return False
 
     def optimize_performance(self):
         """Perform database performance optimization tasks"""
