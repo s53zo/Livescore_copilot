@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 import time
 import logging
@@ -37,6 +37,23 @@ class DatabaseMaintenance:
                 self.logger.addHandler(file_handler)
             except Exception as e:
                 self.logger.error(f"Error setting up log file: {e}")
+
+    def start(self):
+        """Start the maintenance scheduler"""
+        self._stop_flag = False
+        self._maintenance_thread = threading.Thread(
+            target=self.maintenance_worker,
+            daemon=True
+        )
+        self._maintenance_thread.start()
+        self.logger.info("Maintenance scheduler started")
+    
+    def stop(self):
+        """Stop the maintenance scheduler"""
+        self._stop_flag = True
+        if self._maintenance_thread:
+            self._maintenance_thread.join(timeout=60)
+        self.logger.info("Maintenance scheduler stopped")
 
     def is_maintenance_time(self):
         """Check if it's time for maintenance (Thursday 3 AM)"""
