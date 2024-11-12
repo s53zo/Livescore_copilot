@@ -116,7 +116,12 @@ def live_report():
         # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
 
-        # Get station data
+        # When filter_type is 'none', pass None for both parameters
+        if filter_type.lower() == 'none' or filter_value.lower() == 'none':
+            filter_type = None 
+            filter_value = None
+
+        # Get station data with modified filter parameters
         stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
         if not stations:
