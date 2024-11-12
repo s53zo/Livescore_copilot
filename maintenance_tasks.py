@@ -1,5 +1,3 @@
-# maintenance_tasks.py
-
 import argparse
 from datetime import datetime
 import threading
@@ -8,17 +6,158 @@ import logging
 import sqlite3
 import os
 import json
-from flask import Flask
-  
+import sys
+
 class DatabaseMaintenance:
     """Database maintenance scheduler that can be integrated with the main server"""
     def __init__(self, db_path, log_path=None):
-        # Remove Flask app dependency since we don't need it
         self.db_path = db_path
         self.setup_logging(log_path)
         self._maintenance_thread = None
         self._stop_flag = False
         self.stats_path = os.path.join(os.path.dirname(log_path), 'maintenance_stats.json') if log_path else None
+        
+    def setup_logging(self, log_path=None):
+        """Configure logging to both file and console"""
+        self.logger = logging.getLogger('DatabaseMaintenance')
+        self.logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+        
+        # File handler (if log path is provided)
+        if log_path:
+            try:
+                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                file_handler = logging.FileHandler(log_path)
+                file_handler.setFormatter(formatter)
+                self.logger.addHandler(file_handler)
+            except Exception as e:
+                self.logger.error(f"Error setting up log file: {e}")
+
+    def is_maintenance_time(self):
+        """Check if it's time for maintenance (Thursday 3 AM)"""
+        now = datetime.now()
+        return now.weekday() == 3 and now.hour == 3 and now.minute == 0
+
+    def cleanup_small_contests(self, min_participants=10):
+        """Remove contests with fewer than specified participants"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Find contests to remove
+                cursor.execute("""
+                    WITH participant_counts AS (
+                        SELECT contest, COUNT(DISTINCT callsign) as count
+                        FROM contest_scores
+                        GROUP BY contest
+                        HAVING count < ?
+                    )
+                    SELECT contest, count FROM participant_counts
+                """, (min_participants,))
+                
+                contests_to_remove = cursor.fetchall()
+                
+                if contests_to_remove:
+                    self.logger.info(f"Found {len(contests_to_remove)} contests with < {min_participants} participants")
+                    for contest, count in contests_to_remove:
+                        self.logger.info(f"Removing contest {contest} with {count} participants")
+                        
+                        # Delete related records first
+                        cursor.execute("""
+                            DELETE FROM band_breakdown 
+                            WHERE contest_score_id IN (
+                                SELECT id FROM contest_scores WHERE contest = ?
+                            )
+                        """, (contest,))
+                        
+                        cursor.execute("""
+                            DELETE FROM qth_info 
+                            WHERE contest_score_id IN (
+                                SELECT id FROM contest_scores WHERE contest = ?
+                            )
+                        """, (contest,))
+                        
+                        # Delete main contest records
+                        cursor.execute("DELETE FROM contest_scores WHERE contest = ?", (contest,))
+                        
+                    conn.commit()
+                    self.logger.info("Small contests cleanup completed")
+                else:
+                    self.logger.info(f"No contests found with fewer than {min_participants} participants")
+                    
+        except Exception as e:
+            self.logger.error(f"Error in cleanup_small_contests: {e}")
+
+    def cleanup_old_records(self, days=3):
+        """Remove records older than specified number of days"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Delete related records first
+                cursor.execute("""
+                    DELETE FROM band_breakdown 
+                    WHERE contest_score_id IN (
+                        SELECT id FROM contest_scores WHERE timestamp < ?
+                    )
+                """, (cutoff_date,))
+                bb_count = cursor.rowcount
+                
+                cursor.execute("""
+                    DELETE FROM qth_info 
+                    WHERE contest_score_id IN (
+                        SELECT id FROM contest_scores WHERE timestamp < ?
+                    )
+                """, (cutoff_date,))
+                qth_count = cursor.rowcount
+                
+                # Delete main records
+                cursor.execute("DELETE FROM contest_scores WHERE timestamp < ?", (cutoff_date,))
+                cs_count = cursor.rowcount
+                
+                conn.commit()
+                self.logger.info(f"Removed {cs_count} scores, {bb_count} band records, {qth_count} QTH records")
+                
+        except Exception as e:
+            self.logger.error(f"Error in cleanup_old_records: {e}")
+
+    def vacuum_database(self):
+        """Perform VACUUM operation"""
+        try:
+            self.logger.info("Starting VACUUM operation")
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("VACUUM")
+            self.logger.info("VACUUM completed")
+        except Exception as e:
+            self.logger.error(f"Error in vacuum_database: {e}")
+
+    def reindex_database(self):
+        """Rebuild all indexes"""
+        try:
+            self.logger.info("Starting database reindexing")
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get list of all indexes
+                cursor.execute("""
+                    SELECT name, tbl_name 
+                    FROM sqlite_master 
+                    WHERE type = 'index'
+                """)
+                
+                for index_name, table_name in cursor.fetchall():
+                    self.logger.info(f"Reindexing {index_name} on {table_name}")
+                    cursor.execute(f"REINDEX {index_name}")
+                
+            self.logger.info("Reindexing completed")
+        except Exception as e:
+            self.logger.error(f"Error in reindex_database: {e}")
 
     def maintenance_worker(self):
       """Background worker that performs maintenance at the scheduled time"""
