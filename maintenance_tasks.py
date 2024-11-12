@@ -312,9 +312,9 @@ class DatabaseMaintenance:
                 self.logger.info("Database integrity checks completed successfully")
                 return True
     
-            except Exception as e:
-                self.logger.error(f"Error during integrity check: {e}")
-                return False
+        except Exception as e:
+            self.logger.error(f"Error during integrity check: {e}")
+            return False
 
     def optimize_performance(self):
         """Perform database performance optimization tasks"""
