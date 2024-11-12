@@ -21,22 +21,22 @@ class DatabaseMaintenance:
         self.stats_path = os.path.join(os.path.dirname(log_path), 'maintenance_stats.json') if log_path else None
 
     def maintenance_worker(self):
-        """Background worker that performs maintenance at the scheduled time"""
-        while not self._stop_flag:
-            try:
-                now = datetime.now()
-                
-                if self.is_maintenance_time():
-                    self.perform_maintenance()
-                    # Sleep until next minute to avoid multiple runs
-                    time.sleep(60)
-                else:
-                    # Sleep for 30 seconds between checks
-                    time.sleep(30)
-                    
-            except Exception as e:
-                self.logger.error(f"Error in maintenance worker: {e}")
-                time.sleep(30)class DatabaseMaintenance:
+      """Background worker that performs maintenance at the scheduled time"""
+      while not self._stop_flag:
+          try:
+              now = datetime.now()
+              
+              if self.is_maintenance_time():
+                  self.perform_maintenance()
+                  # Sleep until next minute to avoid multiple runs
+                  time.sleep(60)
+              else:
+                  # Sleep for 30 seconds between checks
+                  time.sleep(30)
+                  
+          except Exception as e:
+              self.logger.error(f"Error in maintenance worker: {e}")
+              time.sleep(30)
     
     def run_maintenance_now(self):
         """Run maintenance immediately, outside of the normal schedule"""
