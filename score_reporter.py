@@ -261,7 +261,8 @@ class ScoreReporter:
                             qi.cq_zone,
                             qi.iaru_zone,
                             qi.arrl_section,
-                            qi.state_province
+                            qi.state_province,
+                            qi.continent
                         FROM contest_scores cs
                         INNER JOIN latest_scores ls 
                             ON cs.callsign = ls.callsign 
@@ -283,13 +284,16 @@ class ScoreReporter:
                         'CQ Zone': 'cq_zone',
                         'IARU Zone': 'iaru_zone',
                         'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province'
+                        'State/Province': 'state_province',
+                        'Continent': 'continent'  # Added Continent to the filter map
                     }
                     
                     db_field = filter_map.get(filter_type)
                     if db_field:
                         query += f" AND qi.{db_field} = ?"
                         params.append(filter_value)
+                    else:
+                        self.logger.warning(f"Unknown filter type: {filter_type}")
     
                 # Complete the query
                 query += """)
