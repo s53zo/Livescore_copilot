@@ -101,49 +101,64 @@ def index():
 @app.route('/reports/live.html')
 def live_report():
     try:
+        start_time = time.time()
+        logger.info("Starting live_report request processing")
+
         # Get parameters from URL
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type', 'none')  # Default to 'none' if not provided
-        filter_value = request.args.get('filter_value', 'none')  # Default to 'none' if not provided
+        filter_type = request.args.get('filter_type', 'none')
+        filter_value = request.args.get('filter_value', 'none')
+
+        logger.info(f"Parameters: contest={contest}, callsign={callsign}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
-
         # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
 
-        # When filter_type is 'none', pass None for both parameters
-        if filter_type.lower() == 'none' or filter_value.lower() == 'none':
-            filter_type = None 
-            filter_value = None
-
-        # Get station data with modified filter parameters
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+        # Time the database query
+        query_start = time.time()
+        stations = reporter.get_station_details(callsign, contest, 
+                                             None if filter_type.lower() == 'none' else filter_type,
+                                             None if filter_value.lower() == 'none' else filter_value)
+        query_time = time.time() - query_start
+        logger.info(f"Database query completed in {query_time:.3f} seconds")
 
         if not stations:
             return render_template('error.html', 
                 error=f"No data found for {callsign} in {contest}")
 
+        # Time the HTML generation
+        html_start = time.time()
         success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
+        html_time = time.time() - html_start
+        logger.info(f"HTML generation completed in {html_time:.3f} seconds")
+
         if success:
             try:
-                # First check if file exists
+                # Time the file reading and response generation
+                response_start = time.time()
                 report_path = os.path.join(Config.OUTPUT_DIR, 'live.html')
+                
                 if not os.path.exists(report_path):
                     logger.error(f"Report file not found at {report_path}")
                     return render_template('error.html', error="Report file not found")
 
-                # Read and return the file content directly instead of using send_from_directory
                 with open(report_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
-                response = app.make_response(content)
+                response = make_response(content)
                 response.headers['Content-Type'] = 'text/html'
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                
+                response_time = time.time() - response_start
+                total_time = time.time() - start_time
+                logger.info(f"Response generation completed in {response_time:.3f} seconds")
+                logger.info(f"Total request processing time: {total_time:.3f} seconds")
+                
                 return response
 
             except Exception as e:
