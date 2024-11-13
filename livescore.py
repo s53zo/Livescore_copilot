@@ -14,64 +14,6 @@ import threading
 import time
 import queue
 from callsign_utils import CallsignLookup
-from maintenance_tasks import DatabaseMaintenance
-
-class ContestServer:
-    def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False):
-        self.host = host
-        self.port = port
-        self.db_path = db_path
-        self.debug = debug
-        self.logger = setup_logging(debug, 'contest_server.log')
-        
-        # Initialize database handler
-        self.db_handler = ContestDatabaseHandler(db_path)
-        
-        # Initialize maintenance scheduler
-        self.maintenance = DatabaseMaintenance(
-            db_path=db_path,
-            log_path='/opt/livescore/logs/maintenance.log'
-        )
-
-    def start(self):
-        """Start the server and maintenance scheduler"""
-        try:
-            # Start maintenance scheduler
-            self.maintenance.start()
-            self.logger.info("Maintenance scheduler started")
-            
-            # Start HTTP server
-            server_address = (self.host, self.port)
-            httpd = CustomServer(server_address, 
-                               lambda *args, **kwargs: CustomHandler(*args, 
-                                                                  debug_mode=self.debug, 
-                                                                  **kwargs))
-            httpd.db_handler = self.db_handler
-            
-            self.logger.info(f"Starting server on {self.host}:{self.port}")
-            httpd.serve_forever()
-            
-        except Exception as e:
-            self.logger.error(f"Error starting server: {e}")
-            raise
-        finally:
-            self.cleanup()
-            
-    def cleanup(self):
-        """Cleanup resources"""
-        try:
-            # Stop maintenance scheduler
-            if hasattr(self, 'maintenance'):
-                self.maintenance.stop()
-                self.logger.info("Maintenance scheduler stopped")
-            
-            # Cleanup database handler
-            if hasattr(self, 'db_handler'):
-                self.db_handler.cleanup()
-                self.logger.info("Database handler cleaned up")
-                
-        except Exception as e:
-            self.logger.error(f"Error during cleanup: {e}")
 
 # Add BatchProcessor class at the top level, before ContestDatabaseHandler
 class BatchProcessor:
@@ -262,8 +204,8 @@ class ContestDatabaseHandler:
                     
                     # Use prefix from callsign_info instead of country name
                     if callsign_info:
-                        qth_data['dxcc_country'] = callsign_info.get('prefix')  # This will now use the correct Prefix from cty.plist
-                        qth_data['continent'] = callsign_info.get('continent')
+                        qth_data['dxcc_country'] = callsign_info['prefix']
+                        qth_data['continent'] = callsign_info['continent']
                     else:
                         qth_data['dxcc_country'] = ''
                         qth_data['continent'] = ''
@@ -570,39 +512,22 @@ def parse_arguments():
                       help='Database file path (default: contest_data.db)')
     return parser.parse_args()
 
-class CustomServer(HTTPServer):
-    def __init__(self, *args, db_path='contest_data.db', debug=False, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.db_handler = ContestDatabaseHandler(db_path)
-        self.debug = debug  # Store debug setting
-        # Initialize maintenance scheduler
-        self.maintenance = DatabaseMaintenance(
-            db_path=db_path,
-            log_path='/opt/livescore/logs/maintenance.log'
-        )
-        # Start maintenance scheduler
-        self.maintenance.start()
-        logging.info("Maintenance scheduler started")
+def run_server(host='127.0.0.1', port=8088, debug=False):
+    class CustomServer(HTTPServer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.db_handler = ContestDatabaseHandler()
         
-    def server_close(self):
-        # Stop maintenance scheduler
-        if hasattr(self, 'maintenance'):
-            self.maintenance.stop()
-            logging.info("Maintenance scheduler stopped")
-        # Cleanup database handler
-        if hasattr(self, 'db_handler'):
+        def server_close(self):
             self.db_handler.cleanup()
-        super().server_close()
-
-class CustomHandler(ContestRequestHandler):
-    def __init__(self, *args, **kwargs):
-        # Get the debug setting from the server
-        debug_mode = args[2].debug if len(args) > 2 else False
-        super().__init__(*args, debug_mode=debug_mode, **kwargs)
-
-def run_server(host='127.0.0.1', port=8088, debug=False, db_path='contest_data.db'):
+            super().server_close()
+    
+    class CustomHandler(ContestRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, debug_mode=debug, **kwargs)
+    
     server_address = (host, port)
-    httpd = CustomServer(server_address, CustomHandler, db_path=db_path, debug=debug)
+    httpd = CustomServer(server_address, CustomHandler)
     
     logging.info(f"Starting server on {host}:{port} with batch processing")
     try:
@@ -628,4 +553,4 @@ if __name__ == "__main__":
     logging.info(f"Database File: {args.db_file}")
     
     # Run server
-    run_server(args.host, args.port, args.debug, args.db_file)
+    run_server(args.host, args.port, args.debug)

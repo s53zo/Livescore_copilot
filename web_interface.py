@@ -7,7 +7,6 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
-import time
 
 # Set up detailed logging
 logging.basicConfig(
@@ -102,73 +101,56 @@ def index():
 @app.route('/reports/live.html')
 def live_report():
     try:
-        start_time = time.time()
-        logger.info("Starting live_report request processing")
-
         # Get parameters from URL
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
         filter_type = request.args.get('filter_type', 'none')
         filter_value = request.args.get('filter_value', 'none')
 
-        logger.info(f"Parameters: contest={contest}, callsign={callsign}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
-
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
+
+        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
 
         # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
 
-        # Time the database query
-        query_start = time.time()
-        stations = reporter.get_station_details(callsign, contest, 
-                                             None if filter_type.lower() == 'none' else filter_type,
-                                             None if filter_value.lower() == 'none' else filter_value)
-        query_time = time.time() - query_start
-        logger.info(f"Database query completed in {query_time:.3f} seconds")
+        # Verify contest and callsign exist in database
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM contest_scores 
+                WHERE contest = ? AND callsign = ?
+            """, (contest, callsign))
+            if cursor.fetchone()[0] == 0:
+                return render_template('error.html', 
+                    error=f"No data found for {callsign} in {contest}")
 
-        if not stations:
-            return render_template('error.html', 
-                error=f"No data found for {callsign} in {contest}")
+        # Get station data with filters
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
-        # Time the HTML generation
-        html_start = time.time()
-        success = reporter.generate_html(callsign, contest, stations, Config.OUTPUT_DIR)
-        html_time = time.time() - html_start
-        logger.info(f"HTML generation completed in {html_time:.3f} seconds")
+        if stations:
+            # Generate HTML content directly
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+            with open(template_path, 'r') as f:
+                template = f.read()
 
-        if success:
-            try:
-                # Time the file reading and response generation
-                response_start = time.time()
-                report_path = os.path.join(Config.OUTPUT_DIR, 'live.html')
-                
-                if not os.path.exists(report_path):
-                    logger.error(f"Report file not found at {report_path}")
-                    return render_template('error.html', error="Report file not found")
-
-                with open(report_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                response = make_response(content)
-                response.headers['Content-Type'] = 'text/html'
-                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                
-                response_time = time.time() - response_start
-                total_time = time.time() - start_time
-                logger.info(f"Response generation completed in {response_time:.3f} seconds")
-                logger.info(f"Total request processing time: {total_time:.3f} seconds")
-                
-                return response
-
-            except Exception as e:
-                logger.error(f"Error serving report file: {e}")
-                logger.error(traceback.format_exc())
-                return render_template('error.html', error="Error serving report file")
+            html_content = reporter.generate_html_content(template, callsign, contest, stations)
+            
+            # Return response with appropriate headers
+            response = make_response(html_content)
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            
+            logger.info(f"Successfully generated report for {callsign} in {contest}")
+            return response
         else:
-            logger.error(f"Failed to generate report for {callsign} in {contest}")
-            return render_template('error.html', error="Failed to generate report")
+            logger.error(f"No station data found for {callsign} in {contest}")
+            return render_template('error.html', error="No data found for the selected criteria")
 
     except Exception as e:
         logger.error("Exception in live_report:")
