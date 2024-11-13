@@ -163,6 +163,7 @@ class ScoreReporter:
         """Initialize the ScoreReporter class"""
         self.db_path = db_path or 'contest_data.db'
         self.template_path = template_path or 'templates/score_template.html'
+        self.rate_calculator = RateCalculator(self.db_path)  # Initialize the RateCalculator
         self.setup_logging()
         self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
 
