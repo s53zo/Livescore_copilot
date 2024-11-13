@@ -101,23 +101,14 @@ def index():
 @app.route('/reports/live.html')
 def live_report():
     try:
-        # Get parameters from URL
+        # Get only the required parameters from URL
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type')
-        filter_value = request.args.get('filter_value')
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        # Normalize filter parameters
-        if not filter_type or filter_type.lower() == 'none':
-            filter_type = None
-        if not filter_value or filter_value.lower() == 'none':
-            filter_value = None
-
-        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
+        logger.info(f"Generating report for contest={contest}, callsign={callsign}")
 
         # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
@@ -134,8 +125,8 @@ def live_report():
                 return render_template('error.html', 
                     error=f"No data found for {callsign} in {contest}")
 
-        # Get station data with filters
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+        # Get station data - passing None for filters
+        stations = reporter.get_station_details(callsign, contest)
 
         if not stations:
             logger.error(f"No station data found for {callsign} in {contest}")
