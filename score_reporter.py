@@ -249,7 +249,7 @@ class ScoreReporter:
                 
                 params = [contest, contest]
     
-                # Add filter conditions if specified
+                # Add filter conditions if specified and not 'none'
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
                         'DXCC': 'dxcc_country',
@@ -265,7 +265,7 @@ class ScoreReporter:
                         query += f" AND qi.{db_field} = ?"
                         params.append(filter_value)
     
-                # Complete the query
+                # Close the station_scores CTE and add the final SELECT
                 query += """)
                     SELECT 
                         ss.id,
