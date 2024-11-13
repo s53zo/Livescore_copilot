@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime
 from flask import request
 import sys
+import time
 
 class RateCalculator:
     def __init__(self, db_path):
