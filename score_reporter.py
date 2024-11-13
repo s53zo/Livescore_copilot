@@ -215,57 +215,81 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details and all competitors"""
+        """Get station details and all competitors with optional filtering"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
     
-                # Simple query to get latest scores for all stations
+                # Base query with QTH info join
                 query = """
                     WITH latest_scores AS (
                         SELECT callsign, MAX(timestamp) as max_ts
                         FROM contest_scores
                         WHERE contest = ?
                         GROUP BY callsign
-                    )
-                    SELECT 
-                        cs.id,
-                        cs.callsign,
-                        cs.score,
-                        cs.power,
-                        cs.assisted,
-                        cs.timestamp,
-                        cs.qsos,
-                        cs.multipliers,
-                        CASE 
-                            WHEN cs.callsign = ? THEN 'current'
-                            WHEN cs.score > (
-                                SELECT cs2.score 
-                                FROM contest_scores cs2 
-                                JOIN latest_scores ls2 ON cs2.callsign = ls2.callsign 
-                                AND cs2.timestamp = ls2.max_ts 
-                                WHERE cs2.callsign = ?
-                            ) THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
-                    FROM contest_scores cs
-                    INNER JOIN latest_scores ls 
-                        ON cs.callsign = ls.callsign 
-                        AND cs.timestamp = ls.max_ts
-                    WHERE cs.contest = ?
-                    AND cs.qsos > 0
-                    ORDER BY cs.score DESC
+                    ),
+                    station_scores AS (
+                        SELECT 
+                            cs.*,
+                            qi.dxcc_country,
+                            qi.cq_zone,
+                            qi.iaru_zone,
+                            qi.arrl_section,
+                            qi.state_province,
+                            qi.continent
+                        FROM contest_scores cs
+                        INNER JOIN latest_scores ls 
+                            ON cs.callsign = ls.callsign 
+                            AND cs.timestamp = ls.max_ts
+                        LEFT JOIN qth_info qi 
+                            ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        AND cs.qsos > 0
                 """
                 
-                params = [contest, callsign, callsign, contest]
-                
-                cursor.execute(query, params)
-                results = cursor.fetchall()
-                
-                self.logger.debug(f"Found {len(results) if results else 0} results")
-                return results
+                params = [contest, contest]
     
+                # Add filter conditions if specified
+                if filter_type and filter_value and filter_type.lower() != 'none':
+                    filter_map = {
+                        'DXCC': 'dxcc_country',
+                        'CQ Zone': 'cq_zone',
+                        'IARU Zone': 'iaru_zone',
+                        'ARRL Section': 'arrl_section',
+                        'State/Province': 'state_province',
+                        'Continent': 'continent'
+                    }
+                    
+                    db_field = filter_map.get(filter_type)
+                    if db_field:
+                        query += f" AND qi.{db_field} = ?"
+                        params.append(filter_value)
+    
+                # Complete the query
+                query += """)
+                    SELECT 
+                        ss.id,
+                        ss.callsign,
+                        ss.score,
+                        ss.power,
+                        ss.assisted,
+                        ss.timestamp,
+                        ss.qsos,
+                        ss.multipliers,
+                        CASE 
+                            WHEN ss.callsign = ? THEN 'current'
+                            WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY ss.score DESC) as rn
+                    FROM station_scores ss
+                    ORDER BY ss.score DESC
+                """
+                
+                params.extend([callsign, callsign])
+                cursor.execute(query, params)
+                return cursor.fetchall()
+                    
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
