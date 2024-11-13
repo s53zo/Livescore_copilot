@@ -450,10 +450,9 @@ class ScoreReporter:
         return category_map.get((operator, transmitter, assisted), 'Unknown')
 
     
-    def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display"""
+    def generate_filter_info(self, callsign, contest):
+        """Generate the filter information div"""
         try:
-            # Get filter information for the header if available
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
@@ -505,103 +504,143 @@ class ScoreReporter:
                             {' | '.join(filter_parts)}
                         </div>
                         """
+            
+            return filter_info_div
+        except Exception as e:
+            self.logger.error(f"Error generating filter info: {e}")
+            return ""
     
-            # Add category-specific CSS
-            additional_css = """
-                <style>
-                    .category-group {
-                        display: inline-flex;
-                        gap: 4px;
-                        font-size: 0.75rem;
-                        line-height: 1;
-                        align-items: center;
-                    }
-                    
-                    .category-tag {
-                        display: inline-block;
-                        padding: 3px 6px;
-                        border-radius: 3px;
-                        white-space: nowrap;
-                        font-family: monospace;
-                    }
-                    
-                    /* Category colors */
-                    .cat-power-high { background: #ffebee; color: #c62828; }
-                    .cat-power-low { background: #e8f5e9; color: #2e7d32; }
-                    .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
-                    
-                    .cat-soa { background: #e3f2fd; color: #1565c0; }
-                    .cat-so { background: #f3e5f5; color: #6a1b9a; }
-                    .cat-ms { background: #fff8e1; color: #ff8f00; }
-                    .cat-mm { background: #f1f8e9; color: #558b2f; }
-                </style>
-            """
+    def generate_category_html(self, power, assisted):
+        """Generate the HTML for the category display"""
+        power_class = power.upper() if power else 'Unknown'
+        display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
+        
+        category_html = f"""
+            <div class="category-group">
+                <span class="category-tag">{assisted or 'Unknown'}</span>
+                <span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>
+            </div>
+        """
+        return category_html
     
+    def get_additional_css(self):
+        """Return the additional CSS needed for the report"""
+        return """
+            <style>
+                .category-group {
+                    display: inline-flex;
+                    gap: 4px;
+                    font-size: 0.75rem;
+                    line-height: 1;
+                    align-items: center;
+                }
+                
+                .category-tag {
+                    display: inline-block;
+                    padding: 3px 6px;
+                    border-radius: 3px;
+                    white-space: nowrap;
+                    font-family: monospace;
+                }
+                
+                /* Category colors */
+                .cat-power-high { background: #ffebee; color: #c62828; }
+                .cat-power-low { background: #e8f5e9; color: #2e7d32; }
+                .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
+                
+                .cat-soa { background: #e3f2fd; color: #1565c0; }
+                .cat-so { background: #f3e5f5; color: #6a1b9a; }
+                .cat-ms { background: #fff8e1; color: #ff8f00; }
+                .cat-mm { background: #f1f8e9; color: #558b2f; }
+            </style>
+        """
+    
+    def generate_html_content(self, template, callsign, contest, stations):
+        """Generate HTML content with optimized rate calculation"""
+        try:
+            start_time = time.time()
+            self.logger.debug(f"Starting HTML generation for {len(stations)} stations")
+            
+            # Pre-calculate all rates in a single database connection
+            station_rates = {}
+            station_band_rates = {}
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                self.logger.debug("Batch calculating rates")
+                batch_start = time.time()
+                
+                # Get all station IDs and timestamps
+                station_data = [(s[0], s[1], s[5]) for s in stations]  # id, callsign, timestamp
+                
+                # Get all band breakdowns in a single query
+                station_ids = [s[0] for s in station_data]
+                placeholders = ','.join('?' * len(station_ids))
+                
+                # Batch fetch all band breakdowns
+                cursor.execute(f"""
+                    SELECT cs.id, bb.band, bb.qsos, bb.multipliers
+                    FROM contest_scores cs
+                    JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                    WHERE cs.id IN ({placeholders})
+                    ORDER BY cs.id, bb.band
+                """, station_ids)
+                
+                # Process band data
+                for row in cursor.fetchall():
+                    station_id = row[0]
+                    if station_id not in station_band_rates:
+                        station_band_rates[station_id] = {}
+                    station_band_rates[station_id][row[1]] = [row[2], row[3], 0, 0]  # qsos, mults, long_rate, short_rate
+                
+                # Calculate rates for each station in bulk
+                self.logger.debug("Calculating individual station rates")
+                for station_id, station_call, timestamp in station_data:
+                    # Calculate total rates
+                    total_long_rate, total_short_rate = self.rate_calculator.calculate_rates(
+                        cursor, station_call, contest, timestamp
+                    )
+                    station_rates[station_id] = (total_long_rate, total_short_rate)
+                    
+                    # Calculate band rates
+                    band_data = self.rate_calculator.calculate_band_rates(
+                        cursor, station_call, contest, timestamp
+                    )
+                    if station_id in station_band_rates:
+                        for band, rates in band_data.items():
+                            if band in station_band_rates[station_id]:
+                                station_band_rates[station_id][band][2:] = rates[2:]  # Update long and short rates
+                
+                batch_time = time.time() - batch_start
+                self.logger.debug(f"Batch rate calculations completed in {batch_time:.3f} seconds")
+    
+            # Get reference station for rate comparison
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+            if reference_station:
+                reference_breakdown = station_band_rates.get(reference_station[0], {})
+            else:
+                reference_breakdown = {}
+    
+            # Generate table rows
+            self.logger.debug("Generating table rows")
             table_rows = []
+            row_start = time.time()
+            
             for i, station in enumerate(stations, 1):
                 station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
                 
-                # Get additional category information from database
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT ops, transmitter
-                        FROM contest_scores
-                        WHERE id = ?
-                    """, (station_id,))
-                    result = cursor.fetchone()
-                    ops = result[0] if result else None
-                    transmitter = result[1] if result else None
-    
-                # Calculate operator category
-                op_category = self.get_operator_category(ops or 'SINGLE-OP', 
-                                                       transmitter or 'ONE', 
-                                                       assisted or 'NON-ASSISTED')
+                # Get cached rates
+                total_long_rate, total_short_rate = station_rates.get(station_id, (0, 0))
+                band_breakdown = station_band_rates.get(station_id, {})
                 
-                # Format power class tag
-                power_class = power.upper() if power else 'Unknown'
-                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
-                
-                # Create category display
-                category_html = f"""
-                    <div class="category-group">
-                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
-                        {power_tag}
-                    </div>
-                """
-                
-                # Get band breakdown with rates
-                band_breakdown = self.get_band_breakdown_with_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                
-                # Get reference station for rate comparison
-                reference_station = next((s for s in stations if s[1] == callsign), None)
-                if reference_station:
-                    reference_breakdown = self.get_band_breakdown_with_rates(
-                        reference_station[0], callsign, contest, reference_station[5]
-                    )
-                else:
-                    reference_breakdown = {}
-    
-                # Calculate total rates
-                total_long_rate, total_short_rate = self.get_total_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                
-                # Format timestamp
-                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                
-                # Add highlight for current station
+                formatted_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
                 
-                # Generate table row
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
                     <td>{callsign_val}</td>
-                    <td>{category_html}</td>
+                    <td>{self.generate_category_html(power, assisted)}</td>
                     <td>{score:,}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
@@ -610,24 +649,30 @@ class ScoreReporter:
                     <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
                     <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{formatted_ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-                
+            
+            row_time = time.time() - row_start
+            self.logger.debug(f"Table row generation completed in {row_time:.3f} seconds")
+    
             # Format final HTML
+            self.logger.debug("Generating final HTML")
             html_content = template.format(
                 contest=contest,
                 callsign=callsign,
                 timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
                 power=stations[0][3],
                 assisted=stations[0][4],
-                filter_info_div=filter_info_div,
+                filter_info_div=self.generate_filter_info(callsign, contest),
                 table_rows='\n'.join(table_rows),
-                additional_css=additional_css
+                additional_css=self.get_additional_css()
             )
             
+            total_time = time.time() - start_time
+            self.logger.debug(f"HTML generation completed in {total_time:.3f} seconds")
             return html_content
-    
+            
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
