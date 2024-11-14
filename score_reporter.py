@@ -220,13 +220,67 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
     
-                # Base query with QTH info join
+                # Add data validation query first
+                validation_query = """
+                    WITH validation_check AS (
+                        SELECT 
+                            cs.id,
+                            cs.callsign,
+                            cs.timestamp,
+                            cs.qsos as total_qsos,
+                            cs.multipliers as reported_mults,
+                            SUM(bb.multipliers) as sum_band_mults,
+                            GROUP_CONCAT(bb.band || ':' || bb.qsos || '/' || bb.multipliers) as band_detail,
+                            CASE 
+                                WHEN cs.multipliers < SUM(bb.multipliers) THEN 'ERROR: Total mults less than band sum'
+                                WHEN EXISTS (
+                                    SELECT 1 FROM band_breakdown bb2 
+                                    WHERE bb2.contest_score_id = cs.id 
+                                    AND bb2.qsos > 0 AND bb2.multipliers = 0
+                                ) THEN 'ERROR: Band has QSOs but no mults'
+                                ELSE 'OK'
+                            END as validation_status
+                        FROM contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        GROUP BY cs.id, cs.callsign, cs.timestamp, cs.qsos, cs.multipliers
+                        HAVING validation_status != 'OK'
+                    )
+                    SELECT * FROM validation_check
+                    WHERE callsign = ? OR EXISTS (
+                        SELECT 1 FROM validation_check vc2 
+                        WHERE vc2.callsign = ?
+                    )
+                """
+                
+                cursor.execute(validation_query, (contest, callsign, callsign))
+                validation_results = cursor.fetchall()
+                if validation_results:
+                    self.logger.warning(f"Found data validation issues in {contest}:")
+                    for v in validation_results:
+                        self.logger.warning(
+                            f"Station {v[1]} at {v[2]}: {v[6]}\n"
+                            f"Reported total mults: {v[4]}, Sum of band mults: {v[5]}\n"
+                            f"Band breakdown: {v[6]}\n"
+                            f"Status: {v[7]}"
+                        )
+    
+                # Main query with corrected multiplier calculation
                 query = """
                     WITH latest_scores AS (
                         SELECT callsign, MAX(timestamp) as max_ts
                         FROM contest_scores
                         WHERE contest = ?
                         GROUP BY callsign
+                    ),
+                    band_totals AS (
+                        SELECT 
+                            cs.id,
+                            SUM(bb.multipliers) as total_mults,
+                            GROUP_CONCAT(bb.band || ':' || bb.multipliers) as band_breakdown
+                        FROM contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        GROUP BY cs.id
                     ),
                     station_scores AS (
                         SELECT 
@@ -236,54 +290,19 @@ class ScoreReporter:
                             qi.iaru_zone,
                             qi.arrl_section,
                             qi.state_province,
-                            qi.continent
+                            qi.continent,
+                            COALESCE(bt.total_mults, 0) as total_multipliers,
+                            bt.band_breakdown
                         FROM contest_scores cs
                         INNER JOIN latest_scores ls 
                             ON cs.callsign = ls.callsign 
                             AND cs.timestamp = ls.max_ts
                         LEFT JOIN qth_info qi 
                             ON qi.contest_score_id = cs.id
+                        LEFT JOIN band_totals bt
+                            ON bt.id = cs.id
                         WHERE cs.contest = ?
                         AND cs.qsos > 0
-                """
-                
-                params = [contest, contest]
-    
-                # Add filter conditions if specified
-                if filter_type and filter_value and filter_type.lower() != 'none':
-                    filter_map = {
-                        'DXCC': 'dxcc_country',
-                        'CQ Zone': 'cq_zone',
-                        'IARU Zone': 'iaru_zone',
-                        'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province',
-                        'Continent': 'continent'
-                    }
-                    
-                    db_field = filter_map.get(filter_type)
-                    if db_field:
-                        query += f" AND qi.{db_field} = ?"
-                        params.append(filter_value)
-    
-                # Complete the query
-                query += """)
-                    SELECT 
-                        ss.id,
-                        ss.callsign,
-                        ss.score,
-                        ss.power,
-                        ss.assisted,
-                        ss.timestamp,
-                        ss.qsos,
-                        ss.multipliers,
-                        CASE 
-                            WHEN ss.callsign = ? THEN 'current'
-                            WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY ss.score DESC) as rn
-                    FROM station_scores ss
-                    ORDER BY ss.score DESC
                 """
                 
                 params.extend([callsign, callsign])
