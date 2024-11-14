@@ -220,7 +220,7 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
     
-                # Base query with QTH info join and proper multiplier calculation
+                # Base query with QTH info join
                 query = """
                     WITH latest_scores AS (
                         SELECT callsign, MAX(timestamp) as max_ts
@@ -236,10 +236,7 @@ class ScoreReporter:
                             qi.iaru_zone,
                             qi.arrl_section,
                             qi.state_province,
-                            qi.continent,
-                            (SELECT SUM(bb.multipliers) 
-                             FROM band_breakdown bb 
-                             WHERE bb.contest_score_id = cs.id) as total_multipliers  -- For CQWW: sum all band multipliers
+                            qi.continent
                         FROM contest_scores cs
                         INNER JOIN latest_scores ls 
                             ON cs.callsign = ls.callsign 
@@ -278,7 +275,7 @@ class ScoreReporter:
                         ss.assisted,
                         ss.timestamp,
                         ss.qsos,
-                        COALESCE(ss.total_multipliers, 0) as total_multipliers,  -- Handle NULL case
+                        ss.multipliers,
                         CASE 
                             WHEN ss.callsign = ? THEN 'current'
                             WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
