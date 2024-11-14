@@ -15,7 +15,7 @@ keepalive = 5
 # Logging
 errorlog = os.path.join(log_dir, "gunicorn-error.log")
 accesslog = os.path.join(log_dir, "gunicorn-access.log")
-loglevel = "debug"  # Temporarily set to debug to get more information
+loglevel = "info"  # Temporarily set to debug to get more information
 
 # Ensure proper permissions
 capture_output = True
@@ -26,3 +26,7 @@ proc_name = 'livescore-pilot'
 
 # Graceful timeout
 graceful_timeout = 30
+
+# Trust the X-Forwarded-For headers from local proxies
+forwarded_allow_ips = '127.0.0.1'
+
