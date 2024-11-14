@@ -236,7 +236,10 @@ class ScoreReporter:
                             qi.iaru_zone,
                             qi.arrl_section,
                             qi.state_province,
-                            qi.continent
+                            qi.continent,
+                            (SELECT SUM(bb.multipliers) 
+                             FROM band_breakdown bb 
+                             WHERE bb.contest_score_id = cs.id) as total_multipliers
                         FROM contest_scores cs
                         INNER JOIN latest_scores ls 
                             ON cs.callsign = ls.callsign 
@@ -275,7 +278,7 @@ class ScoreReporter:
                         ss.assisted,
                         ss.timestamp,
                         ss.qsos,
-                        ss.multipliers,
+                        ss.total_multipliers,
                         CASE 
                             WHEN ss.callsign = ? THEN 'current'
                             WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
