@@ -46,7 +46,7 @@ class RateCalculator:
             self.logger.debug(f"Reference time: {current_ts}")
             self.logger.debug(f"Long window lookback to: {long_lookback}")
             self.logger.debug(f"Short window lookback to: {short_lookback}")
-        
+    
         query = """
             WITH current_bands AS (
                 SELECT 
@@ -104,8 +104,9 @@ class RateCalculator:
             ORDER BY cb.band
         """
         
+        # Use the current_ts datetime object for all timestamp comparisons
         cursor.execute(query, (
-            callsign, contest, current_utc.strftime('%Y-%m-%d %H:%M:%S'),
+            callsign, contest, current_ts.strftime('%Y-%m-%d %H:%M:%S'),
             callsign, contest, long_lookback.strftime('%Y-%m-%d %H:%M:%S'), long_lookback.strftime('%Y-%m-%d %H:%M:%S'),
             callsign, contest, short_lookback.strftime('%Y-%m-%d %H:%M:%S'), short_lookback.strftime('%Y-%m-%d %H:%M:%S')
         ))
@@ -117,19 +118,19 @@ class RateCalculator:
             self.logger.debug(f"Found {len(results)} bands with activity")
         
         for row in results:
-            band, current_qsos, multipliers, long_window_qsos, short_window_qsos, current_ts, long_window_ts, short_window_ts = row
+            band, current_qsos, multipliers, long_window_qsos, short_window_qsos, current_ts_str, long_window_ts, short_window_ts = row
             
             if self.debug:
                 self.logger.debug(f"\nBand {band} analysis:")
                 self.logger.debug(f"  Current QSOs: {current_qsos}")
-                self.logger.debug(f"  Current timestamp: {current_ts}")
+                self.logger.debug(f"  Current timestamp: {current_ts_str}")
                 self.logger.debug(f"  60-min window QSOs: {long_window_qsos} at {long_window_ts}")
                 self.logger.debug(f"  15-min window QSOs: {short_window_qsos} at {short_window_ts}")
             
             # Calculate long window rate (60-minute)
             long_rate = 0
             if long_window_qsos is not None and long_window_ts:
-                time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                time_diff = (datetime.strptime(current_ts_str, '%Y-%m-%d %H:%M:%S') - 
                            datetime.strptime(long_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
                 if time_diff > 0:
                     qso_diff = current_qsos - long_window_qsos
@@ -139,7 +140,7 @@ class RateCalculator:
             # Calculate short window rate (15-minute)
             short_rate = 0
             if short_window_qsos is not None and short_window_ts:
-                time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                time_diff = (datetime.strptime(current_ts_str, '%Y-%m-%d %H:%M:%S') - 
                            datetime.strptime(short_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
                 if time_diff > 0:
                     qso_diff = current_qsos - short_window_qsos
