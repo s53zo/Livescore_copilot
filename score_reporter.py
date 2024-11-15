@@ -384,13 +384,18 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return None
 
+    # In score_reporter.py
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
         """Get band breakdown with both 60-minute and 15-minute rates"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                # Pass the timestamp as the current_ts parameter
                 return self.rate_calculator.calculate_band_rates(
-                    cursor, callsign, contest, timestamp
+                    cursor=cursor,
+                    callsign=callsign,
+                    contest=contest,
+                    current_ts=timestamp  # Make sure to pass timestamp as current_ts
                 )
         except Exception as e:
             self.logger.error(f"Error in get_band_breakdown_with_rates: {e}")
