@@ -25,18 +25,25 @@ class RateCalculator:
             self.logger.addHandler(console_handler)
             self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
 
-    def calculate_band_rates(self, cursor, callsign, contest, long_window=60, short_window=15):
-        """Calculate per-band QSO rates for both time windows using current UTC time"""
+    def calculate_band_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
+        """Calculate per-band QSO rates for both time windows using specified timestamp as reference"""
+        # Convert window sizes to integers
         long_window = int(long_window)
         short_window = int(short_window)
         
-        current_utc = datetime.utcnow()
-        long_lookback = current_utc - timedelta(minutes=long_window)
-        short_lookback = current_utc - timedelta(minutes=short_window)
+        # Convert timestamp string to datetime if it's a string
+        if isinstance(timestamp, str):
+            current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+        else:
+            current_ts = timestamp
+        
+        # Calculate lookback times from the provided timestamp
+        long_lookback = current_ts - timedelta(minutes=long_window)
+        short_lookback = current_ts - timedelta(minutes=short_window)
         
         if self.debug:
             self.logger.debug(f"\nCalculating band rates for {callsign} in {contest}")
-            self.logger.debug(f"Current UTC: {current_utc}")
+            self.logger.debug(f"Reference time: {current_ts}")
             self.logger.debug(f"Long window lookback to: {long_lookback}")
             self.logger.debug(f"Short window lookback to: {short_lookback}")
         
