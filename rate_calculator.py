@@ -23,140 +23,132 @@ class RateCalculator:
             self.logger.addHandler(console_handler)
             self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
 
-    def calculate_band_rates(self, cursor, callsign, contest, lookback_minutes=60):
-        """Calculate per-band QSO rates prioritizing reports near the target lookback time"""
-        query = """
-            WITH latest_scores AS (
-                SELECT cs.id, cs.timestamp
-                FROM contest_scores cs
-                WHERE cs.callsign = ? 
-                AND cs.contest = ?
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
-            ),
-            latest_bands AS (
-                SELECT 
-                    bb.band,
-                    bb.qsos as current_qsos,
-                    cs.timestamp as current_ts
-                FROM latest_scores ls
-                JOIN contest_scores cs ON cs.id = ls.id
-                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-            ),
-            time_windows AS (
-                -- Calculate time differences and assign priority
-                SELECT 
-                    bb.band,
-                    bb.qsos as prev_qsos,
-                    cs.timestamp as prev_ts,
-                    ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) as time_diff,
-                    CASE
-                        -- Highest priority: within 5 minutes of target time (55-65 minutes)
-                        WHEN ABS(ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) - ?) <= 5 THEN 1
-                        -- Medium priority: within 10 minutes of target time (50-70 minutes)
-                        WHEN ABS(ROUND((JULIANDAY(lb.current_ts) - JULIANDAY(cs.timestamp)) * 24 * 60, 1) - ?) <= 10 THEN 2
-                        -- Lowest priority: any other time within the window
-                        ELSE 3
-                    END as priority
-                FROM latest_bands lb
-                CROSS JOIN contest_scores cs
-                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                AND cs.timestamp < lb.current_ts
-                AND cs.timestamp >= datetime(lb.current_ts, ? || ' minutes')
-                AND bb.qsos > 0
-            ),
-            ranked_reports AS (
-                -- Rank reports within each priority level
-                SELECT 
-                    band,
-                    prev_qsos,
-                    prev_ts,
-                    time_diff,
-                    priority,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY band, priority 
-                        ORDER BY ABS(time_diff - ?) -- Order by closeness to target time
-                    ) as priority_rank
-                FROM time_windows
-            ),
-            best_reports AS (
-                -- Select the best report for each band based on priority
-                SELECT band, prev_qsos, prev_ts, time_diff
-                FROM ranked_reports rr1
-                WHERE priority_rank = 1
-                AND NOT EXISTS (
-                    -- Ensure there's no higher priority report for this band
-                    SELECT 1 FROM ranked_reports rr2
-                    WHERE rr2.band = rr1.band
-                    AND rr2.priority < rr1.priority
-                    AND rr2.priority_rank = 1
-                )
-            )
-            SELECT DISTINCT
-                lb.band,
-                lb.current_qsos,
-                br.prev_qsos,
-                lb.current_ts,
-                br.prev_ts,
-                br.time_diff as minutes_diff
-            FROM latest_bands lb
-            LEFT JOIN best_reports br ON lb.band = br.band
-            WHERE lb.current_qsos > 0
-            ORDER BY lb.band
-        """
+    def calculate_band_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
+        """Calculate per-band QSO rates for both time windows using specified timestamp as reference"""
+        # Convert window sizes to integers
+        long_window = int(long_window)
+        short_window = int(short_window)
         
-        minutes_param = f"-{lookback_minutes}"
-        cursor.execute(query, (
-            callsign, contest,
-            lookback_minutes, lookback_minutes,  # For priority window calculations
-            callsign, contest,
-            minutes_param,
-            lookback_minutes  # For final time diff comparison
-        ))
-        results = cursor.fetchall()
+        # Convert current_ts string to datetime if it's a string
+        if isinstance(current_ts, str):
+            current_ts = datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S')
+        
+        # Calculate lookback times from the provided timestamp
+        long_lookback = current_ts - timedelta(minutes=long_window)
+        short_lookback = current_ts - timedelta(minutes=short_window)
         
         if self.debug:
             self.logger.debug(f"\nCalculating band rates for {callsign} in {contest}")
-            self.logger.debug(f"Looking back {lookback_minutes} minutes")
+            self.logger.debug(f"Reference time: {current_ts}")
+            self.logger.debug(f"Long window lookback to: {long_lookback}")
+            self.logger.debug(f"Short window lookback to: {short_lookback}")
+        
+        query = """
+            WITH current_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as current_qsos,
+                    bb.multipliers,
+                    cs.timestamp as current_ts
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ? 
+                AND cs.contest = ?
+                AND cs.timestamp <= ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            ),
+            long_window_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as long_window_qsos,
+                    cs.timestamp as long_window_ts
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= ?
+                ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(?))
+                LIMIT 1
+            ),
+            short_window_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as short_window_qsos,
+                    cs.timestamp as short_window_ts
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= ?
+                ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(?))
+                LIMIT 1
+            )
+            SELECT 
+                cb.band,
+                cb.current_qsos,
+                cb.multipliers,
+                lwb.long_window_qsos,
+                swb.short_window_qsos,
+                cb.current_ts,
+                lwb.long_window_ts,
+                swb.short_window_ts
+            FROM current_bands cb
+            LEFT JOIN long_window_bands lwb ON cb.band = lwb.band
+            LEFT JOIN short_window_bands swb ON cb.band = swb.band
+            WHERE cb.current_qsos > 0
+            ORDER BY cb.band
+        """
+        
+        cursor.execute(query, (
+            callsign, contest, current_ts.strftime('%Y-%m-%d %H:%M:%S'),
+            callsign, contest, long_lookback.strftime('%Y-%m-%d %H:%M:%S'), long_lookback.strftime('%Y-%m-%d %H:%M:%S'),
+            callsign, contest, short_lookback.strftime('%Y-%m-%d %H:%M:%S'), short_lookback.strftime('%Y-%m-%d %H:%M:%S')
+        ))
+        
+        results = cursor.fetchall()
+        band_data = {}
+        
+        if self.debug:
             self.logger.debug(f"Found {len(results)} bands with activity")
         
-        band_rates = {}
         for row in results:
-            band, current_qsos, prev_qsos, current_ts, prev_ts, minutes_diff = row
+            band, current_qsos, multipliers, long_window_qsos, short_window_qsos, current_ts, long_window_ts, short_window_ts = row
             
             if self.debug:
                 self.logger.debug(f"\nBand {band} analysis:")
                 self.logger.debug(f"  Current QSOs: {current_qsos}")
-                self.logger.debug(f"  Previous QSOs: {prev_qsos if prev_qsos is not None else 'None'}")
                 self.logger.debug(f"  Current timestamp: {current_ts}")
-                self.logger.debug(f"  Previous timestamp: {prev_ts if prev_ts is not None else 'None'}")
-                self.logger.debug(f"  Time difference: {minutes_diff if minutes_diff is not None else 'None'} minutes")
+                self.logger.debug(f"  60-min window QSOs: {long_window_qsos} at {long_window_ts}")
+                self.logger.debug(f"  15-min window QSOs: {short_window_qsos} at {short_window_ts}")
             
-            if not prev_ts or not minutes_diff or minutes_diff <= 0:
-                if self.debug:
-                    self.logger.debug("  Rate calculation skipped - insufficient data")
-                band_rates[band] = 0
-                continue
+            # Calculate long window rate (60-minute)
+            long_rate = 0
+            if long_window_qsos is not None and long_window_ts:
+                time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                           datetime.strptime(long_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                if time_diff > 0:
+                    qso_diff = current_qsos - long_window_qsos
+                    if qso_diff > 0:
+                        long_rate = int(round((qso_diff * 60) / time_diff))
             
-            # If previous QSOs is NULL, treat as 0
-            prev_qsos = prev_qsos or 0
-            qso_diff = current_qsos - prev_qsos
+            # Calculate short window rate (15-minute)
+            short_rate = 0
+            if short_window_qsos is not None and short_window_ts:
+                time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                           datetime.strptime(short_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                if time_diff > 0:
+                    qso_diff = current_qsos - short_window_qsos
+                    if qso_diff > 0:
+                        short_rate = int(round((qso_diff * 60) / time_diff))
             
-            if qso_diff == 0:
-                if self.debug:
-                    self.logger.debug("  Rate is 0 - no new QSOs")
-                band_rates[band] = 0
-            else:
-                # Calculate hourly rate
-                rate = int(round((qso_diff * 60) / minutes_diff))
-                band_rates[band] = rate
-                if self.debug:
-                    self.logger.debug(f"  QSO difference: {qso_diff}")
-                    self.logger.debug(f"  Calculated rate: {rate}/hr")
+            if self.debug:
+                self.logger.debug(f"  60-minute rate: {long_rate}/hr")
+                self.logger.debug(f"  15-minute rate: {short_rate}/hr")
+            
+            band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
         
-        return band_rates
+        return band_data
     
     def calculate_total_rate(self, cursor, callsign, contest, lookback_minutes=60):
         """Calculate total QSO rate with detailed debugging"""
