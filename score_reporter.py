@@ -8,76 +8,35 @@ from flask import request
 import sys
 
 class RateCalculator:
-    def __init__(self, db_path):
+    def __init__(self, db_path, debug=False):
         self.db_path = db_path
-        
-    def calculate_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
-        """Calculate QSO rates for both long and short time windows"""
-        query = """
-            WITH current_score AS (
-                SELECT qsos, timestamp
-                FROM contest_scores
-                WHERE callsign = ? 
-                AND contest = ?
-                AND timestamp = ?
-            ),
-            long_window_score AS (
-                SELECT qsos
-                FROM contest_scores
-                WHERE callsign = ?
-                AND contest = ?
-                AND timestamp <= datetime(?, '-60 minutes')
-                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(datetime(?, '-60 minutes')))
-                LIMIT 1
-            ),
-            short_window_score AS (
-                SELECT qsos
-                FROM contest_scores
-                WHERE callsign = ?
-                AND contest = ?
-                AND timestamp <= datetime(?, '-15 minutes')
-                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(datetime(?, '-15 minutes')))
-                LIMIT 1
-            )
-            SELECT 
-                cs.qsos as current_qsos,
-                lws.qsos as long_window_qsos,
-                sws.qsos as short_window_qsos
-            FROM current_score cs
-            LEFT JOIN long_window_score lws
-            LEFT JOIN short_window_score sws
-        """
-        
-        cursor.execute(query, (
-            callsign, contest, current_ts,
-            callsign, contest, current_ts, current_ts,
-            callsign, contest, current_ts, current_ts
-        ))
-        
-        result = cursor.fetchone()
-        if not result:
-            return 0, 0
-            
-        current_qsos, long_window_qsos, short_window_qsos = result
-        
-        # Calculate 60-minute rate
-        long_rate = 0
-        if long_window_qsos is not None:
-            qso_diff = current_qsos - long_window_qsos
-            if qso_diff > 0:
-                long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
-                
-        # Calculate 15-minute rate
-        short_rate = 0
-        if short_window_qsos is not None:
-            qso_diff = current_qsos - short_window_qsos
-            if qso_diff > 0:
-                short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
-                
-        return long_rate, short_rate
+        self.debug = debug
+        self.setup_logging()
 
-    def calculate_band_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
-        """Calculate per-band QSO rates for both time windows"""
+    def setup_logging(self):
+        """Setup logging configuration"""
+        self.logger = logging.getLogger('RateCalculator')
+        if not self.logger.handlers:
+            formatter = logging.Formatter(
+                '%(asctime)s - %(levelname)s - %(message)s'
+            )
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            self.logger.addHandler(console_handler)
+            self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
+
+    def calculate_band_rates(self, cursor, callsign, contest, long_window=60, short_window=15):
+        """Calculate per-band QSO rates for both time windows using current UTC time"""
+        current_utc = datetime.utcnow()
+        long_lookback = current_utc - timedelta(minutes=long_window)
+        short_lookback = current_utc - timedelta(minutes=short_window)
+        
+        if self.debug:
+            self.logger.debug(f"\nCalculating band rates for {callsign} in {contest}")
+            self.logger.debug(f"Current UTC: {current_utc}")
+            self.logger.debug(f"Long window lookback to: {long_lookback}")
+            self.logger.debug(f"Short window lookback to: {short_lookback}")
+        
         query = """
             WITH current_bands AS (
                 SELECT 
@@ -89,38 +48,45 @@ class RateCalculator:
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
-                AND cs.timestamp = ?
+                AND cs.timestamp <= ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
             ),
             long_window_bands AS (
                 SELECT 
                     bb.band,
-                    bb.qsos as long_window_qsos
+                    bb.qsos as long_window_qsos,
+                    cs.timestamp as long_window_ts
                 FROM contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                 WHERE cs.callsign = ?
                 AND cs.contest = ?
                 AND cs.timestamp <= ?
-                AND cs.timestamp >= datetime(?, ? || ' minutes')
-                ORDER BY cs.timestamp DESC
+                ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(?))
+                LIMIT 1
             ),
             short_window_bands AS (
                 SELECT 
                     bb.band,
-                    bb.qsos as short_window_qsos
+                    bb.qsos as short_window_qsos,
+                    cs.timestamp as short_window_ts
                 FROM contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                 WHERE cs.callsign = ?
                 AND cs.contest = ?
                 AND cs.timestamp <= ?
-                AND cs.timestamp >= datetime(?, ? || ' minutes')
-                ORDER BY cs.timestamp DESC
+                ORDER BY ABS(JULIANDAY(cs.timestamp) - JULIANDAY(?))
+                LIMIT 1
             )
             SELECT 
                 cb.band,
                 cb.current_qsos,
                 cb.multipliers,
                 lwb.long_window_qsos,
-                swb.short_window_qsos
+                swb.short_window_qsos,
+                cb.current_ts,
+                lwb.long_window_ts,
+                swb.short_window_ts
             FROM current_bands cb
             LEFT JOIN long_window_bands lwb ON cb.band = lwb.band
             LEFT JOIN short_window_bands swb ON cb.band = swb.band
@@ -129,34 +95,151 @@ class RateCalculator:
         """
         
         cursor.execute(query, (
-            callsign, contest, current_ts,
-            callsign, contest, current_ts, current_ts, f"-{long_window}",
-            callsign, contest, current_ts, current_ts, f"-{short_window}"
+            callsign, contest, current_utc.strftime('%Y-%m-%d %H:%M:%S'),
+            callsign, contest, long_lookback.strftime('%Y-%m-%d %H:%M:%S'), long_lookback.strftime('%Y-%m-%d %H:%M:%S'),
+            callsign, contest, short_lookback.strftime('%Y-%m-%d %H:%M:%S'), short_lookback.strftime('%Y-%m-%d %H:%M:%S')
         ))
         
         results = cursor.fetchall()
         band_data = {}
         
+        if self.debug:
+            self.logger.debug(f"Found {len(results)} bands with activity")
+        
         for row in results:
-            band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
+            band, current_qsos, multipliers, long_window_qsos, short_window_qsos, current_ts, long_window_ts, short_window_ts = row
+            
+            if self.debug:
+                self.logger.debug(f"\nBand {band} analysis:")
+                self.logger.debug(f"  Current QSOs: {current_qsos}")
+                self.logger.debug(f"  Current timestamp: {current_ts}")
+                self.logger.debug(f"  60-min window QSOs: {long_window_qsos} at {long_window_ts}")
+                self.logger.debug(f"  15-min window QSOs: {short_window_qsos} at {short_window_ts}")
             
             # Calculate long window rate (60-minute)
             long_rate = 0
-            if long_window_qsos is not None:
-                qso_diff = current_qsos - long_window_qsos
-                if qso_diff > 0:
-                    long_rate = int(round((qso_diff * 60) / long_window))
+            if long_window_qsos is not None and long_window_ts:
+                time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                           datetime.strptime(long_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                if time_diff > 0:
+                    qso_diff = current_qsos - long_window_qsos
+                    if qso_diff > 0:
+                        long_rate = int(round((qso_diff * 60) / time_diff))
             
             # Calculate short window rate (15-minute)
             short_rate = 0
-            if short_window_qsos is not None:
-                qso_diff = current_qsos - short_window_qsos
-                if qso_diff > 0:
-                    short_rate = int(round((qso_diff * 60) / short_window))
+            if short_window_qsos is not None and short_window_ts:
+                time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                           datetime.strptime(short_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                if time_diff > 0:
+                    qso_diff = current_qsos - short_window_qsos
+                    if qso_diff > 0:
+                        short_rate = int(round((qso_diff * 60) / time_diff))
+            
+            if self.debug:
+                self.logger.debug(f"  60-minute rate: {long_rate}/hr")
+                self.logger.debug(f"  15-minute rate: {short_rate}/hr")
             
             band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
         
         return band_data
+
+    def calculate_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
+        """Calculate total QSO rates for both time windows using current UTC time"""
+        current_utc = datetime.utcnow()
+        long_lookback = current_utc - timedelta(minutes=long_window)
+        short_lookback = current_utc - timedelta(minutes=short_window)
+        
+        if self.debug:
+            self.logger.debug(f"\nCalculating total rates for {callsign} in {contest}")
+            self.logger.debug(f"Current UTC: {current_utc}")
+            self.logger.debug(f"Long window lookback to: {long_lookback}")
+            self.logger.debug(f"Short window lookback to: {short_lookback}")
+        
+        query = """
+            WITH current_score AS (
+                SELECT qsos, timestamp
+                FROM contest_scores
+                WHERE callsign = ? 
+                AND contest = ?
+                AND timestamp <= ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            ),
+            long_window_score AS (
+                SELECT qsos, timestamp
+                FROM contest_scores
+                WHERE callsign = ?
+                AND contest = ?
+                AND timestamp <= ?
+                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(?))
+                LIMIT 1
+            ),
+            short_window_score AS (
+                SELECT qsos, timestamp
+                FROM contest_scores
+                WHERE callsign = ?
+                AND contest = ?
+                AND timestamp <= ?
+                ORDER BY ABS(JULIANDAY(timestamp) - JULIANDAY(?))
+                LIMIT 1
+            )
+            SELECT 
+                cs.qsos as current_qsos,
+                lws.qsos as long_window_qsos,
+                sws.qsos as short_window_qsos,
+                cs.timestamp as current_ts,
+                lws.timestamp as long_window_ts,
+                sws.timestamp as short_window_ts
+            FROM current_score cs
+            LEFT JOIN long_window_score lws
+            LEFT JOIN short_window_score sws
+        """
+        
+        cursor.execute(query, (
+            callsign, contest, current_utc.strftime('%Y-%m-%d %H:%M:%S'),
+            callsign, contest, long_lookback.strftime('%Y-%m-%d %H:%M:%S'), long_lookback.strftime('%Y-%m-%d %H:%M:%S'),
+            callsign, contest, short_lookback.strftime('%Y-%m-%d %H:%M:%S'), short_lookback.strftime('%Y-%m-%d %H:%M:%S')
+        ))
+        
+        result = cursor.fetchone()
+        if not result:
+            return 0, 0
+            
+        current_qsos, long_window_qsos, short_window_qsos, current_ts, long_window_ts, short_window_ts = result
+        
+        if self.debug:
+            self.logger.debug("\nTotal rate analysis:")
+            self.logger.debug(f"  Current QSOs: {current_qsos}")
+            self.logger.debug(f"  Current timestamp: {current_ts}")
+            self.logger.debug(f"  60-min window QSOs: {long_window_qsos} at {long_window_ts}")
+            self.logger.debug(f"  15-min window QSOs: {short_window_qsos} at {short_window_ts}")
+        
+        # Calculate 60-minute rate
+        long_rate = 0
+        if long_window_qsos is not None and long_window_ts:
+            time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                        datetime.strptime(long_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+            if time_diff > 0:
+                qso_diff = current_qsos - long_window_qsos
+                if qso_diff > 0:
+                    long_rate = int(round((qso_diff * 60) / time_diff))
+        
+        # Calculate 15-minute rate
+        short_rate = 0
+        if short_window_qsos is not None and short_window_ts:
+            time_diff = (datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S') - 
+                        datetime.strptime(short_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+            if time_diff > 0:
+                qso_diff = current_qsos - short_window_qsos
+                if qso_diff > 0:
+                    short_rate = int(round((qso_diff * 60) / time_diff))
+        
+        if self.debug:
+            self.logger.debug(f"  60-minute rate: {long_rate}/hr")
+            self.logger.debug(f"  15-minute rate: {short_rate}/hr")
+            
+        return long_rate, short_rate
 
 class ScoreReporter:
     def __init__(self, db_path=None, template_path=None, rate_minutes=60):
