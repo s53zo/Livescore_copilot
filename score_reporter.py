@@ -380,12 +380,78 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                return self.rate_calculator.calculate_band_rates(
-                    cursor=cursor,
-                    callsign=callsign,
-                    contest=contest,
-                    timestamp=timestamp  # Changed from current_ts to timestamp
-                )
+                query = """
+                    WITH current_score AS (
+                        SELECT cs.id, cs.timestamp, bb.band, bb.qsos, bb.multipliers
+                        FROM contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        WHERE cs.callsign = ? 
+                        AND cs.contest = ?
+                        AND cs.timestamp = ?
+                    ),
+                    long_window_score AS (
+                        SELECT bb.band, bb.qsos
+                        FROM contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        WHERE cs.callsign = ?
+                        AND cs.contest = ?
+                        AND cs.timestamp <= datetime(?, '-60 minutes')
+                        ORDER BY cs.timestamp DESC
+                        LIMIT 1
+                    ),
+                    short_window_score AS (
+                        SELECT bb.band, bb.qsos
+                        FROM contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        WHERE cs.callsign = ?
+                        AND cs.contest = ?
+                        AND cs.timestamp <= datetime(?, '-15 minutes')
+                        ORDER BY cs.timestamp DESC
+                        LIMIT 1
+                    )
+                    SELECT 
+                        cs.band,
+                        cs.qsos as current_qsos,
+                        cs.multipliers,
+                        lws.qsos as long_window_qsos,
+                        sws.qsos as short_window_qsos
+                    FROM current_score cs
+                    LEFT JOIN long_window_score lws ON cs.band = lws.band
+                    LEFT JOIN short_window_score sws ON cs.band = sws.band
+                    WHERE cs.qsos > 0
+                    ORDER BY cs.band
+                """
+    
+                cursor.execute(query, (
+                    callsign, contest, timestamp,
+                    callsign, contest, timestamp,
+                    callsign, contest, timestamp
+                ))
+                
+                results = cursor.fetchall()
+                band_data = {}
+                
+                for row in results:
+                    band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
+                    
+                    # Calculate 60-minute rate
+                    long_rate = 0
+                    if long_window_qsos is not None:
+                        qso_diff = current_qsos - long_window_qsos
+                        if qso_diff > 0:
+                            long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
+                    
+                    # Calculate 15-minute rate
+                    short_rate = 0
+                    if short_window_qsos is not None:
+                        qso_diff = current_qsos - short_window_qsos
+                        if qso_diff > 0:
+                            short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
+                    
+                    band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
+                
+                return band_data
+                        
         except Exception as e:
             self.logger.error(f"Error in get_band_breakdown_with_rates: {e}")
             self.logger.error(traceback.format_exc())
