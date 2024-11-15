@@ -26,27 +26,17 @@ class RateCalculator:
             self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
 
     def calculate_band_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
-        """Calculate per-band QSO rates for both time windows using specified timestamp as reference"""
-        # Convert window sizes to integers
-        long_window = int(long_window)
-        short_window = int(short_window)
-        
-        # Convert timestamp string to datetime if it's a string
+        """Calculate per-band QSO rates for both time windows"""
+        # Convert timestamp string to datetime if needed
         if isinstance(timestamp, str):
             current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
         else:
             current_ts = timestamp
-        
-        # Calculate lookback times from the provided timestamp
+            
+        # Calculate lookback times
         long_lookback = current_ts - timedelta(minutes=long_window)
         short_lookback = current_ts - timedelta(minutes=short_window)
         
-        if self.debug:
-            self.logger.debug(f"\nCalculating band rates for {callsign} in {contest}")
-            self.logger.debug(f"Reference time: {current_ts}")
-            self.logger.debug(f"Long window lookback to: {long_lookback}")
-            self.logger.debug(f"Short window lookback to: {short_lookback}")
-    
         query = """
             WITH current_bands AS (
                 SELECT 
@@ -104,7 +94,6 @@ class RateCalculator:
             ORDER BY cb.band
         """
         
-        # Use the current_ts datetime object for all timestamp comparisons
         cursor.execute(query, (
             callsign, contest, current_ts.strftime('%Y-%m-%d %H:%M:%S'),
             callsign, contest, long_lookback.strftime('%Y-%m-%d %H:%M:%S'), long_lookback.strftime('%Y-%m-%d %H:%M:%S'),
@@ -114,42 +103,36 @@ class RateCalculator:
         results = cursor.fetchall()
         band_data = {}
         
-        if self.debug:
-            self.logger.debug(f"Found {len(results)} bands with activity")
-        
         for row in results:
             band, current_qsos, multipliers, long_window_qsos, short_window_qsos, current_ts_str, long_window_ts, short_window_ts = row
             
-            if self.debug:
-                self.logger.debug(f"\nBand {band} analysis:")
-                self.logger.debug(f"  Current QSOs: {current_qsos}")
-                self.logger.debug(f"  Current timestamp: {current_ts_str}")
-                self.logger.debug(f"  60-min window QSOs: {long_window_qsos} at {long_window_ts}")
-                self.logger.debug(f"  15-min window QSOs: {short_window_qsos} at {short_window_ts}")
-            
-            # Calculate long window rate (60-minute)
+            # Calculate 60-minute rate
             long_rate = 0
             if long_window_qsos is not None and long_window_ts:
-                time_diff = (datetime.strptime(current_ts_str, '%Y-%m-%d %H:%M:%S') - 
-                           datetime.strptime(long_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-                if time_diff > 0:
-                    qso_diff = current_qsos - long_window_qsos
-                    if qso_diff > 0:
-                        long_rate = int(round((qso_diff * 60) / time_diff))
+                try:
+                    time_diff = (datetime.strptime(current_ts_str, '%Y-%m-%d %H:%M:%S') - 
+                               datetime.strptime(long_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                    if time_diff > 0:
+                        qso_diff = current_qsos - long_window_qsos
+                        if qso_diff > 0:
+                            long_rate = int(round((qso_diff * 60) / time_diff))
+                except Exception as e:
+                    self.logger.error(f"Error calculating long rate: {e}")
+                    long_rate = 0
             
-            # Calculate short window rate (15-minute)
+            # Calculate 15-minute rate
             short_rate = 0
             if short_window_qsos is not None and short_window_ts:
-                time_diff = (datetime.strptime(current_ts_str, '%Y-%m-%d %H:%M:%S') - 
-                           datetime.strptime(short_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-                if time_diff > 0:
-                    qso_diff = current_qsos - short_window_qsos
-                    if qso_diff > 0:
-                        short_rate = int(round((qso_diff * 60) / time_diff))
-            
-            if self.debug:
-                self.logger.debug(f"  60-minute rate: {long_rate}/hr")
-                self.logger.debug(f"  15-minute rate: {short_rate}/hr")
+                try:
+                    time_diff = (datetime.strptime(current_ts_str, '%Y-%m-%d %H:%M:%S') - 
+                               datetime.strptime(short_window_ts, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
+                    if time_diff > 0:
+                        qso_diff = current_qsos - short_window_qsos
+                        if qso_diff > 0:
+                            short_rate = int(round((qso_diff * 60) / time_diff))
+                except Exception as e:
+                    self.logger.error(f"Error calculating short rate: {e}")
+                    short_rate = 0
             
             band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
         
