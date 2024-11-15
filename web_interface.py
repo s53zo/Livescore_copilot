@@ -70,23 +70,27 @@ def index():
             callsigns = []
             
             if selected_contest:
-                # Fetch callsigns with QSO count for the selected contest
+                # Fetch unique callsigns with their latest QSO count for the selected contest
                 cursor.execute("""
-                    SELECT cs.callsign, cs.qsos AS qso_count
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
-                    WHERE cs.contest = ?
-                    AND cs.qsos > 0
-                    ORDER BY cs.callsign
+                    WITH latest_scores AS (
+                        SELECT cs.callsign, cs.qsos, cs.timestamp
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                        AND cs.qsos > 0
+                    )
+                    SELECT DISTINCT callsign, qsos as qso_count
+                    FROM latest_scores
+                    ORDER BY callsign
                 """, (selected_contest, selected_contest))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-        
+                
         return render_template('select_form.html', 
                              contests=contests,
                              selected_contest=selected_contest,
@@ -195,18 +199,22 @@ def get_callsigns():
         with get_db() as db:
             cursor = db.cursor()
             cursor.execute("""
-                SELECT cs.callsign, cs.qsos AS qso_count
-                FROM contest_scores cs
-                INNER JOIN (
-                    SELECT callsign, MAX(timestamp) as max_ts
-                    FROM contest_scores
-                    WHERE contest = ?
-                    GROUP BY callsign
-                ) latest ON cs.callsign = latest.callsign 
-                    AND cs.timestamp = latest.max_ts
-                WHERE cs.contest = ?
-                AND cs.qsos > 0
-                ORDER BY cs.callsign
+                WITH latest_scores AS (
+                    SELECT cs.callsign, cs.qsos, cs.timestamp
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.timestamp = latest.max_ts
+                    WHERE cs.contest = ?
+                    AND cs.qsos > 0
+                )
+                SELECT DISTINCT callsign, qsos as qso_count
+                FROM latest_scores
+                ORDER BY callsign
             """, (contest, contest))
             callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
             return jsonify(callsigns)
