@@ -395,6 +395,7 @@ class ScoreReporter:
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
+                        AND cs.timestamp > datetime(?, '-65 minutes')
                         AND cs.timestamp <= datetime(?, '-60 minutes')
                         ORDER BY cs.timestamp DESC
                         LIMIT 1
@@ -405,6 +406,7 @@ class ScoreReporter:
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
+                        AND cs.timestamp > datetime(?, '-20 minutes')
                         AND cs.timestamp <= datetime(?, '-15 minutes')
                         ORDER BY cs.timestamp DESC
                         LIMIT 1
