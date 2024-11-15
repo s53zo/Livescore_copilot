@@ -395,10 +395,9 @@ class ScoreReporter:
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
-                        AND cs.timestamp > datetime(?, '-65 minutes')
-                        AND cs.timestamp <= datetime(?, '-60 minutes')
+                        AND cs.timestamp <= ?
+                        AND cs.timestamp >= datetime(?, '-60 minutes')
                         ORDER BY cs.timestamp DESC
-                        LIMIT 1
                     ),
                     short_window_score AS (
                         SELECT bb.band, bb.qsos
@@ -406,10 +405,9 @@ class ScoreReporter:
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
-                        AND cs.timestamp > datetime(?, '-20 minutes')
-                        AND cs.timestamp <= datetime(?, '-15 minutes')
+                        AND cs.timestamp <= ?
+                        AND cs.timestamp >= datetime(?, '-15 minutes')
                         ORDER BY cs.timestamp DESC
-                        LIMIT 1
                     )
                     SELECT 
                         cs.band,
@@ -425,9 +423,9 @@ class ScoreReporter:
                 """
     
                 cursor.execute(query, (
-                    callsign, contest, timestamp,
-                    callsign, contest, timestamp,
-                    callsign, contest, timestamp
+                    callsign, contest, timestamp,              # current_score parameters (3)
+                    callsign, contest, timestamp, timestamp,   # long_window_score parameters (4)
+                    callsign, contest, timestamp, timestamp    # short_window_score parameters (4)
                 ))
                 
                 results = cursor.fetchall()
