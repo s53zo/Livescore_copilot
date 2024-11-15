@@ -27,6 +27,9 @@ class RateCalculator:
 
     def calculate_band_rates(self, cursor, callsign, contest, long_window=60, short_window=15):
         """Calculate per-band QSO rates for both time windows using current UTC time"""
+        long_window = int(long_window)
+        short_window = int(short_window)
+        
         current_utc = datetime.utcnow()
         long_lookback = current_utc - timedelta(minutes=long_window)
         short_lookback = current_utc - timedelta(minutes=short_window)
@@ -146,6 +149,9 @@ class RateCalculator:
 
     def calculate_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
         """Calculate total QSO rates for both time windows using current UTC time"""
+        long_window = int(long_window)
+        short_window = int(short_window)
+        
         current_utc = datetime.utcnow()
         long_lookback = current_utc - timedelta(minutes=long_window)
         short_lookback = current_utc - timedelta(minutes=short_window)
