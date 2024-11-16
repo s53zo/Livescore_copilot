@@ -672,7 +672,7 @@ class ScoreReporter:
                 # Add highlight for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
 
-                callsign_cell = f'<div class="rate-tooltip" data-callsign="{callsign_val}" data-contest="{contest}" data-timestamp="{timestamp}">{callsign_val}</div>'
+                callsign_cell = f'<div class="rate-tooltip" data-callsign="{ callsign_val }" data-contest="{ contest }" data-timestamp="{ timestamp }">{ callsign_val }</div>'
     
                 # Generate table row
                 row = f"""
