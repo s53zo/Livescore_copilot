@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime, timedelta
 from flask import request
 import sys
+from rate_reporter_tooltip import RateReporterTooltip
 
 class RateCalculator:
     def __init__(self, db_path, debug=False):
@@ -526,6 +527,7 @@ class ScoreReporter:
 
     
     def generate_html_content(self, template, callsign, contest, stations):
+        rate_tooltip = RateReporterTooltip(self.db_path)
         """Generate HTML content with updated category display"""
         try:
             # Get filter information for the header if available
@@ -672,10 +674,11 @@ class ScoreReporter:
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
                 
                 # Generate table row
+                tooltip_attr = rate_tooltip.generate_tooltip_html(callsign_val, contest, timestamp)
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
-                    <td>{callsign_val}</td>
+                    <td {tooltip_attr}>{callsign_val}</td>
                     <td>{category_html}</td>
                     <td>{score:,}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
