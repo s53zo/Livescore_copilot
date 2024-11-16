@@ -534,6 +534,11 @@ class ScoreReporter:
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
     
+            # Initialize variables for the monitored station
+            power = None
+            assisted = None
+            timestamp = None
+    
             # Fetch QTH details and prepare filter info
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -565,7 +570,7 @@ class ScoreReporter:
                                     f'&filter_value={value}" class="filter-link">'
                                     f'{label}: {value}</a>'
                                 )
-                    
+    
                     if filter_parts:
                         if current_filter_type != 'none':
                             filter_parts.append(
@@ -574,7 +579,7 @@ class ScoreReporter:
                                 f'&filter_value=none" class="filter-link clear-filter">'
                                 f'Show All</a>'
                             )
-                        
+    
                         filter_info_div = f"""
                         <div class="filter-info">
                             <span class="filter-label">Filters:</span> 
@@ -585,7 +590,7 @@ class ScoreReporter:
             # Generate table rows for each station
             table_rows = []
             for i, station in enumerate(stations, 1):
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+                station_id, callsign_val, score, power_val, assisted_val, timestamp_val, qsos, mults, position, rn = station
     
                 # Fetch operator and transmitter details
                 with sqlite3.connect(self.db_path) as conn:
@@ -600,17 +605,17 @@ class ScoreReporter:
                     transmitter = result[1] if result else 'ONE'
     
                 # Calculate operator category and format power tag
-                op_category = self.get_operator_category(ops, transmitter, assisted or 'NON-ASSISTED')
-                power_class = power.upper() if power else 'Unknown'
+                op_category = self.get_operator_category(ops, transmitter, assisted_val or 'NON-ASSISTED')
+                power_class = power_val.upper() if power_val else 'Unknown'
                 display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
                 power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
     
                 # Get band breakdown and total rates
-                band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp)
-                total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp)
+                band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp_val)
+                total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp_val)
     
                 # Format timestamp
-                formatted_timestamp = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                formatted_timestamp = datetime.strptime(timestamp_val, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
     
                 # Highlight current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
@@ -629,16 +634,31 @@ class ScoreReporter:
                 """
                 table_rows.append(row)
     
+                # If this is the monitored station, store its data
+                if callsign_val == callsign:
+                    power = power_val
+                    assisted = assisted_val
+                    timestamp = formatted_timestamp  # Use the formatted timestamp
+    
+            # Check if the monitored station was found
+            if power is None or assisted is None or timestamp is None:
+                self.logger.error(f"Monitored station {callsign} not found in station data.")
+                power = 'Unknown'
+                assisted = 'Unknown'
+                timestamp = 'Unknown'
+    
             # Render the final HTML content
             html_content = template.format(
                 contest=contest,
                 callsign=callsign,
-                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                power=power,
+                assisted=assisted,
+                timestamp=timestamp,
                 filter_info_div=filter_info_div,
-                table_rows='\n'.join(table_rows),
-                additional_css=""  # Add any additional CSS if required
+                additional_css='',  # Assuming you have some way to set this
+                table_rows=''.join(table_rows)
             )
-            
+    
             return html_content
     
         except KeyError as e:
@@ -650,4 +670,5 @@ class ScoreReporter:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
             raise
+
 
