@@ -57,54 +57,6 @@
         }}
 
         document.addEventListener('DOMContentLoaded', updateCountdown);
-
-      //tooltip for rate graph 
-      document.addEventListener('DOMContentLoaded', function() {
-        // Create tooltip root element
-        const tooltipRoot = document.createElement('div');
-        tooltipRoot.id = 'tooltip-root';
-        tooltipRoot.style.position = 'absolute';
-        tooltipRoot.style.zIndex = '1000';
-        document.body.appendChild(tooltipRoot);
-    
-        // Track tooltip state
-        let currentTooltip = null;
-        let tooltipTimeout = null;
-    
-        // Add event listeners to callsign cells
-        document.querySelectorAll('td[data-tooltip]').forEach(cell => {
-          cell.addEventListener('mouseenter', (e) => {
-            clearTimeout(tooltipTimeout);
-            const rect = cell.getBoundingClientRect();
-            const data = JSON.parse(cell.dataset.tooltip);
-            
-            tooltipRoot.style.left = `${rect.right + 10}px`;
-            tooltipRoot.style.top = `${rect.top + window.scrollY}px`;
-            
-            ReactDOM.render(
-              React.createElement(RateTooltip, { data: data }),
-              tooltipRoot
-            );
-            
-            tooltipRoot.style.display = 'block';
-          });
-    
-          cell.addEventListener('mouseleave', () => {
-            tooltipTimeout = setTimeout(() => {
-              tooltipRoot.style.display = 'none';
-            }, 300);
-          });
-        });
-    
-        // Prevent tooltip from disappearing when hovering it
-        tooltipRoot.addEventListener('mouseenter', () => {
-          clearTimeout(tooltipTimeout);
-        });
-    
-        tooltipRoot.addEventListener('mouseleave', () => {
-          tooltipRoot.style.display = 'none';
-        });
-      });
     </script>
     <style>
         /* Base styles */
