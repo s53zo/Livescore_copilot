@@ -529,7 +529,7 @@ class ScoreReporter:
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with updated category display"""
         try:
-            # Get filter information for the header if available
+            rate_reporter = RateReporterTooltip(self.db_path)
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
@@ -676,7 +676,7 @@ class ScoreReporter:
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
-                    <td>{callsign_val}</td>
+                    <td><div class="rate-tooltip" data-callsign="{callsign_val}" data-contest="{contest}" data-timestamp="{timestamp}">{callsign_val}</div></td>
                     <td>{category_html}</td>
                     <td>{score:,}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
