@@ -616,7 +616,7 @@ class ScoreReporter:
             table_rows = []
             for i, station in enumerate(stations, 1):
                 station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                
+                                
                 # Get additional category information from database
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
@@ -671,23 +671,25 @@ class ScoreReporter:
                 
                 # Add highlight for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
-                
+
+                callsign_cell = f'<div class="rate-tooltip" data-callsign="{callsign_val}" data-contest="{contest}" data-timestamp="{timestamp}">{callsign_val}</div>'
+    
                 # Generate table row
                 row = f"""
-                <tr{highlight}>
-                    <td>{i}</td>
-                    <td><div class="rate-tooltip" data-callsign="{callsign_val}" data-contest="{contest}" data-timestamp="{timestamp}">{callsign_val}</div></td>
-                    <td>{category_html}</td>
-                    <td>{score:,}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
-                </tr>"""
+                    <tr{highlight}>
+                        <td>{i}</td>
+                        <td>{callsign_cell}</td>
+                        <td>{category_html}</td>
+                        <td>{score:,}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                        <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                        <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
+                        <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                    </tr>"""
                 table_rows.append(row)
                 
             # Format final HTML
