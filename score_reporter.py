@@ -692,7 +692,6 @@ class ScoreReporter:
                     </tr>"""
                 table_rows.append(row)
                 
-            # Format final HTML
             html_content = template.format(
                 contest=contest,
                 callsign=callsign,
