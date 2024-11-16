@@ -700,16 +700,14 @@ class ScoreReporter:
             table_rows_html = '\n'.join(table_rows)
             
             # Format final HTML
-            html_content = template.format(
-                contest=contest,
-                callsign=callsign,
-                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                power=stations[0][3],
-                assisted=stations[0][4],
-                filter_info_div=filter_info_div,
-                table_rows=table_rows_html,
-                additional_css=additional_css
-            )
+            html_content = template.replace('{contest}', contest)\
+                      .replace('{callsign}', callsign)\
+                      .replace('{timestamp}', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))\
+                      .replace('{power}', stations[0][3])\
+                      .replace('{assisted}', stations[0][4])\
+                      .replace('{filter_info_div}', filter_info_div)\
+                      .replace('{table_rows}', table_rows_html)\
+                      .replace('{additional_css}', additional_css)
             
             return html_content
     
