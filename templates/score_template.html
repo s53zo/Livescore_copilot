@@ -7,119 +7,119 @@
     <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
     <script>
-    const QsoRateTooltip = React.memo(({ callsign, contest, timestamp }) => {
+    const QsoRateTooltip = React.memo(({{ callsign, contest, timestamp }}) => {{
         const [isVisible, setIsVisible] = React.useState(false);
         const [data, setData] = React.useState(null);
         const [loading, setLoading] = React.useState(false);
         const [error, setError] = React.useState(null);
     
-        const bandColors = {
+        const bandColors = {{
             '160m': '#8884d8',
             '80m': '#82ca9d',
             '40m': '#ffc658',
             '20m': '#ff7300',
             '15m': '#ff0000',
             '10m': '#0088ff',
-        };
+        }};
     
-        React.useEffect(() => {
-            const fetchRateData = async () => {
+        React.useEffect(() => {{
+            const fetchRateData = async () => {{
                 if (!isVisible || data) return;
                 
                 setLoading(true);
                 setError(null);
                 
-                try {
-                    const params = new URLSearchParams({
+                try {{
+                    const params = new URLSearchParams({{
                         callsign,
                         contest,
                         timestamp
-                    });
+                    }});
                     
-                    const response = await fetch(`/livescore-pilot/api/rates?${params}`);
+                    const response = await fetch(`/livescore-pilot/api/rates?${{params}}`);
                     if (!response.ok) throw new Error('Failed to fetch rate data');
                     
                     const rateData = await response.json();
                     setData(rateData);
-                } catch (err) {
+                }} catch (err) {{
                     setError(err.message);
-                } finally {
+                }} finally {{
                     setLoading(false);
-                }
-            };
+                }}
+            }};
     
             fetchRateData();
-        }, [isVisible, callsign, contest, timestamp]);
+        }}, [isVisible, callsign, contest, timestamp]);
     
-        const CustomTooltip = ({ active, payload, label }) => {
-            if (active && payload && payload.length) {
-                return React.createElement('div', {
+        const CustomTooltip = ({{ active, payload, label }}) => {{
+            if (active && payload && payload.length) {{
+                return React.createElement('div', {{
                     className: 'tooltip-content'
-                }, [
-                    React.createElement('p', { key: 'time', className: 'tooltip-label' }, label),
+                }}, [
+                    React.createElement('p', {{ key: 'time', className: 'tooltip-label' }}, label),
                     ...payload.map(entry => 
-                        React.createElement('p', { 
+                        React.createElement('p', {{ 
                             key: entry.name,
-                            style: { color: entry.color }
-                        }, `${entry.name}: ${entry.value}/hr`)
+                            style: {{ color: entry.color }}
+                        }}, `${{entry.name}}: ${{entry.value}}/hr`)
                     )
                 ]);
-            }
+            }}
             return null;
-        };
+        }};
     
-        return React.createElement('div', {
+        return React.createElement('div', {{
             className: 'relative inline-block',
             onMouseEnter: () => setIsVisible(true),
             onMouseLeave: () => setIsVisible(false)
-        }, [
+        }}, [
             callsign,
-            isVisible && React.createElement('div', {
+            isVisible && React.createElement('div', {{
                 key: 'tooltip',
                 className: 'tooltip-container'
-            }, [
-                React.createElement('div', { 
+            }}, [
+                React.createElement('div', {{ 
                     key: 'title',
                     className: 'tooltip-title' 
-                }, `${callsign} Rate History`),
+                }}, `${{callsign}} Rate History`),
                 
-                loading && React.createElement('div', {
+                loading && React.createElement('div', {{
                     key: 'loading',
                     className: 'tooltip-loading'
-                }, 'Loading rate data...'),
+                }}, 'Loading rate data...'),
                 
-                error && React.createElement('div', {
+                error && React.createElement('div', {{
                     key: 'error',
                     className: 'tooltip-error'
-                }, `Error: ${error}`),
+                }}, `Error: ${{error}}`),
                 
-                data && !loading && !error && React.createElement('div', {
+                data && !loading && !error && React.createElement('div', {{
                     key: 'chart',
                     className: 'tooltip-chart'
-                }, [
-                    React.createElement(Recharts.ResponsiveContainer, {
+                }}, [
+                    React.createElement(Recharts.ResponsiveContainer, {{
                         width: '100%',
                         height: 200
-                    }, [
-                        React.createElement(Recharts.LineChart, {
+                    }}, [
+                        React.createElement(Recharts.LineChart, {{
                             data: data.rates,
-                            margin: { top: 5, right: 5, bottom: 5, left: 5 }
-                        }, [
-                            React.createElement(Recharts.XAxis, {
+                            margin: {{ top: 5, right: 5, bottom: 5, left: 5 }}
+                        }}, [
+                            React.createElement(Recharts.XAxis, {{
                                 dataKey: 'time',
                                 stroke: '#666',
                                 fontSize: 12
-                            }),
-                            React.createElement(Recharts.YAxis, {
+                            }}),
+                            React.createElement(Recharts.YAxis, {{
                                 stroke: '#666',
                                 fontSize: 12
-                            }),
-                            React.createElement(Recharts.Tooltip, {
+                            }}),
+                            React.createElement(Recharts.Tooltip, {{
                                 content: CustomTooltip
-                            }),
+                            }}),
                             React.createElement(Recharts.Legend),
                             ...Object.keys(bandColors).map(band =>
-                                React.createElement(Recharts.Line, {
+                                React.createElement(Recharts.Line, {{
                                     key: band,
                                     type: 'monotone',
                                     dataKey: band,
@@ -128,27 +128,28 @@
                                     strokeWidth: 2,
                                     dot: false,
                                     connectNulls: true
-                                })
+                                }})
                             )
                         ])
                     ]),
-                    React.createElement('div', {
+                    React.createElement('div', {{
                         key: 'summary',
                         className: 'tooltip-summary'
-                    }, Object.entries(data.totalQsos).map(([band, qsos]) =>
-                        React.createElement('div', {
+                    }}, Object.entries(data.totalQsos).map(([band, qsos]) =>
+                        React.createElement('div', {{
                             key: band,
                             className: 'tooltip-band-summary'
-                        }, [
-                            React.createElement('span', { key: 'band' }, band),
-                            React.createElement('span', { key: 'qsos' }, `${qsos} QSOs`)
+                        }}, [
+                            React.createElement('span', {{ key: 'band' }}, band),
+                            React.createElement('span', {{ key: 'qsos' }}, `${{qsos}} QSOs`)
                         ])
                     ))
                 ])
             ])
         ]);
-    });
+    }});
     </script>
+
     <script>
     document.addEventListener('DOMContentLoaded', () => {
         // Find all tooltip containers
