@@ -668,11 +668,13 @@ class ScoreReporter:
                 
                 # Format timestamp
                 ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                
+
+                logger.debug(f"Inputs to template: callsign={callsign}, contest={contest}, timestamp={timestamp}")
+
                 # Add highlight for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
 
-                callsign_cell = f'<div class="rate-tooltip" data-callsign="{ callsign_val }" data-contest="{ contest }" data-timestamp="{ timestamp }">{ callsign_val }</div>'
+                callsign_cell = f'<div class="rate-tooltip" data-callsign="{callsign_val}" data-contest="{contest}" data-timestamp="{timestamp}">{callsign_val}</div>'
     
                 # Generate table row
                 row = f"""
@@ -704,7 +706,7 @@ class ScoreReporter:
             )
             
             return html_content
-    
+        
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
