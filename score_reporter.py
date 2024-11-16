@@ -629,7 +629,7 @@ class ScoreReporter:
                     result = cursor.fetchone()
                     ops = result[0] if result else None
                     transmitter = result[1] if result else None
-    
+            
                 # Calculate operator category
                 op_category = self.get_operator_category(ops or 'SINGLE-OP', 
                                                        transmitter or 'ONE', 
@@ -661,7 +661,7 @@ class ScoreReporter:
                     )
                 else:
                     reference_breakdown = {}
-    
+            
                 # Calculate total rates
                 total_long_rate, total_short_rate = self.get_total_rates(
                     station_id, callsign_val, contest, timestamp
@@ -673,25 +673,31 @@ class ScoreReporter:
                 # Add highlight for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
                 
-                # Generate table row
+                # Get tooltip data
                 tooltip_attr = rate_tooltip.generate_tooltip_html(callsign_val, contest, timestamp)
-                row = f"""
-                <tr{highlight}>
-                    <td>{i}</td>
-                    <td {tooltip_attr}>{callsign_val}</td>
-                    <td>{category_html}</td>
-                    <td>{score:,}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
-                </tr>"""
-                table_rows.append(row)
-                
+            
+                # Build row HTML
+                row = [
+                    '<tr{}>'.format(highlight),
+                    '<td>{}</td>'.format(i),
+                    '<td {}>{}</td>'.format(tooltip_attr, callsign_val),
+                    '<td>{}</td>'.format(category_html),
+                    '<td>{:,}</td>'.format(score),
+                    '<td class="band-data">{}</td>'.format(self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')),
+                    '<td class="band-data">{}</td>'.format(self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')),
+                    '<td class="band-data">{}</td>'.format(self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')),
+                    '<td class="band-data">{}</td>'.format(self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')),
+                    '<td class="band-data">{}</td>'.format(self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')),
+                    '<td class="band-data">{}</td>'.format(self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')),
+                    '<td class="band-data">{}</td>'.format(self.format_total_data(qsos, mults, total_long_rate, total_short_rate)),
+                    '<td><span class="relative-time" data-timestamp="{}">{}</span></td>'.format(timestamp, ts),
+                    '</tr>'
+                ]
+                table_rows.append(''.join(row))
+            
+            # After the loop ends, join all rows
+            table_rows_html = '\n'.join(table_rows)
+            
             # Format final HTML
             html_content = template.format(
                 contest=contest,
@@ -700,7 +706,7 @@ class ScoreReporter:
                 power=stations[0][3],
                 assisted=stations[0][4],
                 filter_info_div=filter_info_div,
-                table_rows='\n'.join(table_rows),
+                table_rows=table_rows_html,
                 additional_css=additional_css
             )
             
