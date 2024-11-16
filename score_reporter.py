@@ -706,6 +706,12 @@ class ScoreReporter:
             )
             
             return html_content
+
+            self.logger.debug(f"Rendered template before formatting: {template}")
+            self.logger.debug(f"filter_info_div: {filter_info_div}")
+            self.logger.debug(f"table_rows: {table_rows}")
+
+
         
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
