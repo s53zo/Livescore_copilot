@@ -6,7 +6,6 @@ import traceback
 from datetime import datetime, timedelta
 from flask import request
 import sys
-from rate_reporter_tooltip import RateReporterTooltip
 
 class RateCalculator:
     def __init__(self, db_path, debug=False):
@@ -527,19 +526,13 @@ class ScoreReporter:
 
     
     def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display."""
+        """Generate HTML content with updated category display"""
         try:
-            # Initialize necessary variables
+            # Get filter information for the header if available
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
     
-            # Initialize variables for the monitored station
-            power = None
-            assisted = None
-            timestamp = None
-    
-            # Fetch QTH details and prepare filter info
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -552,11 +545,12 @@ class ScoreReporter:
                     LIMIT 1
                 """, (callsign, contest))
                 qth_info = cursor.fetchone()
-    
+                
                 if qth_info:
                     filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
-                                     "State/Province", "Continent"]
+                                   "State/Province", "Continent"]
                     filter_parts = []
+                    
                     for label, value in zip(filter_labels, qth_info):
                         if value:
                             if current_filter_type == label and current_filter_value == value:
@@ -570,7 +564,7 @@ class ScoreReporter:
                                     f'&filter_value={value}" class="filter-link">'
                                     f'{label}: {value}</a>'
                                 )
-    
+                    
                     if filter_parts:
                         if current_filter_type != 'none':
                             filter_parts.append(
@@ -579,7 +573,7 @@ class ScoreReporter:
                                 f'&filter_value=none" class="filter-link clear-filter">'
                                 f'Show All</a>'
                             )
-    
+                        
                         filter_info_div = f"""
                         <div class="filter-info">
                             <span class="filter-label">Filters:</span> 
@@ -587,12 +581,42 @@ class ScoreReporter:
                         </div>
                         """
     
-            # Generate table rows for each station
+            # Add category-specific CSS
+            additional_css = """
+                <style>
+                    .category-group {
+                        display: inline-flex;
+                        gap: 4px;
+                        font-size: 0.75rem;
+                        line-height: 1;
+                        align-items: center;
+                    }
+                    
+                    .category-tag {
+                        display: inline-block;
+                        padding: 3px 6px;
+                        border-radius: 3px;
+                        white-space: nowrap;
+                        font-family: monospace;
+                    }
+                    
+                    /* Category colors */
+                    .cat-power-high { background: #ffebee; color: #c62828; }
+                    .cat-power-low { background: #e8f5e9; color: #2e7d32; }
+                    .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
+                    
+                    .cat-soa { background: #e3f2fd; color: #1565c0; }
+                    .cat-so { background: #f3e5f5; color: #6a1b9a; }
+                    .cat-ms { background: #fff8e1; color: #ff8f00; }
+                    .cat-mm { background: #f1f8e9; color: #558b2f; }
+                </style>
+            """
+    
             table_rows = []
             for i, station in enumerate(stations, 1):
-                station_id, callsign_val, score, power_val, assisted_val, timestamp_val, qsos, mults, position, rn = station
-    
-                # Fetch operator and transmitter details
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+                
+                # Get additional category information from database
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
                     cursor.execute("""
@@ -601,74 +625,85 @@ class ScoreReporter:
                         WHERE id = ?
                     """, (station_id,))
                     result = cursor.fetchone()
-                    ops = result[0] if result else 'SINGLE-OP'
-                    transmitter = result[1] if result else 'ONE'
+                    ops = result[0] if result else None
+                    transmitter = result[1] if result else None
     
-                # Calculate operator category and format power tag
-                op_category = self.get_operator_category(ops, transmitter, assisted_val or 'NON-ASSISTED')
-                power_class = power_val.upper() if power_val else 'Unknown'
+                # Calculate operator category
+                op_category = self.get_operator_category(ops or 'SINGLE-OP', 
+                                                       transmitter or 'ONE', 
+                                                       assisted or 'NON-ASSISTED')
+                
+                # Format power class tag
+                power_class = power.upper() if power else 'Unknown'
                 display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
+                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
+                
+                # Create category display
+                category_html = f"""
+                    <div class="category-group">
+                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
+                        {power_tag}
+                    </div>
+                """
+                
+                # Get band breakdown with rates
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                
+                # Get reference station for rate comparison
+                reference_station = next((s for s in stations if s[1] == callsign), None)
+                if reference_station:
+                    reference_breakdown = self.get_band_breakdown_with_rates(
+                        reference_station[0], callsign, contest, reference_station[5]
+                    )
+                else:
+                    reference_breakdown = {}
     
-                # Get band breakdown and total rates
-                band_breakdown = self.get_band_breakdown_with_rates(station_id, callsign_val, contest, timestamp_val)
-                total_long_rate, total_short_rate = self.get_total_rates(station_id, callsign_val, contest, timestamp_val)
-    
+                # Calculate total rates
+                total_long_rate, total_short_rate = self.get_total_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                
                 # Format timestamp
-                formatted_timestamp = datetime.strptime(timestamp_val, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-    
-                # Highlight current station
+                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                
+                # Add highlight for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
-    
+                
                 # Generate table row
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
                     <td>{callsign_val}</td>
-                    <td>{op_category}</td>
+                    <td>{category_html}</td>
                     <td>{score:,}</td>
-                    <td>{qsos}/{mults}</td>
-                    <td>{total_long_rate}/{total_short_rate}</td>
-                    <td>{formatted_timestamp}</td>
-                </tr>
-                """
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                </tr>"""
                 table_rows.append(row)
-    
-                # If this is the monitored station, store its data
-                if callsign_val == callsign:
-                    power = power_val
-                    assisted = assisted_val
-                    timestamp = formatted_timestamp  # Use the formatted timestamp
-    
-            # Check if the monitored station was found
-            if power is None or assisted is None or timestamp is None:
-                self.logger.error(f"Monitored station {callsign} not found in station data.")
-                power = 'Unknown'
-                assisted = 'Unknown'
-                timestamp = 'Unknown'
-    
-            # Render the final HTML content
+                
+            # Format final HTML
             html_content = template.format(
                 contest=contest,
                 callsign=callsign,
-                power=power,
-                assisted=assisted,
-                timestamp=timestamp,
+                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                power=stations[0][3],
+                assisted=stations[0][4],
                 filter_info_div=filter_info_div,
-                additional_css='',  # Assuming you have some way to set this
-                table_rows=''.join(table_rows)
+                table_rows='\n'.join(table_rows),
+                additional_css=additional_css
             )
-    
+            
             return html_content
-    
-        except KeyError as e:
-            self.logger.error(f"Missing placeholder in template: {e}")
-            self.logger.debug(f"Template before formatting: {template}")
-            raise
     
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
             raise
-
-
