@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime, timedelta
 from flask import request
 import sys
+from rate_reporter_tooltip import RateReporterTooltip
 
 class RateCalculator:
     def __init__(self, db_path, debug=False):
