@@ -527,14 +527,14 @@ class ScoreReporter:
 
     
     def generate_html_content(self, template, callsign, contest, stations):
-    """Generate HTML content with updated category display"""
-    try:
-        rate_tooltip = RateReporterTooltip(self.db_path)
-        
-        # Get filter information for the header if available
-        filter_info_div = ""
-        current_filter_type = request.args.get('filter_type', 'none')
-        current_filter_value = request.args.get('filter_value', 'none')
+        """Generate HTML content with updated category display"""
+        try:
+            rate_tooltip = RateReporterTooltip(self.db_path)
+            
+            # Get filter information for the header if available
+            filter_info_div = ""
+            current_filter_type = request.args.get('filter_type', 'none')
+            current_filter_value = request.args.get('filter_value', 'none')
         
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
