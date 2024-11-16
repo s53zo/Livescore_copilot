@@ -669,7 +669,7 @@ class ScoreReporter:
                 # Format timestamp
                 ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
 
-                logger.debug(f"Inputs to template: callsign={callsign}, contest={contest}, timestamp={timestamp}")
+                self.logger.debug(f"Inputs to template: callsign={callsign}, contest={contest}, timestamp={timestamp}")
 
                 # Add highlight for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
