@@ -295,81 +295,45 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details with all filters working"""
+        """Get station details using materialized view for all filters"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # For DXCC filter or no filter, use materialized view directly
-                if not filter_type or filter_type.lower() == 'none' or filter_type == 'DXCC':
-                    query = """
-                        SELECT 
-                            id,
-                            callsign,
-                            score,
-                            power,
-                            assisted,
-                            timestamp,
-                            qsos,
-                            multipliers,
-                            CASE 
-                                WHEN callsign = ? THEN 'current'
-                                WHEN score > (SELECT score FROM latest_contest_scores 
-                                            WHERE callsign = ? AND contest = ?) 
-                                THEN 'above'
-                                ELSE 'below'
-                            END as position,
-                            ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                        FROM latest_contest_scores
-                        WHERE contest = ?
-                    """
-                    params = [callsign, callsign, contest, contest]
-                    
-                    if filter_type == 'DXCC':
-                        query += " AND dxcc_country = ?"
-                        params.append(filter_value)
+                # Use materialized view for all queries
+                query = """
+                    SELECT 
+                        id,
+                        callsign,
+                        score,
+                        power,
+                        assisted,
+                        timestamp,
+                        qsos,
+                        multipliers,
+                        CASE 
+                            WHEN callsign = ? THEN 'current'
+                            WHEN score > (SELECT score FROM latest_contest_scores 
+                                        WHERE callsign = ? AND contest = ?) 
+                            THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                    FROM latest_contest_scores
+                    WHERE contest = ?
+                """
                 
-                # For other filters (continent, cq_zone, etc.), need to join with qth_info
-                else:
-                    query = """
-                        SELECT 
-                            cs.id,
-                            cs.callsign,
-                            cs.score,
-                            cs.power,
-                            cs.assisted,
-                            cs.timestamp,
-                            cs.qsos,
-                            cs.multipliers,
-                            CASE 
-                                WHEN cs.callsign = ? THEN 'current'
-                                WHEN cs.score > (SELECT score FROM contest_scores 
-                                               WHERE callsign = ? AND contest = ?
-                                               ORDER BY timestamp DESC LIMIT 1) 
-                                THEN 'above'
-                                ELSE 'below'
-                            END as position,
-                            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores 
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
-                        LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                        WHERE cs.contest = ?
-                        AND cs.qsos > 0
-                    """
-                    params = [callsign, callsign, contest, contest, contest]
-    
+                params = [callsign, callsign, contest, contest]
+                
+                # Add filter if specified
+                if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
-                        'CQ Zone': 'qi.cq_zone',
-                        'IARU Zone': 'qi.iaru_zone',
-                        'ARRL Section': 'qi.arrl_section',
-                        'State/Province': 'qi.state_province',
-                        'Continent': 'qi.continent'
+                        'DXCC': 'dxcc_country',
+                        'CQ Zone': 'cq_zone',
+                        'IARU Zone': 'iaru_zone',
+                        'ARRL Section': 'arrl_section',
+                        'State/Province': 'state_province',
+                        'Continent': 'continent'
                     }
                     
                     if field := filter_map.get(filter_type):
@@ -387,19 +351,19 @@ class ScoreReporter:
                 results = cursor.fetchall()
                 
                 if not results:
-                    if filter_type and filter_type != 'DXCC':
-                        # Debug query to check the filter values
-                        cursor.execute(f"""
-                            SELECT DISTINCT {filter_map.get(filter_type).replace('qi.', '')} 
-                            FROM qth_info qi 
-                            JOIN contest_scores cs ON cs.id = qi.contest_score_id 
-                            WHERE cs.contest = ?
-                            ORDER BY 1
-                        """, (contest,))
-                        filter_values = cursor.fetchall()
-                        self.logger.debug(f"Available {filter_type} values for {contest}:")
-                        for value in filter_values:
-                            self.logger.debug(f"  {value[0]}")
+                    # Debug query to check available values
+                    cursor.execute(f"""
+                        SELECT DISTINCT {filter_map.get(filter_type, 'continent')} as value, 
+                               COUNT(*) as count
+                        FROM latest_contest_scores
+                        WHERE contest = ?
+                        GROUP BY 1
+                        ORDER BY 2 DESC
+                    """, (contest,))
+                    available_values = cursor.fetchall()
+                    self.logger.debug(f"Available {filter_type} values for {contest}:")
+                    for value, count in available_values:
+                        self.logger.debug(f"  {value}: {count} stations")
                 
                 return results
     
