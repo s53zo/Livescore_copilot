@@ -295,62 +295,52 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details with optimized unfiltered handling"""
+        """Get station details with fixed DXCC filtering"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
+                # Base query using materialized view
+                query = """
+                    SELECT 
+                        id,
+                        callsign,
+                        score,
+                        power,
+                        assisted,
+                        timestamp,
+                        qsos,
+                        multipliers,
+                        CASE 
+                            WHEN callsign = ? THEN 'current'
+                            WHEN score > (SELECT score FROM latest_contest_scores 
+                                        WHERE callsign = ? AND contest = ?) 
+                            THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                    FROM latest_contest_scores
+                    WHERE contest = ?
+                """
+                
+                params = [callsign, callsign, contest, contest]
+                
+                # Add filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
-                    # Use original filtered query
-                    query = """
-                        SELECT 
-                            id,
-                            callsign,
-                            score,
-                            power,
-                            assisted,
-                            timestamp,
-                            qsos,
-                            multipliers,
-                            CASE 
-                                WHEN callsign = ? THEN 'current'
-                                WHEN score > (SELECT score FROM latest_contest_scores 
-                                            WHERE callsign = ? AND contest = ?) 
-                                THEN 'above'
-                                ELSE 'below'
-                            END as position,
-                            ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                        FROM latest_contest_scores
-                        WHERE contest = ?
-                        AND continent = ?
-                        ORDER BY score DESC
-                    """
-                    params = [callsign, callsign, contest, contest, filter_value]
-                else:
-                    # Optimized unfiltered query using index on (contest, score)
-                    query = """
-                        SELECT 
-                            id,
-                            callsign,
-                            score,
-                            power,
-                            assisted,
-                            timestamp,
-                            qsos,
-                            multipliers,
-                            CASE 
-                                WHEN callsign = ? THEN 'current'
-                                WHEN score > (SELECT score FROM latest_contest_scores 
-                                            WHERE callsign = ? AND contest = ?) 
-                                THEN 'above'
-                                ELSE 'below'
-                            END as position,
-                            ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                        FROM latest_contest_scores
-                        WHERE contest = ?
-                        ORDER BY score DESC
-                    """
-                    params = [callsign, callsign, contest, contest]
+                    filter_map = {
+                        'DXCC': 'dxcc_country',
+                        'CQ Zone': 'cq_zone',
+                        'IARU Zone': 'iaru_zone',
+                        'ARRL Section': 'arrl_section',
+                        'State/Province': 'state_province',
+                        'Continent': 'continent'
+                    }
+                    
+                    if field := filter_map.get(filter_type):
+                        query += f" AND {field} = ?"
+                        params.append(filter_value)
+                
+                query += " ORDER BY score DESC"
                 
                 # Log the query for debugging
                 self.logger.debug(f"Executing query: {query}")
@@ -358,6 +348,19 @@ class ScoreReporter:
                 
                 cursor.execute(query, params)
                 results = cursor.fetchall()
+                
+                if not results:
+                    # Debug query to check the data
+                    cursor.execute("""
+                        SELECT DISTINCT dxcc_country, callsign 
+                        FROM latest_contest_scores 
+                        WHERE contest = ? 
+                        ORDER BY dxcc_country
+                    """, (contest,))
+                    dxcc_data = cursor.fetchall()
+                    self.logger.debug(f"Available DXCC values for {contest}:")
+                    for dxcc, call in dxcc_data:
+                        self.logger.debug(f"  {dxcc}: {call}")
                 
                 return results
     
