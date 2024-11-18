@@ -300,55 +300,35 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
     
-                # Get target score first (for comparison)
-                cursor.execute("""
-                    SELECT score FROM contest_scores 
-                    WHERE callsign = ? AND contest = ?
-                    ORDER BY timestamp DESC LIMIT 1
-                """, (callsign, contest))
-                target_score = cursor.fetchone()[0]
-    
-                # Main query with index hints
+                # Base query
                 query = """
-                    WITH filtered_scores AS (
-                        SELECT 
-                            cs.id,
-                            cs.callsign,
-                            cs.score,
-                            cs.power,
-                            cs.assisted,
-                            cs.timestamp,
-                            cs.qsos,
-                            cs.multipliers
+                    WITH latest_scores AS (
+                        SELECT cs.id,
+                               cs.callsign,
+                               cs.score,
+                               cs.power,
+                               cs.assisted,
+                               cs.timestamp,
+                               cs.qsos,
+                               cs.multipliers,
+                               qi.dxcc_country,
+                               qi.continent
                         FROM contest_scores cs
-                        INDEXED BY idx_opt_contest_callsign_ts
                         INNER JOIN (
                             SELECT callsign, MAX(timestamp) as max_ts
                             FROM contest_scores 
-                            INDEXED BY idx_opt_contest_ts
                             WHERE contest = ?
                             GROUP BY callsign
                         ) latest ON cs.callsign = latest.callsign 
-                            AND cs.timestamp = latest.max_ts
+                        AND cs.timestamp = latest.max_ts
+                        LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
                         WHERE cs.contest = ?
                         AND cs.qsos > 0
-                        {filter_clause}
-                    )
-                    SELECT 
-                        id, callsign, score, power, assisted, timestamp, qsos, multipliers,
-                        CASE 
-                            WHEN callsign = ? THEN 'current'
-                            WHEN score > ? THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                    FROM filtered_scores
-                    ORDER BY score DESC
                 """
+                
+                params = [contest, contest]
     
-                params = [contest, contest, callsign, target_score]
-                filter_clause = ""
-    
+                # Add filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
                         'DXCC': 'dxcc_country',
@@ -360,18 +340,42 @@ class ScoreReporter:
                     }
                     
                     if field := filter_map.get(filter_type):
-                        filter_clause = f"""
-                        AND EXISTS (
-                            SELECT 1 FROM qth_info qi 
-                            INDEXED BY idx_opt_qth_contest_score_id
-                            WHERE qi.contest_score_id = cs.id 
-                            AND qi.{field} = ?
-                        )"""
-                        params.insert(-2, filter_value)
+                        query += f" AND qi.{field} = ?"
+                        params.append(filter_value)
     
-                query = query.format(filter_clause=filter_clause)
+                # Complete the query
+                query += """)
+                    SELECT 
+                        id,
+                        callsign,
+                        score,
+                        power,
+                        assisted,
+                        timestamp,
+                        qsos,
+                        multipliers,
+                        CASE 
+                            WHEN callsign = ? THEN 'current'
+                            WHEN score > (SELECT score FROM latest_scores WHERE callsign = ?) THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                    FROM latest_scores
+                    ORDER BY score DESC
+                """
+                
+                # Add callsign parameters
+                params.extend([callsign, callsign])
+    
+                # Execute query
                 cursor.execute(query, params)
-                return cursor.fetchall()
+                results = cursor.fetchall()
+    
+                if not results:
+                    self.logger.info(f"No results found for {contest} with filter {filter_type}={filter_value}")
+                    return None
+    
+                return results
     
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
