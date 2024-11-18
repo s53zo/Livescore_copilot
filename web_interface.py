@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
 import sqlite3
 import os
@@ -6,7 +7,6 @@ import sys
 import traceback
 from datetime import datetime
 from score_reporter import ScoreReporter
-import json
 
 # Set up detailed logging
 logging.basicConfig(
@@ -18,84 +18,34 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
 # Log startup
 logger.info("Starting web interface application")
-
-try:
-    app = Flask(__name__, static_folder='static')
-    logger.info("Flask app created successfully")
-except Exception as e:
-    logger.error(f"Failed to create Flask app: {str(e)}")
-    logger.error(traceback.format_exc())
-    raise
 
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
     DEBUG = False
-    
-    @staticmethod
-    def get_db():
-        """Database connection with logging"""
-        logger.debug("Attempting database connection")
-        try:
-            conn = sqlite3.connect(Config.DB_PATH)
-            logger.debug("Database connection successful")
-            return conn
-        except Exception as e:
-            logger.error(f"Database connection failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise
 
-@app.route('/livescore-pilot/api/scores')
-def get_scores():
+def get_db():
+    """Database connection with logging"""
+    logger.debug("Attempting database connection")
     try:
-        callsign = request.args.get('callsign')
-        contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type', 'none')
-        filter_value = request.args.get('filter_value', 'none')
-
-        if not (callsign and contest):
-            return jsonify({"error": "Missing required parameters"}), 400
-
-        reporter = ScoreReporter(Config.DB_PATH)
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
-
-        if not stations:
-            return jsonify({"error": "No data found"}), 404
-
-        # Transform data for frontend
-        formatted_stations = []
-        for station in stations:
-            band_data = reporter.get_band_breakdown_with_rates(
-                station[0],  # station_id
-                station[1],  # callsign
-                contest,
-                station[5]   # timestamp
-            )
-
-            formatted_stations.append({
-                "callsign": station[1],
-                "score": station[2],
-                "power": station[3],
-                "assisted": station[4],
-                "timestamp": station[5],
-                "qsos": station[6],
-                "multipliers": station[7],
-                "bandData": band_data
-            })
-
-        return jsonify({
-            "contest": contest,
-            "callsign": callsign,
-            "timestamp": datetime.utcnow().isoformat(),
-            "stations": formatted_stations
-        })
-
+        conn = sqlite3.connect(Config.DB_PATH)
+        logger.debug("Database connection successful")
+        return conn
     except Exception as e:
-        logger.error(f"Error in get_scores: {str(e)}")
+        logger.error(f"Database connection failed: {str(e)}")
         logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        raise
+
+try:
+    app = Flask(__name__)
+    logger.info("Flask app created successfully")
+except Exception as e:
+    logger.error(f"Failed to create Flask app: {str(e)}")
+    logger.error(traceback.format_exc())
+    raise
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -152,6 +102,57 @@ def index():
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
+
+@app.route('/livescore-pilot/api/scores')
+def get_scores():
+    try:
+        callsign = request.args.get('callsign')
+        contest = request.args.get('contest')
+        filter_type = request.args.get('filter_type', 'none')
+        filter_value = request.args.get('filter_value', 'none')
+
+        if not (callsign and contest):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        reporter = ScoreReporter(Config.DB_PATH)
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+
+        if not stations:
+            return jsonify({"error": "No data found"}), 404
+
+        # Transform data for frontend
+        formatted_stations = []
+        for station in stations:
+            band_data = reporter.get_band_breakdown_with_rates(
+                station[0],  # station_id
+                station[1],  # callsign
+                contest,
+                station[5]   # timestamp
+            )
+
+            formatted_stations.append({
+                "callsign": station[1],
+                "score": station[2],
+                "power": station[3],
+                "assisted": station[4],
+                "timestamp": station[5],
+                "qsos": station[6],
+                "multipliers": station[7],
+                "bandData": band_data
+            })
+
+        return jsonify({
+            "contest": contest,
+            "callsign": callsign,
+            "timestamp": datetime.utcnow().isoformat(),
+            "stations": formatted_stations
+        })
+
+    except Exception as e:
+        logger.error(f"Error in get_scores: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/reports/live.html')
 def live_report():
