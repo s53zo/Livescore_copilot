@@ -46,75 +46,7 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-    """Get station details and all competitors with optional filtering"""
-    try:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Base query with QTH info join
-            query = """
-                WITH latest_scores AS (
-                    SELECT callsign, MAX(timestamp) as max_ts
-                    FROM contest_scores
-                    WHERE contest = ?
-                    GROUP BY callsign
-                ),
-                station_scores AS (
-                    SELECT 
-                        cs.*,
-                        qi.dxcc_country,
-                        qi.cq_zone,
-                        qi.iaru_zone,
-                        qi.arrl_section,
-                        qi.state_province,
-                        qi.continent
-                    FROM contest_scores cs
-                    INNER JOIN latest_scores ls 
-                        ON cs.callsign = ls.callsign 
-                        AND cs.timestamp = ls.max_ts
-                    LEFT JOIN qth_info qi 
-                        ON qi.contest_score_id = cs.id
-                    WHERE cs.contest = ?
-                    AND cs.qsos > 0
-                """
-            
-            params = [contest, contest]
 
-            # Add filter conditions if specified
-            if filter_type and filter_value and filter_type.lower() != 'none':
-                query += " AND qi.continent = ?"
-                params.append(filter_value)
-
-            # Complete the query
-            query += """)
-                SELECT 
-                    ss.id,
-                    ss.callsign,
-                    ss.score,
-                    ss.power,
-                    ss.assisted,
-                    ss.timestamp,
-                    ss.qsos,
-                    ss.multipliers,
-                    CASE 
-                        WHEN ss.callsign = ? THEN 'current'
-                        WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
-                        ELSE 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (ORDER BY ss.score DESC) as rn
-                FROM station_scores ss
-                ORDER BY ss.score DESC
-            """
-            
-            params.extend([callsign, callsign])
-            cursor.execute(query, params)
-            return cursor.fetchall()
-                
-    except Exception as e:
-        self.logger.error(f"Error in get_station_details: {e}")
-        self.logger.error(traceback.format_exc())
-        return None
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
