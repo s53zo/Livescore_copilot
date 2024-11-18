@@ -166,22 +166,9 @@ def live_report():
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        logger.info(f"Generating report for: {contest}, {callsign}, filter:{filter_type}={filter_value}")
-
         with get_db() as conn:
             cursor = conn.cursor()
 
-            # First verify that we have data
-            cursor.execute("""
-                SELECT COUNT(*)
-                FROM contest_scores cs
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ? AND qi.arrl_section = ?
-            """, (contest, filter_value))
-            count = cursor.fetchone()[0]
-            logger.debug(f"Found {count} records for section {filter_value}")
-
-            # Use the working query
             query = """
             WITH ranked_scores AS (
                 SELECT cs.id,
@@ -281,10 +268,19 @@ def live_report():
 
             if request.headers.get('Accept') == 'application/json':
                 return jsonify(response_data)
-            
-            # For HTML response, use the template
-            with open(os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html'), 'r') as f:
-                template = f.read()
+
+            # For HTML response, read and format the template
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+            with open(template_path, 'r') as f:
+                template = f.read().replace('{', '{{').replace('}', '}}')
+                # Restore the placeholders we actually want to replace
+                template = template.replace('{{contest}}', '{contest}')
+                template = template.replace('{{callsign}}', '{callsign}')
+                template = template.replace('{{filter_type}}', '{filter_type}')
+                template = template.replace('{{filter_value}}', '{filter_value}')
+                template = template.replace('{{timestamp}}', '{timestamp}')
+                template = template.replace('{{additional_css}}', '{additional_css}')
+
                 return template.format(
                     contest=contest,
                     callsign=callsign,
