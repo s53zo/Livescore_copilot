@@ -295,38 +295,34 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details with optimized filtering"""
+        """Get station details with optimized filtering using materialized view"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
     
-                # Base query
                 query = """
-                    WITH latest_scores AS (
-                        SELECT cs.id,
-                               cs.callsign,
-                               cs.score,
-                               cs.power,
-                               cs.assisted,
-                               cs.timestamp,
-                               cs.qsos,
-                               cs.multipliers,
-                               qi.dxcc_country,
-                               qi.continent
-                        FROM contest_scores cs
-                        INNER JOIN (
-                            SELECT callsign, MAX(timestamp) as max_ts
-                            FROM contest_scores 
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
-                        LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                        WHERE cs.contest = ?
-                        AND cs.qsos > 0
+                    SELECT 
+                        id,
+                        callsign,
+                        score,
+                        power,
+                        assisted,
+                        timestamp,
+                        qsos,
+                        multipliers,
+                        CASE 
+                            WHEN callsign = ? THEN 'current'
+                            WHEN score > (SELECT score FROM latest_contest_scores 
+                                        WHERE callsign = ? AND contest = ?) 
+                            THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                    FROM latest_contest_scores
+                    WHERE contest = ?
                 """
                 
-                params = [contest, contest]
+                params = [callsign, callsign, contest, contest]
     
                 # Add filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
@@ -340,34 +336,11 @@ class ScoreReporter:
                     }
                     
                     if field := filter_map.get(filter_type):
-                        query += f" AND qi.{field} = ?"
+                        query += f" AND {field} = ?"
                         params.append(filter_value)
     
-                # Complete the query
-                query += """)
-                    SELECT 
-                        id,
-                        callsign,
-                        score,
-                        power,
-                        assisted,
-                        timestamp,
-                        qsos,
-                        multipliers,
-                        CASE 
-                            WHEN callsign = ? THEN 'current'
-                            WHEN score > (SELECT score FROM latest_scores WHERE callsign = ?) THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                    FROM latest_scores
-                    ORDER BY score DESC
-                """
+                query += " ORDER BY score DESC"
                 
-                # Add callsign parameters
-                params.extend([callsign, callsign])
-    
-                # Execute query
                 cursor.execute(query, params)
                 results = cursor.fetchall()
     
