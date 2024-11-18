@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from flask import request
 import sqlite3
 import logging
 import sys
