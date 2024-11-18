@@ -13,16 +13,31 @@
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-
+    
     <script>
         // Initial data from server
-        window.initialData = {
+        window.initialData = {{
             contest: '{contest}',
             callsign: '{callsign}',
             filterType: '{filter_type}',
             filterValue: '{filter_value}'
-        };
+        }};
     </script>
+
+    <style>
+        /* Your existing styles */
+        body {{ 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 10px; 
+            color: #333; 
+            padding-bottom: 60px; 
+        }}
+        
+        /* ... rest of your styles ... */
+    </style>
+    
+    {additional_css}
 </head>
 <body>
     <div id="root"></div>
