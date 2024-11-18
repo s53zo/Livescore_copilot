@@ -526,21 +526,48 @@ class ScoreReporter:
 
     
     def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display"""
+        """
+        Generate HTML content with simple template variable replacement.
+        
+        Args:
+            template (str): HTML template string
+            callsign (str): Station callsign
+            contest (str): Contest name
+            stations (list): List of station data (not used in template but kept for compatibility)
+        
+        Returns:
+            str: Formatted HTML content
+        """
         try:
-            # Get filter information
+            # Input validation
+            if not all([template, callsign, contest]):
+                raise ValueError("Missing required parameters")
+    
+            # Get filter information from request args with safe defaults
             filter_type = request.args.get('filter_type', 'none')
             filter_value = request.args.get('filter_value', 'none')
-    
-            # Format HTML using straight replacement
-            html_content = template.replace('{contest}', contest)
-            html_content = html_content.replace('{callsign}', callsign)
-            html_content = html_content.replace('{filter_type}', filter_type)
-            html_content = html_content.replace('{filter_value}', filter_value)
-            html_content = html_content.replace('{timestamp}', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
-    
+            
+            # Create replacement dictionary
+            replacements = {
+                '{contest}': contest,
+                '{callsign}': callsign,
+                '{filter_type}': filter_type,
+                '{filter_value}': filter_value,
+                '{timestamp}': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                '{additional_css}': ''  # Keep this for backward compatibility
+            }
+            
+            # Perform all replacements
+            html_content = template
+            for key, value in replacements.items():
+                html_content = html_content.replace(key, str(value))
+                
+            self.logger.debug(f"Generated HTML content for {callsign} in {contest}")
             return html_content
             
+        except ValueError as ve:
+            self.logger.error(f"Invalid parameters in generate_html_content: {ve}")
+            raise
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
