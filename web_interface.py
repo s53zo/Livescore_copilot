@@ -154,6 +154,7 @@ def index():
 
 @app.route('/reports/live.html')
 def live_report():
+    """Handle requests for live contest reports"""
     try:
         # Get parameters from URL
         callsign = request.args.get('callsign')
@@ -185,26 +186,76 @@ def live_report():
         # Get station data with filters
         stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
-        if stations:
-            # Generate HTML content directly
-            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-            with open(template_path, 'r') as f:
-                template = f.read()
-
-            html_content = reporter.generate_html_content(template, callsign, contest, stations)
-            
-            # Return response with appropriate headers
-            response = make_response(html_content)
-            response.headers['Content-Type'] = 'text/html; charset=utf-8'
-            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
-            
-            logger.info(f"Successfully generated report for {callsign} in {contest}")
-            return response
-        else:
+        if not stations:
             logger.error(f"No station data found for {callsign} in {contest}")
             return render_template('error.html', error="No data found for the selected criteria")
+
+        # Check if client accepts JSON
+        if request.headers.get('Accept') == 'application/json':
+            # Return JSON data for API requests
+            formatted_stations = []
+            for station in stations:
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rank = station
+                
+                # Get band breakdown with rates
+                band_data = reporter.get_band_breakdown_with_rates(
+                    station_id,
+                    callsign_val,
+                    contest,
+                    timestamp
+                )
+                
+                # Calculate total rates
+                total_long_rate, total_short_rate = reporter.get_total_rates(
+                    station_id,
+                    callsign_val,
+                    contest,
+                    timestamp
+                )
+
+                formatted_stations.append({
+                    "id": station_id,
+                    "callsign": callsign_val,
+                    "score": score,
+                    "power": power,
+                    "assisted": assisted,
+                    "timestamp": timestamp,
+                    "qsos": qsos,
+                    "multipliers": mults,
+                    "position": position,
+                    "rank": rank,
+                    "bandData": band_data,
+                    "totalRates": {
+                        "long": total_long_rate,
+                        "short": total_short_rate
+                    }
+                })
+
+            return jsonify({
+                "contest": contest,
+                "callsign": callsign,
+                "filterType": filter_type,
+                "filterValue": filter_value,
+                "timestamp": datetime.utcnow().isoformat(),
+                "stations": formatted_stations
+            })
+
+        # For HTML requests, render the template
+        template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+        with open(template_path, 'r') as f:
+            template = f.read()
+
+        html_content = reporter.generate_html_content(template, callsign, contest, stations)
+            
+        # Return response with appropriate headers
+        response = make_response(html_content)
+        response.headers['Content-Type'] = 'text/html; charset=utf-8'
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+            
+        logger.info(f"Successfully generated report for {callsign} in {contest}")
+        return response
 
     except Exception as e:
         logger.error("Exception in live_report:")
