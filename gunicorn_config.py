@@ -8,9 +8,15 @@ os.makedirs(log_dir, exist_ok=True)
 # Basic configurations
 bind = "127.0.0.1:8089"
 workers = multiprocessing.cpu_count() * 2 + 1
-worker_class = "sync"
+#worker_class = "sync"
+worker_class = "gthread"
+threads = 4
+#
 timeout = 120
 keepalive = 5
+
+max_requests = 1000
+max_requests_jitter = 50
 
 # Logging
 errorlog = os.path.join(log_dir, "gunicorn-error.log")
