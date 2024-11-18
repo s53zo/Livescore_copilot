@@ -295,46 +295,59 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details and all competitors with optional filtering"""
+        """Get station details with optimized filtering"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
+    
+                # Get target score first (for comparison)
+                cursor.execute("""
+                    SELECT score FROM contest_scores 
+                    WHERE callsign = ? AND contest = ?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (callsign, contest))
+                target_score = cursor.fetchone()[0]
+    
+                # Main query with index hints
                 query = """
-                    WITH latest_scores AS (
-                        SELECT callsign, MAX(timestamp) as max_ts, MAX(id) as latest_id
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
+                    WITH filtered_scores AS (
+                        SELECT 
+                            cs.id,
+                            cs.callsign,
+                            cs.score,
+                            cs.power,
+                            cs.assisted,
+                            cs.timestamp,
+                            cs.qsos,
+                            cs.multipliers
+                        FROM contest_scores cs
+                        INDEXED BY idx_opt_contest_callsign_ts
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores 
+                            INDEXED BY idx_opt_contest_ts
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                        AND cs.qsos > 0
+                        {filter_clause}
                     )
                     SELECT 
-                        cs.id,
-                        cs.callsign,
-                        cs.score,
-                        cs.power,
-                        cs.assisted,
-                        cs.timestamp,
-                        cs.qsos,
-                        cs.multipliers,
+                        id, callsign, score, power, assisted, timestamp, qsos, multipliers,
                         CASE 
-                            WHEN cs.callsign = ? THEN 'current'
-                            WHEN cs.score > (
-                                SELECT score 
-                                FROM contest_scores 
-                                WHERE callsign = ? AND contest = ? AND timestamp = (
-                                    SELECT max_ts FROM latest_scores WHERE callsign = ?
-                                )
-                            ) THEN 'above'
+                            WHEN callsign = ? THEN 'current'
+                            WHEN score > ? THEN 'above'
                             ELSE 'below'
                         END as position,
-                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
-                    FROM contest_scores cs
-                    INNER JOIN latest_scores ls ON cs.id = ls.latest_id
-                    WHERE cs.contest = ?
-                    AND cs.qsos > 0
+                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                    FROM filtered_scores
+                    ORDER BY score DESC
                 """
-                
-                params = [contest, callsign, callsign, contest, callsign, contest]
+    
+                params = [contest, contest, callsign, target_score]
+                filter_clause = ""
     
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
@@ -346,26 +359,20 @@ class ScoreReporter:
                         'Continent': 'continent'
                     }
                     
-                    field = filter_map.get(filter_type)
-                    if field:
-                        query = query.replace(
-                            "WHERE cs.contest = ?",
-                            f"""WHERE cs.contest = ?
-                            AND EXISTS (
-                                SELECT 1 FROM qth_info qi 
-                                WHERE qi.contest_score_id = cs.id 
-                                AND qi.{field} = ?
-                            )"""
-                        )
-                        params.append(filter_value)
+                    if field := filter_map.get(filter_type):
+                        filter_clause = f"""
+                        AND EXISTS (
+                            SELECT 1 FROM qth_info qi 
+                            INDEXED BY idx_opt_qth_contest_score_id
+                            WHERE qi.contest_score_id = cs.id 
+                            AND qi.{field} = ?
+                        )"""
+                        params.insert(-2, filter_value)
     
+                query = query.format(filter_clause=filter_clause)
                 cursor.execute(query, params)
-                results = cursor.fetchall()
-                
-                if results:
-                    return results
-                return None
-                        
+                return cursor.fetchall()
+    
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
