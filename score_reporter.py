@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import sqlite3
-import os
 import logging
-import traceback
-from datetime import datetime, timedelta
-from flask import request
 import sys
+import os
+import time
+import traceback
+from datetime import datetime
+from collections import defaultdict
+from typing import Dict, List, Tuple, Optional
 
 class RateCalculator:
     def __init__(self, db_path, debug=False):
