@@ -295,40 +295,40 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details with optimized query structure"""
+        """Get station details using pre-calculated latest scores"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-    
-                # First get the latest timestamp for each callsign in a separate CTE
-                query = """
-                    WITH latest_timestamps AS (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores 
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ),
-                    latest_scores AS (
-                        SELECT cs.id,
-                               cs.callsign,
-                               cs.score,
-                               cs.power,
-                               cs.assisted,
-                               cs.timestamp,
-                               cs.qsos,
-                               cs.multipliers
-                        FROM contest_scores cs
-                        INNER JOIN latest_timestamps lt 
-                            ON cs.callsign = lt.callsign 
-                            AND cs.timestamp = lt.max_ts
-                        WHERE cs.contest = ?
-                        AND cs.qsos > 0
-                """
                 
-                params = [contest, contest]
-    
-                # If filtering, join with qth_info in the latest_scores CTE
                 if filter_type and filter_value and filter_type.lower() != 'none':
+                    # Use original query for filtered results
+                    query = """
+                        WITH latest_scores AS (
+                            SELECT cs.id,
+                                   cs.callsign,
+                                   cs.score,
+                                   cs.power,
+                                   cs.assisted,
+                                   cs.timestamp,
+                                   cs.qsos,
+                                   cs.multipliers,
+                                   qi.dxcc_country,
+                                   qi.continent
+                            FROM contest_scores cs
+                            INNER JOIN (
+                                SELECT callsign, MAX(timestamp) as max_ts
+                                FROM contest_scores 
+                                WHERE contest = ?
+                                GROUP BY callsign
+                            ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                            LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                            WHERE cs.contest = ?
+                            AND cs.qsos > 0
+                    """
+                    
+                    params = [contest, contest]
+                    
                     filter_map = {
                         'DXCC': 'dxcc_country',
                         'CQ Zone': 'cq_zone',
@@ -339,16 +339,34 @@ class ScoreReporter:
                     }
                     
                     if field := filter_map.get(filter_type):
-                        query = query.replace('AND cs.qsos > 0',
-                            f'''AND cs.qsos > 0
-                            AND EXISTS (
-                                SELECT 1 FROM qth_info qi 
-                                WHERE qi.contest_score_id = cs.id
-                                AND qi.{field} = ?
-                            )''')
+                        query += f" AND qi.{field} = ?"
                         params.append(filter_value)
-    
-                query += """)
+                    
+                    query += ")"
+                    
+                else:
+                    # Use materialized view for unfiltered results
+                    query = """
+                    WITH latest_scores AS (
+                        SELECT 
+                            id,
+                            callsign,
+                            score,
+                            power,
+                            assisted,
+                            timestamp,
+                            qsos,
+                            multipliers,
+                            dxcc_country,
+                            continent 
+                        FROM latest_contest_scores
+                        WHERE contest = ?
+                    )
+                    """
+                    params = [contest]
+                
+                # Common select portion for both queries
+                query += """
                     SELECT 
                         id,
                         callsign,
@@ -370,10 +388,10 @@ class ScoreReporter:
                 
                 # Add callsign parameters
                 params.extend([callsign, callsign])
-    
+                
                 cursor.execute(query, params)
                 results = cursor.fetchall()
-    
+                
                 return results
     
         except Exception as e:
