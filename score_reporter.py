@@ -300,7 +300,6 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Base query with QTH info join
                 query = """
                     WITH latest_scores AS (
                         SELECT callsign, MAX(timestamp) as max_ts, MAX(id) as latest_id
@@ -357,10 +356,10 @@ class ScoreReporter:
                     
                 return results
                         
-            except Exception as e:
-                self.logger.error(f"Error in get_station_details: {e}")
-                self.logger.error(traceback.format_exc())
-                return None
+        except Exception as e:
+            self.logger.error(f"Error in get_station_details: {e}")
+            self.logger.error(traceback.format_exc())
+            return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
         """Get band breakdown with both 60-minute and 15-minute rates"""
