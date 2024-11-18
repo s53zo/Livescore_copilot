@@ -314,49 +314,14 @@ class ScoreReporter:
                         CASE 
                             WHEN callsign = ? THEN 'current'
                             WHEN score > (SELECT score FROM latest_contest_scores 
-                                          WHERE callsign = ? AND contest = ?) 
+                                        WHERE callsign = ? AND contest = ?) 
                             THEN 'above'
                             ELSE 'below'
                         END as position,
-                        rn
-                    FROM (
-                        SELECT 
-                            id,
-                            callsign,
-                            score,
-                            power,
-                            assisted,
-                            timestamp,
-                            qsos,
-                            multipliers,
-                            ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                        FROM latest_contest_scores
-                        WHERE contest = ?
-                    ) ranked_scores
-                    WHERE rn <= 20
+                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                    FROM latest_contest_scores
+                    WHERE contest = ?
                 """
-                #
-                #query = """
-                #    SELECT 
-                #        id,
-                #        callsign,
-                #        score,
-                #        power,
-                #        assisted,
-                #        timestamp,
-                #        qsos,
-                #        multipliers,
-                #        CASE 
-                #            WHEN callsign = ? THEN 'current'
-                #            WHEN score > (SELECT score FROM latest_contest_scores 
-                #                        WHERE callsign = ? AND contest = ?) 
-                #            THEN 'above'
-                #            ELSE 'below'
-                #        END as position,
-                #        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                #    FROM latest_contest_scores
-                #    WHERE contest = ?
-                #"""
                 
                 params = [callsign, callsign, contest, contest]
                 
