@@ -395,6 +395,7 @@ class ScoreReporter:
                         AND cs.contest = ?
                         AND cs.timestamp <= ?
                         AND cs.timestamp >= datetime(?, '-60 minutes')
+                        AND cs.timestamp < datetime(?, '-65 minutes')
                         ORDER BY cs.timestamp DESC
                     ),
                     short_window_score AS (
@@ -405,6 +406,7 @@ class ScoreReporter:
                         AND cs.contest = ?
                         AND cs.timestamp <= ?
                         AND cs.timestamp >= datetime(?, '-15 minutes')
+                        AND cs.timestamp < datetime(?, '-20 minutes')
                         ORDER BY cs.timestamp DESC
                     )
                     SELECT 
