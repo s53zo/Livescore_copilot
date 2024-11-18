@@ -1,12 +1,12 @@
-#!/usr/bin/env python3
 from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
 import sqlite3
 import os
 import logging
 import sys
 import traceback
-from score_reporter import ScoreReporter
 from datetime import datetime
+from score_reporter import ScoreReporter
+import json
 
 # Set up detailed logging
 logging.basicConfig(
@@ -18,7 +18,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
 # Log startup
 logger.info("Starting web interface application")
 
