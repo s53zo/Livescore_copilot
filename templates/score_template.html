@@ -3,217 +3,335 @@
 <head>
     <title>Contest Progress Report - {contest}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
-    <!-- React and ReactDOM -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
-    <!-- Babel for JSX transformation -->
-    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
+    <script>
+        function refreshPage() {{
+            const params = new URLSearchParams(window.location.search);
+            window.location.href = '/reports/live.html?' + params.toString();
+        }}
+        
+        setInterval(refreshPage, 120000);
+
+        function updateCountdown() {{
+            const countdownElement = document.getElementById('countdown');
+            let minutes = 1;
+            let seconds = 59;
+
+            function pad(num) {{
+                return num.toString().padStart(2, '0');
+            }}
+
+            function updateRelativeTimes() {{
+                document.querySelectorAll('.relative-time').forEach(el => {{
+                    const timestamp = new Date(el.dataset.timestamp + 'Z');
+                    const now = new Date();
+                    const diff = Math.floor((now - timestamp) / 1000 / 60);
+                    
+                    if (diff < 60) {{
+                        el.textContent = `${{diff}}m ago`;
+                    }} else if (diff < 1440) {{
+                        el.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
+                    }} else {{
+                        el.textContent = Math.floor(diff/1440) + 'd ago';
+                    }}
+                }});
+            }}
+
+            const timer = setInterval(() => {{
+                if (minutes === 0 && seconds === 0) {{
+                    clearInterval(timer);
+                    return;
+                }}
+
+                if (seconds === 0) {{
+                    minutes--;
+                    seconds = 59;
+                }} else {{
+                    seconds--;
+                }}
+
+                countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
+                updateRelativeTimes();
+            }}, 1000);
+
+            updateRelativeTimes();
+        }}
+
+        document.addEventListener('DOMContentLoaded', updateCountdown);
+    </script>
     <style>
         /* Base styles */
-        body { 
+        body {{ 
             font-family: Arial, sans-serif; 
             margin: 0; 
             padding: 10px; 
             color: #333; 
             padding-bottom: 60px; 
-        }
+        }}
         
-        .band-data { 
+        h1 {{ 
+            color: #2c3e50; 
+            margin-bottom: 10px; 
+            font-size: 1.5rem; 
+            word-break: break-word; 
+        }}
+        
+        /* Station info styles */
+        .station-info {{ 
+            background-color: #f8f9fa; 
+            padding: 15px; 
+            border-radius: 4px; 
+            margin-bottom: 20px; 
+            line-height: 1.5;
+            font-size: 0.9rem;
+        }}
+        
+        .category-tag {{ 
+            display: inline-block; 
+            padding: 2px 8px; 
+            background-color: #e7f3ff; 
+            border: 1px solid #cce5ff; 
+            border-radius: 3px; 
+            color: #0066cc; 
+            margin: 2px;
+            font-size: 0.85rem;
+        }}
+        
+        /* Table styles */
+        .table-container {{
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 20px;
+            background: linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)), 
+                        linear-gradient(to left, white 30%, rgba(255, 255, 255, 0)) 100% 0;
+            background-size: 50px 100%;
+            background-repeat: no-repeat;
+            background-attachment: local, local;
+        }}
+        
+        table {{ 
+            border-collapse: collapse; 
+            width: 100%;
+            min-width: 800px;
+            margin-bottom: 20px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+        }}
+        
+        th, td {{ 
+            border: 1px solid #dee2e6; 
+            padding: 6px 4px; 
+            text-align: center; 
+            font-size: 0.85rem; 
+            white-space: nowrap;
+        }}
+        
+        th {{ 
+            background-color: #f8f9fa; 
+            font-weight: bold; 
+            color: #2c3e50; 
+            position: sticky; 
+            top: 0; 
+            z-index: 1; 
+        }}
+        
+        tr:nth-child(even) {{ 
+            background-color: #f8f9fa; 
+        }}
+        
+        .highlight {{ 
+            background-color: #e8f5e9 !important; 
+            font-weight: bold; 
+        }}
+        
+        .highlight td {{ 
+            border-top: 2px solid #4caf50; 
+            border-bottom: 2px solid #4caf50; 
+        }}
+        
+        /* Fixed elements */
+        .refresh-info {{ 
+            position: fixed; 
+            top: 10px; 
+            right: 10px; 
+            background-color: #4caf50; 
+            color: white; 
+            padding: 8px 12px; 
+            border-radius: 4px; 
+            font-size: 0.85rem; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            z-index: 1000; 
+        }}
+        
+        .footer {{ 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            right: 0; 
+            background-color: #f8f9fa; 
+            padding: 10px; 
+            text-align: center; 
+            font-size: 0.75rem; 
+            color: #666; 
+            border-top: 1px solid #dee2e6; 
+            z-index: 1000;
+        }}
+        
+        /* Rate display */
+        .band-data {{ 
             font-family: monospace; 
             white-space: nowrap; 
             font-size: 0.8rem;
-        }
+        }}
         
-        .better-rate { 
+        .better-rate {{ 
             color: #c71212; 
             font-weight: bold; 
-        }
+        }}
         
-        .worse-rate { 
+        .worse-rate {{ 
             color: #666; 
-        }
+        }}
         
-        .highlight { 
-            background-color: #e8f5e9 !important; 
-        }
+        .legend {{
+            display: none;
+            position: fixed;
+            bottom: 40px;
+            right: 10px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            font-size: 0.75rem;
+            z-index: 1000;
+        }}
         
-        @media print { 
-            .refresh-info, .footer { 
+        /* Filter styles */
+        .filter-info {{
+            margin-top: 10px;
+            padding: 8px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            white-space: nowrap;
+        }}
+        
+        .filter-label {{
+            font-weight: bold;
+            color: #666;
+        }}
+        
+        .filter-link {{
+            color: #0066cc;
+            text-decoration: none;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+            margin: 2px;
+        }}
+        
+        .active-filter {{
+            background-color: #4CAF50;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }}
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {{
+            body {{
+                padding: 5px;
+                padding-bottom: 60px;
+            }}
+            
+            h1 {{
+                font-size: 1.2rem;
+            }}
+            
+            .station-info {{
+                padding: 10px;
+                font-size: 0.8rem;
+            }}
+            
+            .refresh-info {{
+                font-size: 0.75rem;
+                padding: 6px 10px;
+            }}
+            
+            .footer {{
+                padding: 8px;
+                font-size: 0.7rem;
+            }}
+            
+            .category-tag {{
+                font-size: 0.75rem;
+                margin: 1px;
+                padding: 1px 6px;
+            }}
+        }}
+        
+        /* Print styles */
+        @media print {{ 
+            .refresh-info, .footer, .legend {{ 
                 display: none; 
-            } 
-            body { 
+            }} 
+            body {{ 
                 padding-bottom: 0; 
-            }
-        }
+            }}
+            .table-container {{
+                overflow-x: visible;
+                background: none;
+            }}
+            table {{
+                min-width: auto;
+            }}
+        }}
     </style>
+    {additional_css}
 </head>
 <body>
-    <div id="root"></div>
+    <div class="refresh-info">
+        Next update in <span id="countdown">5:00</span>
+    </div>
 
-    <script type="text/babel">
-        // Initial data from URL parameters
-        const urlParams = new URLSearchParams(window.location.search);
-        const initialData = {{
-            contest: '{contest}',
-            callsign: '{callsign}',
-            filterType: '{filter_type}',
-            filterValue: '{filter_value}'
-        }};
+    <h1>Contest Progress Report - {contest}</h1>
+    
+    <div class="station-info">
+        <div>Monitoring: {callsign} | 
+        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | 
+        Updated: {timestamp}</div>
+        <div>Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
+        {filter_info_div}
+    </div>
 
-        const LiveScoreTable = () => {
-            const [data, setData] = React.useState(null);
-            const [loading, setLoading] = React.useState(true);
-            const [error, setError] = React.useState(null);
-            const [countdown, setCountdown] = React.useState(120);
+    <div class="table-container">
+        <table>
+            <tr>
+                <th>No</th>
+                <th>Callsign</th>
+                <th>Cat</th>
+                <th>Score</th>
+                <th>160m</th>
+                <th>80m</th>
+                <th>40m</th>
+                <th>20m</th>
+                <th>15m</th>
+                <th>10m</th>
+                <th>Total<br>QSO/Mults</th>
+                <th>Last Update</th>
+            </tr>
+            {table_rows}
+        </table>
+    </div>
 
-            const fetchData = async () => {
-                try {
-                    const response = await fetch(`/reports/live.html${window.location.search}`, {
-                        headers: {
-                            'Accept': 'application/json'
-                        }
-                    });
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    const jsonData = await response.json();
-                    setData(jsonData);
-                    setLoading(false);
-                } catch (err) {
-                    setError(err.message);
-                    setLoading(false);
-                }
-            };
+    <div class="legend">
+        <div class="legend-item">Score Display Format:</div>
+        <div class="legend-item">QSOs/Mults (60min/15min)</div>
+        <div class="legend-item legend-better">Red = Station has better rate</div>
+    </div>
 
-            React.useEffect(() => {
-                fetchData();
-                const dataInterval = setInterval(fetchData, 120000);
-                const countdownInterval = setInterval(() => {
-                    setCountdown(prev => prev > 0 ? prev - 1 : 120);
-                }, 1000);
-
-                return () => {
-                    clearInterval(dataInterval);
-                    clearInterval(countdownInterval);
-                };
-            }, []);
-
-            if (loading) {
-                return (
-                    <div className="flex items-center justify-center h-64">
-                        <div className="text-xl text-gray-600">Loading contest data...</div>
-                    </div>
-                );
-            }
-
-            if (error) {
-                return (
-                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-md">
-                        <h3 className="text-lg font-semibold">Error Loading Data</h3>
-                        <p>{error}</p>
-                    </div>
-                );
-            }
-
-            if (!data) return null;
-
-            const formatBandData = (bandData) => {
-                if (!bandData) return "-/- (0/0)";
-                const [qsos, mults, longRate, shortRate] = bandData;
-                const longRateStr = longRate > 0 ? `+${longRate}` : "0";
-                const shortRateStr = shortRate > 0 ? `+${shortRate}` : "0";
-                return `${qsos}/${mults} (${longRateStr}/${shortRateStr})`;
-            };
-
-            return (
-                <div className="w-full max-w-8xl mx-auto p-4">
-                    <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg">
-                        Next update in {Math.floor(countdown/60)}:{(countdown%60).toString().padStart(2, '0')}
-                    </div>
-
-                    <div className="mb-8">
-                        <h1 className="text-2xl font-bold text-gray-800">
-                            Contest Progress Report - {data.contest}
-                        </h1>
-                        <div className="text-sm text-gray-500 mt-2">
-                            Last Updated: {new Date(data.timestamp).toLocaleString()}
-                        </div>
-                    </div>
-
-                    <div className="overflow-x-auto shadow-md rounded-lg">
-                        <table className="min-w-full bg-white">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pos</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Callsign</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-                                    {['160', '80', '40', '20', '15', '10'].map(band => (
-                                        <th key={band} className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            {band}m
-                                        </th>
-                                    ))}
-                                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Last Update</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {data.stations.map((station, index) => (
-                                    <tr key={station.callsign} 
-                                        className={`${station.callsign === data.callsign ? 'highlight' : 'hover:bg-gray-50'}`}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm">{index + 1}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap font-mono text-sm">{station.callsign}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="flex gap-2">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                                    ${station.power === 'HIGH' ? 'bg-red-100 text-red-800' :
-                                                      station.power === 'LOW' ? 'bg-green-100 text-green-800' :
-                                                      'bg-yellow-100 text-yellow-800'}`}>
-                                                    {station.power}
-                                                </span>
-                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                                    {station.assisted}
-                                                </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right font-mono text-sm">
-                                            {station.score.toLocaleString()}
-                                        </td>
-                                        {['160', '80', '40', '20', '15', '10'].map(band => (
-                                            <td key={band} className="px-6 py-4 whitespace-nowrap text-center band-data">
-                                                {formatBandData(station.bandData[band])}
-                                            </td>
-                                        ))}
-                                        <td className="px-6 py-4 whitespace-nowrap text-center band-data">
-                                            {station.qsos}/{station.multipliers}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
-                                            {new Date(station.timestamp).toLocaleTimeString()}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 text-center text-sm text-gray-600">
-                        Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network
-                    </footer>
-                </div>
-            );
-        };
-
-        // Mount the React application
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(
-            <React.StrictMode>
-                <LiveScoreTable />
-            </React.StrictMode>
-        );
-    </script>
+    <div class="footer">
+        Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network | <a href="https://azure.s53m.com/livescore-pilot">https://azure.s53m.com/livescore-pilot</a>
+    </div>
 </body>
 </html>
