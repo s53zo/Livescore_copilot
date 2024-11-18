@@ -46,6 +46,56 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
+@app.route('/livescore-pilot/api/scores')
+def get_scores():
+    try:
+        callsign = request.args.get('callsign')
+        contest = request.args.get('contest')
+        filter_type = request.args.get('filter_type', 'none')
+        filter_value = request.args.get('filter_value', 'none')
+
+        if not (callsign and contest):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        reporter = ScoreReporter(Config.DB_PATH)
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+
+        if not stations:
+            return jsonify({"error": "No data found"}), 404
+
+        # Transform data for frontend
+        formatted_stations = []
+        for station in stations:
+            band_data = reporter.get_band_breakdown_with_rates(
+                station[0],  # station_id
+                station[1],  # callsign
+                contest,
+                station[5]   # timestamp
+            )
+
+            formatted_stations.append({
+                "callsign": station[1],
+                "score": station[2],
+                "power": station[3],
+                "assisted": station[4],
+                "timestamp": station[5],
+                "qsos": station[6],
+                "multipliers": station[7],
+                "bandData": band_data
+            })
+
+        return jsonify({
+            "contest": contest,
+            "callsign": callsign,
+            "timestamp": datetime.utcnow().isoformat(),
+            "stations": formatted_stations
+        })
+
+    except Exception as e:
+        logger.error(f"Error in get_scores: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
     logger.debug(f"Request received: {request.method}")
