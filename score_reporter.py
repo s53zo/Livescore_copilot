@@ -528,89 +528,18 @@ class ScoreReporter:
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with updated category display"""
         try:
-            # Get filter information from the URL parameters
+            # Get filter information
             filter_type = request.args.get('filter_type', 'none')
             filter_value = request.args.get('filter_value', 'none')
-            
-            # Prepare filter info div
-            filter_info_div = ""
-            
-            if filter_type != 'none' and filter_value != 'none':
-                # Create "Show All" link
-                clear_filter = f'<a href="/reports/live.html?contest={contest}&callsign={callsign}&filter_type=none&filter_value=none" class="filter-link">Show All</a>'
-                
-                # Create active filter display
-                active_filter = f'<span class="active-filter">{filter_type}: {filter_value}</span>'
-                
-                filter_info_div = f"""
-                <div class="filter-info">
-                    <span class="filter-label">Active Filter:</span> 
-                    {active_filter} | {clear_filter}
-                </div>
-                """
-            
-            # Get reference station for category display
-            reference_station = next((s for s in stations if s[1] == callsign), None)
-            if not reference_station:
-                raise ValueError(f"Reference station {callsign} not found in results")
-                
-            # Format table rows
-            table_rows = []
-            for i, station in enumerate(stations, 1):
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rank = station
-                
-                # Get band breakdown with rates
-                band_data = self.get_band_breakdown_with_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                
-                # Calculate total rates
-                total_long_rate, total_short_rate = self.get_total_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                
-                # Format band cells
-                band_cells = []
-                for band in ['160', '80', '40', '20', '15', '10']:
-                    band_data_formatted = self.format_band_data(
-                        band_data.get(band, None),
-                        reference_rates=band_data if callsign_val == callsign else None,
-                        band=band
-                    )
-                    band_cells.append(f'<td class="band-data">{band_data_formatted}</td>')
-                
-                # Format the row
-                highlight = ' class="highlight"' if callsign_val == callsign else ''
-                timestamp_formatted = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                
-                row = f"""
-                <tr{highlight}>
-                    <td>{i}</td>
-                    <td>{callsign_val}</td>
-                    <td>{power if power else 'Unknown'}</td>
-                    <td>{score:,}</td>
-                    {''.join(band_cells)}
-                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td><span class="relative-time" data-timestamp="{timestamp}">{timestamp_formatted}</span></td>
-                </tr>"""
-                table_rows.append(row)
-            
-            # Format final HTML
-            formatted_html = template.format(
-                contest=contest,
-                callsign=callsign,
-                power=reference_station[3] if reference_station else 'Unknown',
-                assisted=reference_station[4] if reference_station else 'Unknown',
-                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                filter_info_div=filter_info_div,
-                table_rows='\n'.join(table_rows),
-                additional_css='',
-                category_filter=filter_type,
-                filter_type=filter_type,
-                filter_value=filter_value
-            )
-            
-            return formatted_html
+    
+            # Format HTML using straight replacement
+            html_content = template.replace('{contest}', contest)
+            html_content = html_content.replace('{callsign}', callsign)
+            html_content = html_content.replace('{filter_type}', filter_type)
+            html_content = html_content.replace('{filter_value}', filter_value)
+            html_content = html_content.replace('{timestamp}', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    
+            return html_content
             
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
