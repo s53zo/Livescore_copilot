@@ -297,11 +297,36 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details with optimized query performance"""
+        """Get station details with debug logging"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
+                # First verify the data exists
+                verify_query = """
+                    SELECT COUNT(*)
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.contest = ?
+                    AND cs.callsign = ?
+                """
+                cursor.execute(verify_query, (contest, callsign))
+                count = cursor.fetchone()[0]
+                self.logger.debug(f"Found {count} records for {callsign} in {contest}")
+                
+                # Check filter values
+                if filter_type and filter_value:
+                    verify_filter = """
+                        SELECT COUNT(*)
+                        FROM contest_scores cs
+                        JOIN qth_info qi ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        AND qi.arrl_section = ?
+                    """
+                    cursor.execute(verify_filter, (contest, filter_value))
+                    filter_count = cursor.fetchone()[0]
+                    self.logger.debug(f"Found {filter_count} records matching filter {filter_type}={filter_value}")
+    
                 # Build the optimized query
                 query = """
                 WITH ranked_scores AS (
@@ -313,106 +338,76 @@ class ScoreReporter:
                         cs.assisted,
                         cs.timestamp,
                         cs.qsos,
-                        cs.multipliers,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY cs.callsign 
-                            ORDER BY cs.timestamp DESC
-                        ) as rn
+                        cs.multipliers
                     FROM contest_scores cs 
                     WHERE cs.contest = ?
                 ),
-                reference_score AS (
-                    SELECT score
-                    FROM ranked_scores
-                    WHERE callsign = ?
-                    AND rn = 1
+                latest_timestamps AS (
+                    SELECT callsign, MAX(timestamp) as max_ts
+                    FROM contest_scores
+                    WHERE contest = ?
+                    GROUP BY callsign
                 ),
                 filtered_scores AS (
                     SELECT 
-                        rs.id,
-                        rs.callsign,
-                        rs.score,
-                        rs.power,
-                        rs.assisted,
-                        rs.timestamp,
-                        rs.qsos,
-                        rs.multipliers,
-                        CASE 
-                            WHEN rs.callsign = ? THEN 'current'
-                            WHEN rs.score > (SELECT score FROM reference_score) THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY rs.score DESC) as rank
+                        rs.*,
+                        qi.arrl_section
                     FROM ranked_scores rs
+                    JOIN latest_timestamps lt 
+                        ON rs.callsign = lt.callsign 
+                        AND rs.timestamp = lt.max_ts
                     JOIN qth_info qi ON qi.contest_score_id = rs.id
-                    WHERE rs.rn = 1
-                """
-                
-                params = [contest, callsign, callsign]
-
-                # Add filter conditions if specified
-                if filter_type and filter_value and filter_type.lower() != 'none':
-                    filter_map = {
-                        'DXCC': ('qi.dxcc_country', str),
-                        'CQ Zone': ('qi.cq_zone', str),
-                        'IARU Zone': ('qi.iaru_zone', str),
-                        'ARRL Section': ('qi.arrl_section', str),
-                        'State/Province': ('qi.state_province', str),
-                        'Continent': ('qi.continent', str)
-                    }
-                    
-                    if filter_type in filter_map:
-                        field, value_type = filter_map[filter_type]
-                        query += f" AND {field} = ?"
-                        params.append(value_type(filter_value))
-
-                # Complete the query
-                query += """
+                    WHERE qi.arrl_section = ?
+                ),
+                reference_score AS (
+                    SELECT score
+                    FROM filtered_scores
+                    WHERE callsign = ?
+                    LIMIT 1
                 )
                 SELECT 
-                    fs.*,
-                    GROUP_CONCAT(
-                        json_object(
-                            'band', bb.band,
-                            'qsos', bb.qsos,
-                            'multipliers', bb.multipliers
-                        )
-                    ) as band_data
+                    fs.id,
+                    fs.callsign,
+                    fs.score,
+                    fs.power,
+                    fs.assisted,
+                    fs.timestamp,
+                    fs.qsos,
+                    fs.multipliers,
+                    CASE 
+                        WHEN fs.callsign = ? THEN 'current'
+                        WHEN fs.score > (SELECT score FROM reference_score) THEN 'above'
+                        ELSE 'below'
+                    END as position,
+                    ROW_NUMBER() OVER (ORDER BY fs.score DESC) as rank
                 FROM filtered_scores fs
-                LEFT JOIN band_breakdown bb ON bb.contest_score_id = fs.id
-                GROUP BY fs.id
                 ORDER BY fs.score DESC
                 """
-
-                # Execute query
+                
+                params = [contest, contest, filter_value, callsign, callsign]
+                
+                self.logger.debug(f"Executing query with params: {params}")
+                
                 cursor.execute(query, params)
-                results = []
-                for row in cursor.fetchall():
-                    station_data = list(row[:-1])  # All columns except band_data
-                    band_data = {}
-                    
-                    if row[-1]:  # Process band_data if not NULL
-                        for band_info in row[-1].split(','):
-                            band_dict = eval(band_info)
-                            band = band_dict['band']
-                            band_data[band] = [
-                                band_dict['qsos'],
-                                band_dict['multipliers'],
-                                0,  # Long rate placeholder
-                                0   # Short rate placeholder
-                            ]
-                    
-                    # Calculate rates for each band
-                    rates = self.calculate_band_rates(cursor, station_data[1], contest, station_data[5])
-                    for band, rate_data in rates.items():
-                        if band in band_data:
-                            band_data[band][2:] = rate_data[2:]  # Update rates
-                    
-                    station_data.append(band_data)
-                    results.append(station_data)
+                results = cursor.fetchall()
+                
+                self.logger.debug(f"Query returned {len(results)} results")
+                
+                if not results:
+                    self.logger.error("No results found!")
+                    self.logger.debug("Checking raw data...")
+                    cursor.execute("""
+                        SELECT DISTINCT arrl_section 
+                        FROM qth_info 
+                        WHERE contest_score_id IN (
+                            SELECT id FROM contest_scores WHERE contest = ?
+                        )
+                    """, (contest,))
+                    sections = cursor.fetchall()
+                    self.logger.debug(f"Available sections: {sections}")
                 
                 return results
-                    
+                
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
