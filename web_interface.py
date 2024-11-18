@@ -156,9 +156,8 @@ def get_scores():
 
 @app.route('/reports/live.html')
 def live_report():
-    """Handle requests for live contest reports"""
+    """Handle live report requests"""
     try:
-        # Get parameters from URL
         callsign = request.args.get('callsign')
         contest = request.args.get('contest')
         filter_type = request.args.get('filter_type', 'none')
@@ -167,57 +166,98 @@ def live_report():
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
+        logger.info(f"Generating report for: {contest}, {callsign}, filter:{filter_type}={filter_value}")
 
-        # Create reporter instance
-        reporter = ScoreReporter(Config.DB_PATH)
-
-        # Verify contest and callsign exist in database
         with get_db() as conn:
             cursor = conn.cursor()
+
+            # First verify that we have data
             cursor.execute("""
-                SELECT COUNT(*) 
-                FROM contest_scores 
-                WHERE contest = ? AND callsign = ?
-            """, (contest, callsign))
-            if cursor.fetchone()[0] == 0:
-                return render_template('error.html', 
-                    error=f"No data found for {callsign} in {contest}")
+                SELECT COUNT(*)
+                FROM contest_scores cs
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ? AND qi.arrl_section = ?
+            """, (contest, filter_value))
+            count = cursor.fetchone()[0]
+            logger.debug(f"Found {count} records for section {filter_value}")
 
-        # Get station data with filters
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+            # Use the working query
+            query = """
+            WITH ranked_scores AS (
+                SELECT cs.id,
+                       cs.callsign,
+                       cs.score,
+                       cs.power,
+                       cs.assisted,
+                       cs.timestamp,
+                       cs.qsos,
+                       cs.multipliers,
+                       ROW_NUMBER() OVER (PARTITION BY cs.callsign ORDER BY cs.timestamp DESC) as rn
+                FROM contest_scores cs
+                WHERE cs.contest = ?
+            ),
+            filtered_scores AS (
+                SELECT rs.*
+                FROM ranked_scores rs
+                JOIN qth_info qi ON qi.contest_score_id = rs.id
+                WHERE rs.rn = 1
+                AND qi.arrl_section = ?
+            ),
+            reference_score AS (
+                SELECT score
+                FROM filtered_scores
+                WHERE callsign = ?
+            )
+            SELECT 
+                fs.id,
+                fs.callsign,
+                fs.score,
+                fs.power,
+                fs.assisted,
+                fs.timestamp,
+                fs.qsos,
+                fs.multipliers,
+                CASE 
+                    WHEN fs.callsign = ? THEN 'current'
+                    WHEN fs.score > (SELECT score FROM reference_score) THEN 'above'
+                    ELSE 'below'
+                END as position,
+                ROW_NUMBER() OVER (ORDER BY fs.score DESC) as rank
+            FROM filtered_scores fs
+            ORDER BY fs.score DESC
+            """
 
-        if not stations:
-            logger.error(f"No station data found for {callsign} in {contest}")
-            return render_template('error.html', error="No data found for the selected criteria")
+            cursor.execute(query, (contest, filter_value, callsign, callsign))
+            results = cursor.fetchall()
 
-        # Check if client accepts JSON
-        if request.headers.get('Accept') == 'application/json':
-            # Return JSON data for API requests
-            formatted_stations = []
-            for station in stations:
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rank = station
+            if not results:
+                if request.headers.get('Accept') == 'application/json':
+                    return jsonify({"error": "No data found"}), 404
+                return render_template('error.html', error="No data found for the selected criteria")
+
+            # Format results for JSON response
+            stations = []
+            for row in results:
+                station_id, station_call, score, power, assisted, timestamp, qsos, mults, position, rank = row
                 
-                # Get band breakdown with rates
-                band_data = reporter.get_band_breakdown_with_rates(
-                    station_id,
-                    callsign_val,
-                    contest,
-                    timestamp
-                )
+                # Get band breakdown
+                cursor.execute("""
+                    SELECT bb.band,
+                           bb.qsos,
+                           bb.multipliers
+                    FROM band_breakdown bb
+                    WHERE bb.contest_score_id = ?
+                    ORDER BY bb.band
+                """, (station_id,))
                 
-                # Calculate total rates
-                total_long_rate, total_short_rate = reporter.get_total_rates(
-                    station_id,
-                    callsign_val,
-                    contest,
-                    timestamp
-                )
+                band_data = {}
+                for band_row in cursor.fetchall():
+                    band, band_qsos, band_mults = band_row
+                    band_data[band] = [band_qsos, band_mults, 0, 0]  # Include placeholders for rates
 
-                formatted_stations.append({
+                stations.append({
                     "id": station_id,
-                    "callsign": callsign_val,
+                    "callsign": station_call,
                     "score": score,
                     "power": power,
                     "assisted": assisted,
@@ -227,41 +267,38 @@ def live_report():
                     "position": position,
                     "rank": rank,
                     "bandData": band_data,
-                    "totalRates": {
-                        "long": total_long_rate,
-                        "short": total_short_rate
-                    }
+                    "totalRates": {"long": 0, "short": 0}
                 })
 
-            return jsonify({
+            response_data = {
                 "contest": contest,
                 "callsign": callsign,
                 "filterType": filter_type,
                 "filterValue": filter_value,
                 "timestamp": datetime.utcnow().isoformat(),
-                "stations": formatted_stations
-            })
+                "stations": stations
+            }
 
-        # For HTML requests, render the template
-        template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-        with open(template_path, 'r') as f:
-            template = f.read()
-
-        html_content = reporter.generate_html_content(template, callsign, contest, stations)
+            if request.headers.get('Accept') == 'application/json':
+                return jsonify(response_data)
             
-        # Return response with appropriate headers
-        response = make_response(html_content)
-        response.headers['Content-Type'] = 'text/html; charset=utf-8'
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
-            
-        logger.info(f"Successfully generated report for {callsign} in {contest}")
-        return response
+            # For HTML response, use the template
+            with open(os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html'), 'r') as f:
+                template = f.read()
+                return template.format(
+                    contest=contest,
+                    callsign=callsign,
+                    filter_type=filter_type,
+                    filter_value=filter_value,
+                    additional_css='',
+                    timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                )
 
     except Exception as e:
-        logger.error("Exception in live_report:")
+        logger.error(f"Error in live_report: {e}")
         logger.error(traceback.format_exc())
+        if request.headers.get('Accept') == 'application/json':
+            return jsonify({"error": str(e)}), 500
         return render_template('error.html', error=f"Error: {str(e)}")
 
 @app.errorhandler(404)
