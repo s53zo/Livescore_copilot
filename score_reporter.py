@@ -314,13 +314,22 @@ class ScoreReporter:
                         CASE 
                             WHEN callsign = ? THEN 'current'
                             WHEN score > (SELECT score FROM latest_contest_scores 
-                                        WHERE callsign = ? AND contest = ?) 
+                                          WHERE callsign = ? AND contest = ?) 
                             THEN 'above'
                             ELSE 'below'
-                        END as position
+                        END as position,
+                        rn
                     FROM (
-                        SELECT *,
-                               ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                        SELECT 
+                            id,
+                            callsign,
+                            score,
+                            power,
+                            assisted,
+                            timestamp,
+                            qsos,
+                            multipliers,
+                            ROW_NUMBER() OVER (ORDER BY score DESC) as rn
                         FROM latest_contest_scores
                         WHERE contest = ?
                     ) ranked_scores
