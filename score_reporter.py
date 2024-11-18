@@ -295,34 +295,38 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details with optimized filtering using materialized view"""
+        """Get station details with debug logging"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
     
+                # Base query
                 query = """
-                    SELECT 
-                        id,
-                        callsign,
-                        score,
-                        power,
-                        assisted,
-                        timestamp,
-                        qsos,
-                        multipliers,
-                        CASE 
-                            WHEN callsign = ? THEN 'current'
-                            WHEN score > (SELECT score FROM latest_contest_scores 
-                                        WHERE callsign = ? AND contest = ?) 
-                            THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                    FROM latest_contest_scores
-                    WHERE contest = ?
+                    WITH latest_scores AS (
+                        SELECT cs.id,
+                               cs.callsign,
+                               cs.score,
+                               cs.power,
+                               cs.assisted,
+                               cs.timestamp,
+                               cs.qsos,
+                               cs.multipliers,
+                               qi.dxcc_country,
+                               qi.continent
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores 
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                        AND cs.timestamp = latest.max_ts
+                        LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        AND cs.qsos > 0
                 """
                 
-                params = [callsign, callsign, contest, contest]
+                params = [contest, contest]
     
                 # Add filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
@@ -336,17 +340,54 @@ class ScoreReporter:
                     }
                     
                     if field := filter_map.get(filter_type):
-                        query += f" AND {field} = ?"
+                        query += f" AND qi.{field} = ?"
                         params.append(filter_value)
     
-                query += " ORDER BY score DESC"
+                query += """)
+                    SELECT 
+                        id,
+                        callsign,
+                        score,
+                        power,
+                        assisted,
+                        timestamp,
+                        qsos,
+                        multipliers,
+                        CASE 
+                            WHEN callsign = ? THEN 'current'
+                            WHEN score > (SELECT score FROM latest_scores WHERE callsign = ?) THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
+                    FROM latest_scores
+                    ORDER BY score DESC
+                """
                 
+                # Add callsign parameters
+                params.extend([callsign, callsign])
+    
+                # Debug output
+                self.logger.debug(f"Executing query for {contest} with filter {filter_type}={filter_value}")
+                self.logger.debug(f"Query: {query}")
+                self.logger.debug(f"Parameters: {params}")
+    
+                # Execute query and get results
                 cursor.execute(query, params)
                 results = cursor.fetchall()
     
                 if not results:
-                    self.logger.info(f"No results found for {contest} with filter {filter_type}={filter_value}")
-                    return None
+                    # Debug query to see what values exist
+                    cursor.execute("""
+                        SELECT DISTINCT qi.dxcc_country, cs.callsign
+                        FROM contest_scores cs
+                        JOIN qth_info qi ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        ORDER BY qi.dxcc_country
+                    """, (contest,))
+                    stored_values = cursor.fetchall()
+                    self.logger.debug(f"Available DXCC values in contest {contest}:")
+                    for dxcc, call in stored_values:
+                        self.logger.debug(f"  {dxcc} ({call})")
     
                 return results
     
