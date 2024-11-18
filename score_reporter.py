@@ -326,25 +326,26 @@ class ScoreReporter:
                     FROM ranked_scores
                     WHERE callsign = ?
                     AND rn = 1
-                )
-                SELECT 
-                    rs.id,
-                    rs.callsign,
-                    rs.score,
-                    rs.power,
-                    rs.assisted,
-                    rs.timestamp,
-                    rs.qsos,
-                    rs.multipliers,
-                    CASE 
-                        WHEN rs.callsign = ? THEN 'current'
-                        WHEN rs.score > (SELECT score FROM reference_score) THEN 'above'
-                        ELSE 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (ORDER BY rs.score DESC) as rank
-                FROM ranked_scores rs
-                JOIN qth_info qi ON qi.contest_score_id = rs.id
-                WHERE rs.rn = 1
+                ),
+                filtered_scores AS (
+                    SELECT 
+                        rs.id,
+                        rs.callsign,
+                        rs.score,
+                        rs.power,
+                        rs.assisted,
+                        rs.timestamp,
+                        rs.qsos,
+                        rs.multipliers,
+                        CASE 
+                            WHEN rs.callsign = ? THEN 'current'
+                            WHEN rs.score > (SELECT score FROM reference_score) THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        ROW_NUMBER() OVER (ORDER BY rs.score DESC) as rank
+                    FROM ranked_scores rs
+                    JOIN qth_info qi ON qi.contest_score_id = rs.id
+                    WHERE rs.rn = 1
                 """
                 
                 params = [contest, callsign, callsign]
@@ -366,18 +367,49 @@ class ScoreReporter:
                         params.append(value_type(filter_value))
 
                 # Complete the query
-                query += " ORDER BY rs.score DESC"
+                query += """
+                )
+                SELECT 
+                    fs.*,
+                    GROUP_CONCAT(
+                        json_object(
+                            'band', bb.band,
+                            'qsos', bb.qsos,
+                            'multipliers', bb.multipliers
+                        )
+                    ) as band_data
+                FROM filtered_scores fs
+                LEFT JOIN band_breakdown bb ON bb.contest_score_id = fs.id
+                GROUP BY fs.id
+                ORDER BY fs.score DESC
+                """
 
-                # Log query for debugging if needed
-                self.logger.debug(f"Executing query with params: {params}")
-                start_time = time.time()
-                
                 # Execute query
                 cursor.execute(query, params)
-                results = cursor.fetchall()
-                
-                query_time = time.time() - start_time
-                self.logger.debug(f"Query executed in {query_time:.3f} seconds")
+                results = []
+                for row in cursor.fetchall():
+                    station_data = list(row[:-1])  # All columns except band_data
+                    band_data = {}
+                    
+                    if row[-1]:  # Process band_data if not NULL
+                        for band_info in row[-1].split(','):
+                            band_dict = eval(band_info)
+                            band = band_dict['band']
+                            band_data[band] = [
+                                band_dict['qsos'],
+                                band_dict['multipliers'],
+                                0,  # Long rate placeholder
+                                0   # Short rate placeholder
+                            ]
+                    
+                    # Calculate rates for each band
+                    rates = self.calculate_band_rates(cursor, station_data[1], contest, station_data[5])
+                    for band, rate_data in rates.items():
+                        if band in band_data:
+                            band_data[band][2:] = rate_data[2:]  # Update rates
+                    
+                    station_data.append(band_data)
+                    results.append(station_data)
                 
                 return results
                     
@@ -385,6 +417,66 @@ class ScoreReporter:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
             return None
+            
+    def calculate_band_rates(self, cursor, callsign, contest, timestamp):
+        """Calculate rates for all bands"""
+        try:
+            query = """
+            WITH current_bands AS (
+                SELECT bb.band, bb.qsos, cs.timestamp
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ? 
+                AND cs.contest = ?
+                AND cs.timestamp = ?
+            ),
+            previous_bands AS (
+                SELECT bb.band, bb.qsos, cs.timestamp
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= datetime(?, '-60 minutes')
+                ORDER BY cs.timestamp DESC
+            )
+            SELECT 
+                cb.band,
+                cb.qsos as current_qsos,
+                pb.qsos as prev_qsos,
+                cb.timestamp as current_ts,
+                pb.timestamp as prev_ts
+            FROM current_bands cb
+            LEFT JOIN previous_bands pb ON cb.band = pb.band
+            """
+            
+            cursor.execute(query, (
+                callsign, contest, timestamp,
+                callsign, contest, timestamp
+            ))
+            
+            rates = {}
+            for band, curr_qsos, prev_qsos, curr_ts, prev_ts in cursor.fetchall():
+                if prev_ts and prev_qsos:
+                    time_diff = (
+                        datetime.strptime(curr_ts, '%Y-%m-%d %H:%M:%S') - 
+                        datetime.strptime(prev_ts, '%Y-%m-%d %H:%M:%S')
+                    ).total_seconds() / 3600  # Convert to hours
+                    
+                    if time_diff > 0:
+                        qso_diff = curr_qsos - prev_qsos
+                        rate = int(round(qso_diff / time_diff))
+                        rates[band] = [curr_qsos, 0, rate, rate // 4]  # Divide by 4 for 15-min rate
+                    else:
+                        rates[band] = [curr_qsos, 0, 0, 0]
+                else:
+                    rates[band] = [curr_qsos, 0, 0, 0]
+            
+            return rates
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating band rates: {e}")
+            self.logger.error(traceback.format_exc())
+            return {}
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
         """Get band breakdown with rates optimization"""
