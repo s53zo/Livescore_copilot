@@ -245,7 +245,6 @@ class ScoreReporter:
         self.template_path = template_path or 'templates/score_template.html'
         self.rate_calculator = RateCalculator(self.db_path)
         self.setup_logging()
-        self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
 
     def setup_logging(self):
         """Setup logging configuration with both file and console handlers"""
@@ -295,159 +294,159 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details and all competitors with optional filtering"""
+        """Get station details with optimized query performance"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Base query using CTEs for better performance
+                # Build the optimized query
                 query = """
-                    WITH latest_scores AS (
-                        SELECT MAX(id) as id
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ),
-                    filtered_scores AS (
-                        SELECT 
-                            cs.*,
-                            qi.dxcc_country,
-                            qi.cq_zone,
-                            qi.iaru_zone,
-                            qi.arrl_section,
-                            qi.state_province,
-                            qi.continent,
-                            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rank
-                        FROM contest_scores cs
-                        JOIN latest_scores ls ON cs.id = ls.id
-                        LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    )
+                WITH ranked_scores AS (
                     SELECT 
-                        fs.id,
-                        fs.callsign,
-                        fs.score,
-                        fs.power,
-                        fs.assisted,
-                        fs.timestamp,
-                        fs.qsos,
-                        fs.multipliers,
-                        CASE 
-                            WHEN fs.callsign = ? THEN 'current'
-                            WHEN fs.score > (SELECT score FROM filtered_scores WHERE callsign = ?) THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        fs.rank
-                    FROM filtered_scores fs
-                    WHERE 1=1
+                        cs.id,
+                        cs.callsign,
+                        cs.score,
+                        cs.power,
+                        cs.assisted,
+                        cs.timestamp,
+                        cs.qsos,
+                        cs.multipliers,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY cs.callsign 
+                            ORDER BY cs.timestamp DESC
+                        ) as rn
+                    FROM contest_scores cs 
+                    WHERE cs.contest = ?
+                ),
+                reference_score AS (
+                    SELECT score
+                    FROM ranked_scores
+                    WHERE callsign = ?
+                    AND rn = 1
+                )
+                SELECT 
+                    rs.id,
+                    rs.callsign,
+                    rs.score,
+                    rs.power,
+                    rs.assisted,
+                    rs.timestamp,
+                    rs.qsos,
+                    rs.multipliers,
+                    CASE 
+                        WHEN rs.callsign = ? THEN 'current'
+                        WHEN rs.score > (SELECT score FROM reference_score) THEN 'above'
+                        ELSE 'below'
+                    END as position,
+                    ROW_NUMBER() OVER (ORDER BY rs.score DESC) as rank
+                FROM ranked_scores rs
+                JOIN qth_info qi ON qi.contest_score_id = rs.id
+                WHERE rs.rn = 1
                 """
                 
                 params = [contest, callsign, callsign]
-    
+
                 # Add filter conditions if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
-                        'DXCC': 'dxcc_country',
-                        'CQ Zone': 'cq_zone',
-                        'IARU Zone': 'iaru_zone',
-                        'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province',
-                        'Continent': 'continent'
+                        'DXCC': ('qi.dxcc_country', str),
+                        'CQ Zone': ('qi.cq_zone', str),
+                        'IARU Zone': ('qi.iaru_zone', str),
+                        'ARRL Section': ('qi.arrl_section', str),
+                        'State/Province': ('qi.state_province', str),
+                        'Continent': ('qi.continent', str)
                     }
                     
-                    db_field = filter_map.get(filter_type)
-                    if db_field:
-                        query += f" AND fs.{db_field} = ?"
-                        params.append(filter_value)
-    
+                    if filter_type in filter_map:
+                        field, value_type = filter_map[filter_type]
+                        query += f" AND {field} = ?"
+                        params.append(value_type(filter_value))
+
                 # Complete the query
-                query += " ORDER BY fs.score DESC"
-    
-                # Execute query with parameters
+                query += " ORDER BY rs.score DESC"
+
+                # Log query for debugging if needed
+                self.logger.debug(f"Executing query with params: {params}")
+                start_time = time.time()
+                
+                # Execute query
                 cursor.execute(query, params)
-                return cursor.fetchall()
-                        
+                results = cursor.fetchall()
+                
+                query_time = time.time() - start_time
+                self.logger.debug(f"Query executed in {query_time:.3f} seconds")
+                
+                return results
+                    
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
             return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
-        """Get band breakdown with both 60-minute and 15-minute rates"""
+        """Get band breakdown with rates optimization"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                
                 query = """
-                    WITH current_score AS (
-                        SELECT cs.id, cs.timestamp, bb.band, bb.qsos, bb.multipliers
-                        FROM contest_scores cs
-                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                        WHERE cs.callsign = ? 
-                        AND cs.contest = ?
-                        AND cs.timestamp = ?
-                    ),
-                    long_window_score AS (
-                        SELECT bb.band, bb.qsos
-                        FROM contest_scores cs
-                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                        WHERE cs.callsign = ?
-                        AND cs.contest = ?
-                        AND cs.timestamp <= ?
-                        AND cs.timestamp >= datetime(?, '-60 minutes')
-                        ORDER BY cs.timestamp DESC
-                    ),
-                    short_window_score AS (
-                        SELECT bb.band, bb.qsos
-                        FROM contest_scores cs
-                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                        WHERE cs.callsign = ?
-                        AND cs.contest = ?
-                        AND cs.timestamp <= ?
-                        AND cs.timestamp >= datetime(?, '-15 minutes')
-                        ORDER BY cs.timestamp DESC
-                    )
-                    SELECT 
-                        cs.band,
-                        cs.qsos as current_qsos,
-                        cs.multipliers,
-                        lws.qsos as long_window_qsos,
-                        sws.qsos as short_window_qsos
-                    FROM current_score cs
-                    LEFT JOIN long_window_score lws ON cs.band = lws.band
-                    LEFT JOIN short_window_score sws ON cs.band = sws.band
-                    WHERE cs.qsos > 0
-                    ORDER BY cs.band
+                WITH RECURSIVE time_windows(window_start) AS (
+                    SELECT ?
+                    UNION ALL
+                    SELECT datetime(window_start, '-15 minutes')
+                    FROM time_windows
+                    WHERE window_start > datetime(?, '-60 minutes')
+                )
+                SELECT 
+                    bb.band,
+                    bb.qsos as current_qsos,
+                    bb.multipliers,
+                    prev_60.qsos as qsos_60,
+                    prev_15.qsos as qsos_15
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                LEFT JOIN time_windows tw ON 1=1
+                LEFT JOIN LATERAL (
+                    SELECT bb2.qsos
+                    FROM contest_scores cs2
+                    JOIN band_breakdown bb2 ON bb2.contest_score_id = cs2.id
+                    WHERE cs2.callsign = cs.callsign
+                    AND cs2.contest = cs.contest
+                    AND cs2.timestamp <= datetime(tw.window_start, '-60 minutes')
+                    AND bb2.band = bb.band
+                    ORDER BY cs2.timestamp DESC
+                    LIMIT 1
+                ) as prev_60
+                LEFT JOIN LATERAL (
+                    SELECT bb3.qsos
+                    FROM contest_scores cs3
+                    JOIN band_breakdown bb3 ON bb3.contest_score_id = cs3.id
+                    WHERE cs3.callsign = cs.callsign
+                    AND cs3.contest = cs.contest
+                    AND cs3.timestamp <= datetime(tw.window_start, '-15 minutes')
+                    AND bb3.band = bb.band
+                    ORDER BY cs3.timestamp DESC
+                    LIMIT 1
+                ) as prev_15
+                WHERE cs.id = ?
+                GROUP BY bb.band
                 """
-    
-                cursor.execute(query, (
-                    callsign, contest, timestamp,              # current_score parameters (3)
-                    callsign, contest, timestamp, timestamp,   # long_window_score parameters (4)
-                    callsign, contest, timestamp, timestamp    # short_window_score parameters (4)
-                ))
                 
+                cursor.execute(query, (timestamp, timestamp, station_id))
                 results = cursor.fetchall()
-                band_data = {}
                 
+                band_data = {}
                 for row in results:
-                    band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
+                    band, qsos, mults, qsos_60, qsos_15 = row
                     
-                    # Calculate 60-minute rate
-                    long_rate = 0
-                    if long_window_qsos is not None:
-                        qso_diff = current_qsos - long_window_qsos
-                        if qso_diff > 0:
-                            long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
+                    # Calculate rates
+                    rate_60 = ((qsos - qsos_60) * 60 // 60) if qsos_60 is not None else 0
+                    rate_15 = ((qsos - qsos_15) * 60 // 15) if qsos_15 is not None else 0
                     
-                    # Calculate 15-minute rate
-                    short_rate = 0
-                    if short_window_qsos is not None:
-                        qso_diff = current_qsos - short_window_qsos
-                        if qso_diff > 0:
-                            short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
-                    
-                    band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
+                    band_data[band] = [qsos, mults, rate_60, rate_15]
                 
                 return band_data
-                        
+                
         except Exception as e:
             self.logger.error(f"Error in get_band_breakdown_with_rates: {e}")
             self.logger.error(traceback.format_exc())
