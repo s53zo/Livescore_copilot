@@ -337,24 +337,34 @@ class ScoreReporter:
                 params = [contest, callsign, callsign, contest, callsign, contest]
     
                 if filter_type and filter_value and filter_type.lower() != 'none':
-                    query = query.replace(
-                        "WHERE cs.contest = ?",
-                        """WHERE cs.contest = ?
-                        AND EXISTS (
-                            SELECT 1 FROM qth_info qi 
-                            WHERE qi.contest_score_id = cs.id 
-                            AND qi.continent = ?
-                        )"""
-                    )
-                    params.append(filter_value)
+                    filter_map = {
+                        'DXCC': 'dxcc_country',
+                        'CQ Zone': 'cq_zone',
+                        'IARU Zone': 'iaru_zone',
+                        'ARRL Section': 'arrl_section',
+                        'State/Province': 'state_province',
+                        'Continent': 'continent'
+                    }
+                    
+                    field = filter_map.get(filter_type)
+                    if field:
+                        query = query.replace(
+                            "WHERE cs.contest = ?",
+                            f"""WHERE cs.contest = ?
+                            AND EXISTS (
+                                SELECT 1 FROM qth_info qi 
+                                WHERE qi.contest_score_id = cs.id 
+                                AND qi.{field} = ?
+                            )"""
+                        )
+                        params.append(filter_value)
     
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 
-                if self.debug:
-                    self.logger.debug(f"Query returned {len(results)} results")
-                    
-                return results
+                if results:
+                    return results
+                return None
                         
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
