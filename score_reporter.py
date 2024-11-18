@@ -299,16 +299,16 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-    
-                # Base query with QTH info join
+                
+                # Base query using CTEs for better performance
                 query = """
                     WITH latest_scores AS (
-                        SELECT callsign, MAX(timestamp) as max_ts
+                        SELECT MAX(id) as id
                         FROM contest_scores
                         WHERE contest = ?
                         GROUP BY callsign
                     ),
-                    station_scores AS (
+                    filtered_scores AS (
                         SELECT 
                             cs.*,
                             qi.dxcc_country,
@@ -316,18 +316,32 @@ class ScoreReporter:
                             qi.iaru_zone,
                             qi.arrl_section,
                             qi.state_province,
-                            qi.continent
+                            qi.continent,
+                            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rank
                         FROM contest_scores cs
-                        INNER JOIN latest_scores ls 
-                            ON cs.callsign = ls.callsign 
-                            AND cs.timestamp = ls.max_ts
-                        LEFT JOIN qth_info qi 
-                            ON qi.contest_score_id = cs.id
-                        WHERE cs.contest = ?
-                        AND cs.qsos > 0
+                        JOIN latest_scores ls ON cs.id = ls.id
+                        LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    )
+                    SELECT 
+                        fs.id,
+                        fs.callsign,
+                        fs.score,
+                        fs.power,
+                        fs.assisted,
+                        fs.timestamp,
+                        fs.qsos,
+                        fs.multipliers,
+                        CASE 
+                            WHEN fs.callsign = ? THEN 'current'
+                            WHEN fs.score > (SELECT score FROM filtered_scores WHERE callsign = ?) THEN 'above'
+                            ELSE 'below'
+                        END as position,
+                        fs.rank
+                    FROM filtered_scores fs
+                    WHERE 1=1
                 """
                 
-                params = [contest, contest]
+                params = [contest, callsign, callsign]
     
                 # Add filter conditions if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
@@ -342,34 +356,16 @@ class ScoreReporter:
                     
                     db_field = filter_map.get(filter_type)
                     if db_field:
-                        query += f" AND qi.{db_field} = ?"
+                        query += f" AND fs.{db_field} = ?"
                         params.append(filter_value)
     
                 # Complete the query
-                query += """)
-                    SELECT 
-                        ss.id,
-                        ss.callsign,
-                        ss.score,
-                        ss.power,
-                        ss.assisted,
-                        ss.timestamp,
-                        ss.qsos,
-                        ss.multipliers,
-                        CASE 
-                            WHEN ss.callsign = ? THEN 'current'
-                            WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
-                            ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY ss.score DESC) as rn
-                    FROM station_scores ss
-                    ORDER BY ss.score DESC
-                """
-                
-                params.extend([callsign, callsign])
+                query += " ORDER BY fs.score DESC"
+    
+                # Execute query with parameters
                 cursor.execute(query, params)
                 return cursor.fetchall()
-                    
+                        
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
