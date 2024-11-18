@@ -303,66 +303,64 @@ class ScoreReporter:
                 # Base query with QTH info join
                 query = """
                     WITH latest_scores AS (
-                        SELECT callsign, MAX(timestamp) as max_ts
+                        SELECT callsign, MAX(timestamp) as max_ts, MAX(id) as latest_id
                         FROM contest_scores
                         WHERE contest = ?
                         GROUP BY callsign
-                    ),
-                    station_scores AS (
-                        SELECT 
-                            cs.*,
-                            qi.dxcc_country,
-                            qi.cq_zone,
-                            qi.iaru_zone,
-                            qi.arrl_section,
-                            qi.state_province,
-                            qi.continent
-                        FROM contest_scores cs
-                        INNER JOIN latest_scores ls 
-                            ON cs.callsign = ls.callsign 
-                            AND cs.timestamp = ls.max_ts
-                        LEFT JOIN qth_info qi 
-                            ON qi.contest_score_id = cs.id
-                        WHERE cs.contest = ?
-                        AND cs.qsos > 0
-                    """
-                
-                params = [contest, contest]
-    
-                # Add filter conditions if specified
-                if filter_type and filter_value and filter_type.lower() != 'none':
-                    query += " AND qi.continent = ?"
-                    params.append(filter_value)
-    
-                # Complete the query
-                query += """)
+                    )
                     SELECT 
-                        ss.id,
-                        ss.callsign,
-                        ss.score,
-                        ss.power,
-                        ss.assisted,
-                        ss.timestamp,
-                        ss.qsos,
-                        ss.multipliers,
+                        cs.id,
+                        cs.callsign,
+                        cs.score,
+                        cs.power,
+                        cs.assisted,
+                        cs.timestamp,
+                        cs.qsos,
+                        cs.multipliers,
                         CASE 
-                            WHEN ss.callsign = ? THEN 'current'
-                            WHEN ss.score > (SELECT score FROM station_scores WHERE callsign = ?) THEN 'above'
+                            WHEN cs.callsign = ? THEN 'current'
+                            WHEN cs.score > (
+                                SELECT score 
+                                FROM contest_scores 
+                                WHERE callsign = ? AND contest = ? AND timestamp = (
+                                    SELECT max_ts FROM latest_scores WHERE callsign = ?
+                                )
+                            ) THEN 'above'
                             ELSE 'below'
                         END as position,
-                        ROW_NUMBER() OVER (ORDER BY ss.score DESC) as rn
-                    FROM station_scores ss
-                    ORDER BY ss.score DESC
+                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
+                    FROM contest_scores cs
+                    INNER JOIN latest_scores ls ON cs.id = ls.latest_id
+                    WHERE cs.contest = ?
+                    AND cs.qsos > 0
                 """
                 
-                params.extend([callsign, callsign])
+                params = [contest, callsign, callsign, contest, callsign, contest]
+    
+                if filter_type and filter_value and filter_type.lower() != 'none':
+                    query = query.replace(
+                        "WHERE cs.contest = ?",
+                        """WHERE cs.contest = ?
+                        AND EXISTS (
+                            SELECT 1 FROM qth_info qi 
+                            WHERE qi.contest_score_id = cs.id 
+                            AND qi.continent = ?
+                        )"""
+                    )
+                    params.append(filter_value)
+    
                 cursor.execute(query, params)
-                return cursor.fetchall()
+                results = cursor.fetchall()
+                
+                if self.debug:
+                    self.logger.debug(f"Query returned {len(results)} results")
                     
-        except Exception as e:
-            self.logger.error(f"Error in get_station_details: {e}")
-            self.logger.error(traceback.format_exc())
-            return None
+                return results
+                        
+            except Exception as e:
+                self.logger.error(f"Error in get_station_details: {e}")
+                self.logger.error(traceback.format_exc())
+                return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
         """Get band breakdown with both 60-minute and 15-minute rates"""
