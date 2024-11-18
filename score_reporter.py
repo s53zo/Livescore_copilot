@@ -340,7 +340,7 @@ class ScoreReporter:
                         query += f" AND {field} = ?"
                         params.append(filter_value)
     
-                query += " ORDER BY score"
+                query += " ORDER BY score DESC"
 
                 
                 # Log the query for debugging
