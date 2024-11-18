@@ -528,181 +528,90 @@ class ScoreReporter:
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with updated category display"""
         try:
-            # Get filter information for the header if available
+            # Get filter information from the URL parameters
+            filter_type = request.args.get('filter_type', 'none')
+            filter_value = request.args.get('filter_value', 'none')
+            
+            # Prepare filter info div
             filter_info_div = ""
-            current_filter_type = request.args.get('filter_type', 'none')
-            current_filter_value = request.args.get('filter_value', 'none')
-    
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                           qi.arrl_section, qi.state_province, qi.continent
-                    FROM contest_scores cs
-                    JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.callsign = ? AND cs.contest = ?
-                    ORDER BY cs.timestamp DESC
-                    LIMIT 1
-                """, (callsign, contest))
-                qth_info = cursor.fetchone()
+            
+            if filter_type != 'none' and filter_value != 'none':
+                # Create "Show All" link
+                clear_filter = f'<a href="/reports/live.html?contest={contest}&callsign={callsign}&filter_type=none&filter_value=none" class="filter-link">Show All</a>'
                 
-                if qth_info:
-                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
-                                   "State/Province", "Continent"]
-                    filter_parts = []
-                    
-                    for label, value in zip(filter_labels, qth_info):
-                        if value:
-                            if current_filter_type == label and current_filter_value == value:
-                                filter_parts.append(
-                                    f'<span class="active-filter">{label}: {value}</span>'
-                                )
-                            else:
-                                filter_parts.append(
-                                    f'<a href="/reports/live.html?contest={contest}'
-                                    f'&callsign={callsign}&filter_type={label}'
-                                    f'&filter_value={value}" class="filter-link">'
-                                    f'{label}: {value}</a>'
-                                )
-                    
-                    if filter_parts:
-                        if current_filter_type != 'none':
-                            filter_parts.append(
-                                f'<a href="/reports/live.html?contest={contest}'
-                                f'&callsign={callsign}&filter_type=none'
-                                f'&filter_value=none" class="filter-link clear-filter">'
-                                f'Show All</a>'
-                            )
-                        
-                        filter_info_div = f"""
-                        <div class="filter-info">
-                            <span class="filter-label">Filters:</span> 
-                            {' | '.join(filter_parts)}
-                        </div>
-                        """
-    
-            # Add category-specific CSS
-            additional_css = """
-                <style>
-                    .category-group {
-                        display: inline-flex;
-                        gap: 4px;
-                        font-size: 0.75rem;
-                        line-height: 1;
-                        align-items: center;
-                    }
-                    
-                    .category-tag {
-                        display: inline-block;
-                        padding: 3px 6px;
-                        border-radius: 3px;
-                        white-space: nowrap;
-                        font-family: monospace;
-                    }
-                    
-                    /* Category colors */
-                    .cat-power-high { background: #ffebee; color: #c62828; }
-                    .cat-power-low { background: #e8f5e9; color: #2e7d32; }
-                    .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
-                    
-                    .cat-soa { background: #e3f2fd; color: #1565c0; }
-                    .cat-so { background: #f3e5f5; color: #6a1b9a; }
-                    .cat-ms { background: #fff8e1; color: #ff8f00; }
-                    .cat-mm { background: #f1f8e9; color: #558b2f; }
-                </style>
-            """
-    
+                # Create active filter display
+                active_filter = f'<span class="active-filter">{filter_type}: {filter_value}</span>'
+                
+                filter_info_div = f"""
+                <div class="filter-info">
+                    <span class="filter-label">Active Filter:</span> 
+                    {active_filter} | {clear_filter}
+                </div>
+                """
+            
+            # Get reference station for category display
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+            if not reference_station:
+                raise ValueError(f"Reference station {callsign} not found in results")
+                
+            # Format table rows
             table_rows = []
             for i, station in enumerate(stations, 1):
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                
-                # Get additional category information from database
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT ops, transmitter
-                        FROM contest_scores
-                        WHERE id = ?
-                    """, (station_id,))
-                    result = cursor.fetchone()
-                    ops = result[0] if result else None
-                    transmitter = result[1] if result else None
-    
-                # Calculate operator category
-                op_category = self.get_operator_category(ops or 'SINGLE-OP', 
-                                                       transmitter or 'ONE', 
-                                                       assisted or 'NON-ASSISTED')
-                
-                # Format power class tag
-                power_class = power.upper() if power else 'Unknown'
-                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
-                
-                # Create category display
-                category_html = f"""
-                    <div class="category-group">
-                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
-                        {power_tag}
-                    </div>
-                """
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rank = station
                 
                 # Get band breakdown with rates
-                band_breakdown = self.get_band_breakdown_with_rates(
+                band_data = self.get_band_breakdown_with_rates(
                     station_id, callsign_val, contest, timestamp
                 )
                 
-                # Get reference station for rate comparison
-                reference_station = next((s for s in stations if s[1] == callsign), None)
-                if reference_station:
-                    reference_breakdown = self.get_band_breakdown_with_rates(
-                        reference_station[0], callsign, contest, reference_station[5]
-                    )
-                else:
-                    reference_breakdown = {}
-    
                 # Calculate total rates
                 total_long_rate, total_short_rate = self.get_total_rates(
                     station_id, callsign_val, contest, timestamp
                 )
                 
-                # Format timestamp
-                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                # Format band cells
+                band_cells = []
+                for band in ['160', '80', '40', '20', '15', '10']:
+                    band_data_formatted = self.format_band_data(
+                        band_data.get(band, None),
+                        reference_rates=band_data if callsign_val == callsign else None,
+                        band=band
+                    )
+                    band_cells.append(f'<td class="band-data">{band_data_formatted}</td>')
                 
-                # Add highlight for current station
+                # Format the row
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
+                timestamp_formatted = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
                 
-                # Generate table row
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
                     <td>{callsign_val}</td>
-                    <td>{category_html}</td>
+                    <td>{power if power else 'Unknown'}</td>
                     <td>{score:,}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                    {''.join(band_cells)}
                     <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{timestamp_formatted}</span></td>
                 </tr>"""
                 table_rows.append(row)
-                
+            
             # Format final HTML
-            html_content = template.format(
+            formatted_html = template.format(
                 contest=contest,
                 callsign=callsign,
+                power=reference_station[3] if reference_station else 'Unknown',
+                assisted=reference_station[4] if reference_station else 'Unknown',
                 timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                power=stations[0][3],
-                assisted=stations[0][4],
                 filter_info_div=filter_info_div,
                 table_rows='\n'.join(table_rows),
-                additional_css=additional_css
+                additional_css='',
+                category_filter=filter_type,
+                filter_type=filter_type,
+                filter_value=filter_value
             )
             
-            return html_content
-    
+            return formatted_html
+            
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
