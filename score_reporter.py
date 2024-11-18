@@ -340,7 +340,8 @@ class ScoreReporter:
                         query += f" AND {field} = ?"
                         params.append(filter_value)
     
-                query += " ORDER BY score DESC"
+                query += " ORDER BY score DESC LIMIT 20"
+
                 
                 # Log the query for debugging
                 self.logger.debug(f"Executing query with filter_type={filter_type}, filter_value={filter_value}")
