@@ -32,18 +32,20 @@ except Exception as e:
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
-
-def get_db():
-    """Database connection with logging"""
-    logger.debug("Attempting database connection")
-    try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        logger.debug("Database connection successful")
-        return conn
-    except Exception as e:
-        logger.error(f"Database connection failed: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise
+    DEBUG = False
+    
+    @staticmethod
+    def get_db():
+        """Database connection with logging"""
+        logger.debug("Attempting database connection")
+        try:
+            conn = sqlite3.connect(Config.DB_PATH)
+            logger.debug("Database connection successful")
+            return conn
+        except Exception as e:
+            logger.error(f"Database connection failed: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise
 
 @app.route('/livescore-pilot/api/scores')
 def get_scores():
