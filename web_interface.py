@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 logger.info("Starting web interface application")
 
 try:
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder='static')
     logger.info("Flask app created successfully")
 except Exception as e:
     logger.error(f"Failed to create Flask app: {str(e)}")
