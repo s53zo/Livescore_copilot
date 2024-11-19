@@ -30,6 +30,14 @@ except Exception as e:
     logger.error(traceback.format_exc())
     raise
 
+# Initialize maintenance scheduler
+maintenance = DatabaseMaintenance(
+    db_path=Config.DB_PATH,
+    log_path='/opt/livescore/logs/maintenance.log'
+)
+maintenance.start()
+logger.info("Database maintenance scheduler initialized")
+
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
