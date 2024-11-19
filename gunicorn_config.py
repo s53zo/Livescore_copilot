@@ -28,5 +28,5 @@ proc_name = 'livescore-pilot'
 graceful_timeout = 30
 
 # Trust the X-Forwarded-For headers from local proxies
-forwarded_allow_ips = '127.0.0.1'
+forwarded_allow_ips = '*'
 
