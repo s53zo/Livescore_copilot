@@ -7,6 +7,7 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
+from maintenance_tasks import DatabaseMaintenance
 
 # Set up detailed logging
 logging.basicConfig(
