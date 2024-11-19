@@ -10,10 +10,35 @@ class DatabaseMaintenance:
         self.last_maintenance_time = datetime.now()
         
     def cleanup_scores(self, minutes=90):
-        """Cleanup old score records, keeping only the last 'minutes' of data"""
+        """Cleanup old score records and remove duplicates"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                
+                # First remove duplicates
+                self.logger.info("Starting duplicate record cleanup")
+                cursor.execute("""
+                    WITH duplicate_ids AS (
+                        SELECT id
+                        FROM contest_scores cs1
+                        WHERE EXISTS (
+                            SELECT 1 FROM contest_scores cs2
+                            WHERE cs2.callsign = cs1.callsign
+                            AND cs2.contest = cs1.contest
+                            AND cs2.timestamp = cs1.timestamp
+                            AND cs2.score = cs1.score
+                            AND cs2.id < cs1.id
+                        )
+                    )
+                    DELETE FROM contest_scores 
+                    WHERE id IN (SELECT id FROM duplicate_ids)
+                """)
+                
+                duplicates_removed = cursor.rowcount
+                self.logger.info(f"Removed {duplicates_removed} duplicate records")
+                
+                # Then perform regular time-based cleanup
+                self.logger.info(f"Starting time-based cleanup (keeping last {minutes} minutes)")
                 
                 # Get latest timestamps for each callsign/contest
                 query = """
@@ -68,8 +93,11 @@ class DatabaseMaintenance:
                         )
                 
                 conn.commit()
-                self.logger.info(f"Score cleanup completed: {total_deleted} records removed")
-                return total_deleted
+                self.logger.info(
+                    f"Score cleanup completed: {duplicates_removed} duplicates and "
+                    f"{total_deleted} old records removed"
+                )
+                return total_deleted + duplicates_removed
                 
         except Exception as e:
             self.logger.error(f"Error in score cleanup: {e}")
