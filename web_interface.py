@@ -9,6 +9,11 @@ from score_reporter import ScoreReporter
 from datetime import datetime
 from maintenance_tasks import DatabaseMaintenance
 
+# Define Config class first
+class Config:
+    DB_PATH = '/opt/livescore/contest_data.db'
+    OUTPUT_DIR = '/opt/livescore/reports'
+
 # Set up detailed logging
 logging.basicConfig(
     level=logging.DEBUG,
@@ -24,20 +29,21 @@ logger = logging.getLogger(__name__)
 logger.info("Starting web interface application")
 
 try:
+    # Create Flask app
     app = Flask(__name__)
     logger.info("Flask app created successfully")
+
+    # Initialize maintenance scheduler
+    maintenance = DatabaseMaintenance(
+        db_path=Config.DB_PATH,
+        log_path='/opt/livescore/logs/maintenance.log'
+    )
+    maintenance.start()
+    logger.info("Database maintenance scheduler initialized")
 except Exception as e:
-    logger.error(f"Failed to create Flask app: {str(e)}")
+    logger.error(f"Failed to create Flask app or initialize maintenance: {str(e)}")
     logger.error(traceback.format_exc())
     raise
-
-# Initialize maintenance scheduler
-maintenance = DatabaseMaintenance(
-    db_path=Config.DB_PATH,
-    log_path='/opt/livescore/logs/maintenance.log'
-)
-maintenance.start()
-logger.info("Database maintenance scheduler initialized")
 
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
