@@ -32,7 +32,32 @@ class RateCalculator:
             
             # Check if data is too old (e.g., more than 24 hours)
             if (datetime.utcnow() - current_ts).total_seconds() > 24 * 3600:
-                return {}  # Return empty dict for old data
+                # Get basic band data without rates for old data
+                query = """
+                    WITH current_bands AS (
+                        SELECT 
+                            bb.band,
+                            bb.qsos as current_qsos,
+                            bb.multipliers
+                        FROM contest_scores cs
+                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                        WHERE cs.callsign = ? 
+                        AND cs.contest = ?
+                        AND cs.timestamp = ?
+                        AND bb.qsos > 0
+                    )
+                    SELECT band, current_qsos, multipliers
+                    FROM current_bands
+                    ORDER BY band
+                """
+                cursor.execute(query, (callsign, contest, current_ts.strftime('%Y-%m-%d %H:%M:%S')))
+                results = cursor.fetchall()
+                
+                # Return band data with zero rates
+                band_data = {}
+                for band, qsos, mults in results:
+                    band_data[band] = [qsos, mults, 0, 0]
+                return band_data
                 
             long_lookback = current_ts - timedelta(minutes=long_window)
             short_lookback = current_ts - timedelta(minutes=short_window)
