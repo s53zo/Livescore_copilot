@@ -245,7 +245,7 @@ class ScoreReporter:
         self.template_path = template_path or 'templates/score_template.html'
         self.rate_calculator = RateCalculator(self.db_path)
         self.setup_logging()
-        self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
+        #self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
 
     def setup_logging(self):
         """Setup logging configuration with both file and console handlers"""
@@ -286,8 +286,8 @@ class ScoreReporter:
             self.logger.addHandler(console_handler)
             
             # Log startup message
-            self.logger.info("Score Reporter logging initialized")
-            self.logger.debug(f"Debug log file: {debug_log}")
+            #self.logger.info("Score Reporter logging initialized")
+            #self.logger.debug(f"Debug log file: {debug_log}")
             
         except Exception as e:
             print(f"Error setting up logging: {e}", file=sys.stderr)
@@ -344,9 +344,9 @@ class ScoreReporter:
 
                 
                 # Log the query for debugging
-                self.logger.debug(f"Executing query with filter_type={filter_type}, filter_value={filter_value}")
-                self.logger.debug(f"Query: {query}")
-                self.logger.debug(f"Parameters: {params}")
+                #self.logger.debug(f"Executing query with filter_type={filter_type}, filter_value={filter_value}")
+                #self.logger.debug(f"Query: {query}")
+                #self.logger.debug(f"Parameters: {params}")
                 
                 cursor.execute(query, params)
                 results = cursor.fetchall()
