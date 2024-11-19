@@ -29,24 +29,21 @@ class RateCalculator:
         """Calculate QSO rates considering current time and actual QSO increases"""
         try:
             current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            data_age = (datetime.utcnow() - current_ts).total_seconds()
             
-            # Return zeros if data older than 24h
-            if data_age > 24 * 3600:
-                return 0, 0
-                
-            long_window_start = current_ts - timedelta(minutes=long_window)
-            short_window_start = current_ts - timedelta(minutes=short_window)
-    
             query = """
-            WITH total_qsos AS (
+            WITH now AS (
+                SELECT datetime('now') as current_utc
+            ),
+            total_qsos AS (
                 SELECT cs.timestamp, SUM(bb.qsos) as total
                 FROM contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                CROSS JOIN now n 
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
                 AND cs.timestamp >= ?
                 AND cs.timestamp <= ?
+                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
                 GROUP BY cs.timestamp
                 ORDER BY cs.timestamp DESC
             )
@@ -59,20 +56,22 @@ class RateCalculator:
             WHERE timestamp >= ?
             """
             
-            # Calculate long window rate
-            cursor.execute(query, (callsign, contest, long_window_start.strftime('%Y-%m-%d %H:%M:%S'), 
+            long_window_start = current_ts - timedelta(minutes=long_window)
+            cursor.execute(query, (callsign, contest, 
+                                 long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                                  current_ts.strftime('%Y-%m-%d %H:%M:%S'),
                                  long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             row = cursor.fetchone()
-            long_rate = int(round(row[0] * 60 / long_window)) if row[0] else 0
-            
-            # Calculate short window rate
-            cursor.execute(query, (callsign, contest, short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
+            long_rate = int(round(row[0] * 60 / long_window)) if row and row[0] else 0
+    
+            short_window_start = current_ts - timedelta(minutes=short_window) 
+            cursor.execute(query, (callsign, contest,
+                                 short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                                  current_ts.strftime('%Y-%m-%d %H:%M:%S'),
                                  short_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             row = cursor.fetchone()
-            short_rate = int(round(row[0] * 60 / short_window)) if row[0] else 0
-            
+            short_rate = int(round(row[0] * 60 / short_window)) if row and row[0] else 0
+    
             return long_rate, short_rate
                 
         except Exception as e:
@@ -84,7 +83,6 @@ class RateCalculator:
         """Calculate per-band QSO rates considering current time and actual QSO increases"""
         try:
             current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            data_age = (datetime.utcnow() - current_ts).total_seconds()
             
             # Get current band data
             query = """
@@ -99,24 +97,22 @@ class RateCalculator:
             """
             cursor.execute(query, (callsign, contest, timestamp))
             band_data = {row[0]: [row[1], row[2], 0, 0] for row in cursor.fetchall()}
-            
-            # Return just current data if too old
-            if data_age > 24 * 3600:
-                return band_data
-                
-            long_window_start = current_ts - timedelta(minutes=long_window)
-            short_window_start = current_ts - timedelta(minutes=short_window)
     
-            # Calculate rates per band
+            # Calculate rates per band using UTC time check
             query = """
-            WITH band_qsos AS (
+            WITH now AS (
+                SELECT datetime('now') as current_utc
+            ),
+            band_qsos AS (
                 SELECT cs.timestamp, bb.band, bb.qsos
                 FROM contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                CROSS JOIN now n
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
                 AND cs.timestamp >= ?
                 AND cs.timestamp <= ?
+                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
                 ORDER BY cs.timestamp DESC
             )
             SELECT 
@@ -132,7 +128,9 @@ class RateCalculator:
             """
             
             # Calculate long window rates
-            cursor.execute(query, (callsign, contest, long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
+            long_window_start = current_ts - timedelta(minutes=long_window)
+            cursor.execute(query, (callsign, contest, 
+                                 long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                                  current_ts.strftime('%Y-%m-%d %H:%M:%S'),
                                  long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             for row in cursor.fetchall():
@@ -141,7 +139,9 @@ class RateCalculator:
                     band_data[band][2] = int(round(row[1] * 60 / long_window))
             
             # Calculate short window rates
-            cursor.execute(query, (callsign, contest, short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
+            short_window_start = current_ts - timedelta(minutes=short_window)
+            cursor.execute(query, (callsign, contest,
+                                 short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                                  current_ts.strftime('%Y-%m-%d %H:%M:%S'),
                                  short_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             for row in cursor.fetchall():
