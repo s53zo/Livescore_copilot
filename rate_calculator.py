@@ -22,7 +22,8 @@ class RateCalculator:
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(formatter)
             self.logger.addHandler(console_handler)
-            self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
+            #self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
+            self.logger.setLevel(logging.ERROR) 
 
     def calculate_total_rate(self, cursor, callsign, contest, lookback_minutes=60):
         """Calculate total QSO rate using current UTC time as reference"""
