@@ -83,7 +83,7 @@ class DatabaseMaintenance:
                 now = datetime.now()
                 
                 # Check for score cleanup (every 15 minutes)
-                if (now - self.last_cleanup_time).total_seconds() >= 120:  # 15 minutes = 900 seconds
+                if (now - self.last_cleanup_time).total_seconds() >= 10:  # 15 minutes = 900 seconds
                     self.logger.info("Starting scheduled score cleanup")
                     self.cleanup_scores(minutes=90)
                     self.last_cleanup_time = now
