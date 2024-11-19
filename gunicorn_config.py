@@ -15,7 +15,7 @@ keepalive = 5
 # Logging
 errorlog = os.path.join(log_dir, "gunicorn-error.log")
 accesslog = os.path.join(log_dir, "gunicorn-access.log")
-loglevel = "info"  # Temporarily set to debug to get more information
+loglevel = "error"  
 
 # Ensure proper permissions
 capture_output = True
