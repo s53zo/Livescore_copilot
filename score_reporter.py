@@ -10,7 +10,7 @@ import sys
 class RateCalculator:
     def __init__(self, db_path, debug=False):
         self.db_path = db_path
-        self.debug = debug
+        #self.debug = debug
         self.setup_logging()
 
     def setup_logging(self):
