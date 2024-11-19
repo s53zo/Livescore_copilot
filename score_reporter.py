@@ -393,8 +393,7 @@ class ScoreReporter:
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
-                        AND cs.timestamp <= ?
-                        AND cs.timestamp >= datetime(?, '-59 minutes')
+                        AND cs.timestamp <= datetime(?, '-60 minutes')
                         AND cs.timestamp >= datetime(?, '-65 minutes')
                         ORDER BY cs.timestamp DESC
                     ),
@@ -404,8 +403,7 @@ class ScoreReporter:
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
-                        AND cs.timestamp <= ?
-                        AND cs.timestamp >= datetime(?, '-14 minutes')
+                        AND cs.timestamp <= datetime(?, '-15 minutes')
                         AND cs.timestamp >= datetime(?, '-20 minutes')
                         ORDER BY cs.timestamp DESC
                     )
@@ -423,13 +421,14 @@ class ScoreReporter:
                 """
     
                 params = (
-                    callsign, contest, timestamp,           # current_score parameters (3)
-                    callsign, contest, timestamp, timestamp,  # long_window_score parameters (4)
-                    callsign, contest, timestamp, timestamp   # short_window_score parameters (4)
+                    callsign, contest, timestamp,                  # current_score parameters (3)
+                    callsign, contest, timestamp, timestamp,       # long_window_score parameters (4)
+                    callsign, contest, timestamp, timestamp        # short_window_score parameters (4)
                 )
     
                 # Log query details when debugging
-                self.logger.debug(f"Running band breakdown query with params: {params}")
+                self.logger.debug(f"Running band breakdown query with {len(params)} parameters")
+                self.logger.debug(f"Parameters: {params}")
                 
                 cursor.execute(query, params)
                 results = cursor.fetchall()
