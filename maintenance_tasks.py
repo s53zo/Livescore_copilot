@@ -21,7 +21,7 @@ class DatabaseMaintenance:
     def setup_logging(self, log_path=None):
         """Configure detailed logging"""
         self.logger = logging.getLogger('DatabaseMaintenance')
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.ERROR)
         
         # Create formatters for different detail levels
         detailed_formatter = logging.Formatter(
