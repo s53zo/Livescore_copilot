@@ -10,7 +10,7 @@ import sys
 class RateCalculator:
     def __init__(self, db_path, debug=False):
         self.db_path = db_path
-        #self.debug = debug
+        self.debug = debug
         self.setup_logging()
 
     def setup_logging(self):
@@ -427,8 +427,8 @@ class ScoreReporter:
                 )
     
                 # Log query details when debugging
-                self.logger.debug(f"Running band breakdown query with {len(params)} parameters")
-                self.logger.debug(f"Parameters: {params}")
+                #self.logger.debug(f"Running band breakdown query with {len(params)} parameters")
+                #self.logger.debug(f"Parameters: {params}")
                 
                 cursor.execute(query, params)
                 results = cursor.fetchall()
