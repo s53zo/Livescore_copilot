@@ -395,7 +395,6 @@ class ScoreReporter:
                         AND cs.contest = ?
                         AND cs.timestamp <= ?
                         AND cs.timestamp >= datetime(?, '-60 minutes')
-                        AND cs.timestamp < datetime(?, '-65 minutes')
                         ORDER BY cs.timestamp DESC
                     ),
                     short_window_score AS (
@@ -406,7 +405,6 @@ class ScoreReporter:
                         AND cs.contest = ?
                         AND cs.timestamp <= ?
                         AND cs.timestamp >= datetime(?, '-15 minutes')
-                        AND cs.timestamp < datetime(?, '-20 minutes')
                         ORDER BY cs.timestamp DESC
                     )
                     SELECT 
@@ -422,12 +420,16 @@ class ScoreReporter:
                     ORDER BY cs.band
                 """
     
-                cursor.execute(query, (
-                    callsign, contest, timestamp,              # current_score parameters (3)
-                    callsign, contest, timestamp, timestamp,   # long_window_score parameters (4)
-                    callsign, contest, timestamp, timestamp    # short_window_score parameters (4)
-                ))
+                params = (
+                    callsign, contest, timestamp,           # current_score parameters (3)
+                    callsign, contest, timestamp, timestamp,  # long_window_score parameters (4)
+                    callsign, contest, timestamp, timestamp   # short_window_score parameters (4)
+                )
+    
+                # Log query details when debugging
+                self.logger.debug(f"Running band breakdown query with params: {params}")
                 
+                cursor.execute(query, params)
                 results = cursor.fetchall()
                 band_data = {}
                 
