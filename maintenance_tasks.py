@@ -127,8 +127,8 @@ class DatabaseMaintenance:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # First remove duplicates
-                self.logger.info("Starting duplicate record cleanup")
+                # First remove exact duplicates
+                self.logger.info("Starting exact duplicate record cleanup")
                 cursor.execute("""
                     WITH duplicate_ids AS (
                         SELECT id
@@ -145,8 +145,32 @@ class DatabaseMaintenance:
                     DELETE FROM contest_scores 
                     WHERE id IN (SELECT id FROM duplicate_ids)
                 """)
-                duplicates_removed = cursor.rowcount
-                self.logger.info(f"Removed {duplicates_removed} duplicate records")
+                exact_duplicates_removed = cursor.rowcount
+                self.logger.info(f"Removed {exact_duplicates_removed} exact duplicate records")
+    
+                # Then remove same score/timestamp but different category duplicates
+                self.logger.info("Starting category variant cleanup")
+                cursor.execute("""
+                    WITH category_duplicates AS (
+                        SELECT cs1.id
+                        FROM contest_scores cs1
+                        WHERE EXISTS (
+                            SELECT 1 FROM contest_scores cs2
+                            WHERE cs2.callsign = cs1.callsign
+                            AND cs2.contest = cs1.contest
+                            AND cs2.timestamp = cs1.timestamp
+                            AND cs2.score = cs1.score
+                            AND cs2.qsos = cs1.qsos
+                            AND cs2.multipliers = cs1.multipliers
+                            AND cs2.id < cs1.id
+                        )
+                    )
+                    DELETE FROM contest_scores 
+                    WHERE id IN (SELECT id FROM category_duplicates)
+                """)
+                category_duplicates_removed = cursor.rowcount
+                self.logger.info(f"Removed {category_duplicates_removed} category variant duplicates")
+
                 
                 # Get latest timestamps for each callsign/contest
                 query = """
@@ -194,11 +218,13 @@ class DatabaseMaintenance:
                         )
                 
                 conn.commit()
+                total_duplicates = exact_duplicates_removed + category_duplicates_removed
                 self.logger.info(
-                    f"Score cleanup completed: {duplicates_removed} duplicates and "
+                    f"Score cleanup completed: {total_duplicates} duplicates "
+                    f"({exact_duplicates_removed} exact, {category_duplicates_removed} category) and "
                     f"{total_deleted} old records removed"
                 )
-                return total_deleted + duplicates_removed
+                return total_deleted + total_duplicates
                 
         except Exception as e:
             self.logger.error(f"Error in score cleanup: {e}")
