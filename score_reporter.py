@@ -26,33 +26,33 @@ class RateCalculator:
             self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
 
     def calculate_band_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
-    """Calculate per-band QSO rates considering current time"""
-    try:
-        # Convert timestamp string to datetime if needed
-        current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S') if isinstance(timestamp, str) else current_ts
-        current_utc = datetime.utcnow()
-        
-        # Data age in hours  
-        data_age = (current_utc - current_ts).total_seconds() / 3600
-        
-        # Return zeros if data is more than 24 hours old
-        if data_age > 24:
-            # Get just current band data 
-            query = """
-                SELECT bb.band, bb.qsos, bb.multipliers 
-                FROM contest_scores cs
-                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                AND cs.timestamp = ?
-                AND bb.qsos > 0
-                ORDER BY bb.band
-            """
-            cursor.execute(query, (callsign, contest, timestamp))
-            band_data = {}
-            for band, qsos, mults in cursor.fetchall():
-                band_data[band] = [qsos, mults, 0, 0]
-            return band_data
+        """Calculate per-band QSO rates considering current time"""
+        try:
+            # Convert timestamp string to datetime if needed
+            current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S') if isinstance(timestamp, str) else current_ts
+            current_utc = datetime.utcnow()
+            
+            # Data age in hours  
+            data_age = (current_utc - current_ts).total_seconds() / 3600
+            
+            # Return zeros if data is more than 24 hours old
+            if data_age > 24:
+                # Get just current band data 
+                query = """
+                    SELECT bb.band, bb.qsos, bb.multipliers 
+                    FROM contest_scores cs
+                    JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                    WHERE cs.callsign = ?
+                    AND cs.contest = ?
+                    AND cs.timestamp = ?
+                    AND bb.qsos > 0
+                    ORDER BY bb.band
+                """
+                cursor.execute(query, (callsign, contest, timestamp))
+                band_data = {}
+                for band, qsos, mults in cursor.fetchall():
+                    band_data[band] = [qsos, mults, 0, 0]
+                return band_data
             
             long_lookback = current_ts - timedelta(minutes=long_window)
             short_lookback = current_ts - timedelta(minutes=short_window)
@@ -159,18 +159,18 @@ class RateCalculator:
             self.logger.debug(traceback.format_exc())
             return {}
     def calculate_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
-    """Calculate QSO rates considering current time"""
-    try:
-        # Convert timestamp string to datetime if needed
-        current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S') if isinstance(timestamp, str) else current_ts
-        current_utc = datetime.utcnow()
-        
-        # Data age in hours
-        data_age = (current_utc - current_ts).total_seconds() / 3600
-        
-        # Return zeros if data is more than 24 hours old
-        if data_age > 24:
-            return 0, 0
+        """Calculate QSO rates considering current time"""
+        try:
+            # Convert timestamp string to datetime if needed
+            current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S') if isinstance(timestamp, str) else current_ts
+            current_utc = datetime.utcnow()
+            
+            # Data age in hours
+            data_age = (current_utc - current_ts).total_seconds() / 3600
+            
+            # Return zeros if data is more than 24 hours old
+            if data_age > 24:
+                return 0, 0
                    
             long_lookback = current_ts - timedelta(minutes=long_window)
             short_lookback = current_ts - timedelta(minutes=short_window)
