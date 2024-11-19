@@ -92,8 +92,8 @@ class DatabaseMaintenance:
                     self.logger.info(f"Last cleanup: {self.last_cleanup_time}")
                     self.logger.info(f"Last maintenance: {self.last_maintenance_time}")
                 
-                # Check for score cleanup (every 15 minutes)
-                if (now - self.last_cleanup_time).total_seconds() >= 10:  # 15 minutes
+                # Check for score cleanup (every 911 seconds, that is cca 15 minutes)
+                if (now - self.last_cleanup_time).total_seconds() >= 911:  
                     self.logger.info("Starting scheduled score cleanup")
                     try:
                         cleaned = self.cleanup_scores(minutes=90)
