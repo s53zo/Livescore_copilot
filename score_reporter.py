@@ -218,7 +218,7 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Start with base query
+                # Start with base query including ROW_NUMBER()
                 query = """
                 SELECT 
                     cs.id,
@@ -240,7 +240,8 @@ class ScoreReporter:
                             LIMIT 1
                         ) THEN 'above'
                         ELSE 'below'
-                    END as position
+                    END as position,
+                    ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
                 FROM contest_scores cs
                 JOIN qth_info qi ON qi.contest_score_id = cs.id
                 WHERE cs.contest = ?
@@ -284,7 +285,21 @@ class ScoreReporter:
                 self.logger.debug(f"Query returned {len(results)} results")
                 
                 if not results:
-                    self.logger.warning(f"No results for {contest} with filter {filter_type}={filter_value}")
+                    if filter_type and filter_value and filter_type.lower() != 'none':
+                        # Debug query to check actual values in database
+                        field = filter_map.get(filter_type)
+                        cursor.execute(f"""
+                            SELECT DISTINCT qi.{field}, COUNT(*) as count
+                            FROM contest_scores cs
+                            JOIN qth_info qi ON qi.contest_score_id = cs.id
+                            WHERE cs.contest = ?
+                            GROUP BY qi.{field}
+                            ORDER BY count DESC
+                        """, (contest,))
+                        available = cursor.fetchall()
+                        self.logger.debug(f"Available {filter_type} values in database:")
+                        for value, count in available:
+                            self.logger.debug(f"  {value}: {count} stations")
                     
                 return results
                 
