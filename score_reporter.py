@@ -218,32 +218,52 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Use materialized view for all queries
+                # Base query using CTEs for better performance
                 query = """
+                WITH latest_scores AS (
+                    SELECT cs.id
+                    FROM contest_scores cs
+                    WHERE cs.contest = ?
+                    GROUP BY cs.callsign
+                    HAVING cs.timestamp = MAX(cs.timestamp)
+                ),
+                filtered_scores AS (
                     SELECT 
-                        id,
-                        callsign,
-                        score,
-                        power,
-                        assisted,
-                        timestamp,
-                        qsos,
-                        multipliers,
+                        cs.id,
+                        cs.callsign,
+                        cs.score,
+                        cs.power,
+                        cs.assisted,
+                        cs.timestamp,
+                        cs.qsos,
+                        cs.multipliers,
+                        qi.dxcc_country,
+                        qi.continent,
+                        qi.cq_zone,
+                        qi.iaru_zone,
+                        qi.arrl_section,
+                        qi.state_province,
                         CASE 
-                            WHEN callsign = ? THEN 'current'
-                            WHEN score > (SELECT score FROM latest_contest_scores 
-                                        WHERE callsign = ? AND contest = ?) 
-                            THEN 'above'
+                            WHEN cs.callsign = ? THEN 'current'
+                            WHEN cs.score > (
+                                SELECT score 
+                                FROM contest_scores 
+                                WHERE callsign = ? 
+                                AND contest = ?
+                                ORDER BY timestamp DESC 
+                                LIMIT 1
+                            ) THEN 'above'
                             ELSE 'below'
-                        END as position,
-                        ROW_NUMBER() OVER (ORDER BY score DESC) as rn
-                    FROM latest_contest_scores
-                    WHERE contest = ?
+                        END as position
+                    FROM contest_scores cs
+                    JOIN latest_scores ls ON cs.id = ls.id
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE 1=1
                 """
                 
-                params = [callsign, callsign, contest, contest]
+                params = [contest, callsign, callsign, contest]
                 
-                # Add filter if specified
+                # Add filter if specified and valid
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
                         'DXCC': 'dxcc_country',
@@ -255,40 +275,42 @@ class ScoreReporter:
                     }
                     
                     if field := filter_map.get(filter_type):
-                        query += f" AND {field} = ?"
+                        query += f" AND qi.{field} = ?"
                         params.append(filter_value)
-    
-                query += " ORDER BY score DESC"
-
+                
+                # Complete the query with ordering
+                query += " ORDER BY cs.score DESC"
                 
                 # Log the query for debugging
-                #self.logger.debug(f"Executing query with filter_type={filter_type}, filter_value={filter_value}")
-                #self.logger.debug(f"Query: {query}")
-                #self.logger.debug(f"Parameters: {params}")
+                logger.debug(f"Executing filter query: {query}")
+                logger.debug(f"Query parameters: {params}")
                 
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 
                 if not results:
+                    logger.warning(f"No results found for {contest} with filter {filter_type}={filter_value}")
                     # Debug query to check available values
-                    cursor.execute(f"""
-                        SELECT DISTINCT {filter_map.get(filter_type, 'continent')} as value, 
-                               COUNT(*) as count
-                        FROM latest_contest_scores
-                        WHERE contest = ?
-                        GROUP BY 1
-                        ORDER BY 2 DESC
-                    """, (contest,))
-                    available_values = cursor.fetchall()
-                    self.logger.debug(f"Available {filter_type} values for {contest}:")
-                    for value, count in available_values:
-                        self.logger.debug(f"  {value}: {count} stations")
+                    if filter_type and filter_type.lower() != 'none':
+                        field = filter_map.get(filter_type)
+                        cursor.execute(f"""
+                            SELECT DISTINCT qi.{field} as value, COUNT(*) as count
+                            FROM contest_scores cs
+                            JOIN qth_info qi ON qi.contest_score_id = cs.id
+                            WHERE cs.contest = ?
+                            GROUP BY qi.{field}
+                            ORDER BY count DESC
+                        """, (contest,))
+                        available_values = cursor.fetchall()
+                        logger.debug(f"Available {filter_type} values for {contest}:")
+                        for value, count in available_values:
+                            logger.debug(f"  {value}: {count} stations")
                 
                 return results
-    
+                
         except Exception as e:
-            self.logger.error(f"Error in get_station_details: {e}")
-            self.logger.error(traceback.format_exc())
+            logger.error(f"Error in get_station_details: {e}")
+            logger.error(traceback.format_exc())
             return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
