@@ -239,12 +239,13 @@ class ContestDatabaseHandler:
                 # Get callsign info from cty.plist
                 callsign_info = self.callsign_lookup.get_callsign_info(callsign)
                 if callsign_info:
-                    # Merge cty.plist data with XML data, preferring XML for zones if present
                     qth_data['dxcc_country'] = callsign_info['prefix']
                     qth_data['continent'] = callsign_info['continent']
-                    if not qth_data.get('cq_zone'):
+                    #if not qth_data.get('cq_zone'):
+                    if qth_data.get('cq_zone') in [None, '', '0']:
                         qth_data['cq_zone'] = callsign_info['cq_zone']
-                    if not qth_data.get('iaru_zone'):
+                    #if not qth_data.get('iaru_zone'):
+                    if qth_data.get('iaru_zone') in [None, '', '0']:
                         qth_data['iaru_zone'] = callsign_info['itu_zone']
                 
                 # Extract basic contest data
