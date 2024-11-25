@@ -282,14 +282,14 @@ class ScoreReporter:
                 query += " ORDER BY cs.score DESC"
                 
                 # Log the query for debugging
-                logger.debug(f"Executing filter query: {query}")
-                logger.debug(f"Query parameters: {params}")
+                self.logger.debug(f"Executing filter query: {query}")
+                self.logger.debug(f"Query parameters: {params}")
                 
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 
                 if not results:
-                    logger.warning(f"No results found for {contest} with filter {filter_type}={filter_value}")
+                    self.logger.warning(f"No results found for {contest} with filter {filter_type}={filter_value}")
                     # Debug query to check available values
                     if filter_type and filter_type.lower() != 'none':
                         field = filter_map.get(filter_type)
@@ -302,15 +302,15 @@ class ScoreReporter:
                             ORDER BY count DESC
                         """, (contest,))
                         available_values = cursor.fetchall()
-                        logger.debug(f"Available {filter_type} values for {contest}:")
+                        self.logger.debug(f"Available {filter_type} values for {contest}:")
                         for value, count in available_values:
-                            logger.debug(f"  {value}: {count} stations")
+                            self.logger.debug(f"  {value}: {count} stations")
                 
                 return results
                 
         except Exception as e:
-            logger.error(f"Error in get_station_details: {e}")
-            logger.error(traceback.format_exc())
+            self.logger.error(f"Error in get_station_details: {e}")
+            self.logger.error(traceback.format_exc())
             return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
