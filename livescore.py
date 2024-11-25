@@ -309,22 +309,43 @@ class ContestDatabaseHandler:
 
 
     def store_data(self, contest_data):
-        """Store contest data in the database with normalized QTH info from prefix database."""
+        """Store contest data in the database with debugging."""
+        logging.debug(f"Received {len(contest_data)} records to store")
+        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
             for data in contest_data:
                 try:
-                    # [Previous contest_scores INSERT remains the same]
+                    logging.debug(f"Processing {data['callsign']} in {data['contest']}")
+                    logging.debug(f"QTH data from XML: {data.get('qth', {})}")
+                    
+                    # Insert main contest data
+                    cursor.execute('''
+                        INSERT INTO contest_scores (
+                            timestamp, contest, callsign, power, assisted, transmitter,
+                            ops, bands, mode, overlay, club, section, score, qsos,
+                            multipliers, points
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        data['timestamp'], data['contest'], data['callsign'],
+                        data.get('power', ''), data.get('assisted', ''),
+                        data.get('transmitter', ''), data.get('ops', ''),
+                        data.get('bands', ''), data.get('mode', ''),
+                        data.get('overlay', ''), data['club'], data['section'],
+                        data['score'], data.get('qsos', 0), data.get('multipliers', 0),
+                        data.get('points', 0)
+                    ))
+                    
                     contest_score_id = cursor.lastrowid
+                    logging.debug(f"Inserted contest_score record {contest_score_id}")
                     
-                    # Get callsign info from cty.plist
+                    # Get callsign info
                     callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
+                    logging.debug(f"Callsign info from lookup: {callsign_info}")
                     
-                    # XML QTH data
+                    # Store QTH info
                     xml_qth = data.get('qth', {})
-                    
-                    # Store QTH info combining XML and cty.plist data
                     qth_data = {
                         'dxcc_country': callsign_info.get('prefix', ''),
                         'continent': callsign_info.get('continent', ''),
@@ -334,32 +355,7 @@ class ContestDatabaseHandler:
                         'state_province': xml_qth.get('state_province', ''),
                         'grid6': xml_qth.get('grid6', '')
                     }
-                    
-                    contest_score_id = cursor.lastrowid
-                    
-                    # Get callsign info from cty.plist
-                    callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
-                    
-                    if not callsign_info:
-                        # Try to extract prefix from callsign
-                        call_parts = data['callsign'].split('/')
-                        base_call = call_parts[0]
-                        for i in range(len(base_call), 0, -1):
-                            prefix_try = base_call[:i]
-                            callsign_info = self.callsign_lookup.get_callsign_info(prefix_try)
-                            if callsign_info:
-                                break
-                    
-                    # Store QTH info, using callsign_info as primary source
-                    qth_data = {
-                        'dxcc_country': callsign_info.get('prefix') if callsign_info else '',
-                        'continent': callsign_info.get('continent') if callsign_info else '',
-                        'cq_zone': callsign_info.get('cq_zone') if callsign_info else data.get('qth', {}).get('cq_zone', ''),
-                        'iaru_zone': data.get('qth', {}).get('iaru_zone', ''),
-                        'arrl_section': data.get('qth', {}).get('arrl_section', ''),
-                        'state_province': data.get('qth', {}).get('state_province', ''),
-                        'grid6': data.get('qth', {}).get('grid6', '')
-                    }
+                    logging.debug(f"Final QTH data: {qth_data}")
                     
                     cursor.execute('''
                         INSERT INTO qth_info (
@@ -377,21 +373,12 @@ class ContestDatabaseHandler:
                         qth_data['grid6']
                     ))
                     
-                    # Insert band breakdown data
-                    for band_data in data.get('band_breakdown', []):
-                        cursor.execute('''
-                            INSERT INTO band_breakdown (
-                                contest_score_id, band, mode, qsos, points, multipliers
-                            ) VALUES (?, ?, ?, ?, ?, ?)
-                        ''', (
-                            contest_score_id, band_data['band'], band_data['mode'],
-                            band_data['qsos'], band_data['points'],
-                            band_data['multipliers']
-                        ))
-                            
+                    conn.commit()
+                    logging.debug(f"Successfully stored data for {data['callsign']}")
+                        
                 except Exception as e:
                     logging.error(f"Error storing data for {data['callsign']}: {e}")
-                    logging.debug("Error details:", exc_info=True)
+                    logging.error(traceback.format_exc())
                     raise
     
     def cleanup_old_data(self, days=3):
