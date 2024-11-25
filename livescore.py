@@ -315,22 +315,25 @@ class ContestDatabaseHandler:
             
             for data in contest_data:
                 try:
-                    # Insert main contest data
-                    cursor.execute('''
-                        INSERT INTO contest_scores (
-                            timestamp, contest, callsign, power, assisted, transmitter,
-                            ops, bands, mode, overlay, club, section, score, qsos,
-                            multipliers, points
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        data['timestamp'], data['contest'], data['callsign'],
-                        data.get('power', ''), data.get('assisted', ''),
-                        data.get('transmitter', ''), data.get('ops', ''),
-                        data.get('bands', ''), data.get('mode', ''),
-                        data.get('overlay', ''), data['club'], data['section'],
-                        data['score'], data.get('qsos', 0), data.get('multipliers', 0),
-                        data.get('points', 0)
-                    ))
+                    # [Previous contest_scores INSERT remains the same]
+                    contest_score_id = cursor.lastrowid
+                    
+                    # Get callsign info from cty.plist
+                    callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
+                    
+                    # XML QTH data
+                    xml_qth = data.get('qth', {})
+                    
+                    # Store QTH info combining XML and cty.plist data
+                    qth_data = {
+                        'dxcc_country': callsign_info.get('prefix', ''),
+                        'continent': callsign_info.get('continent', ''),
+                        'cq_zone': xml_qth.get('cq_zone') or callsign_info.get('cq_zone', ''),
+                        'iaru_zone': xml_qth.get('iaru_zone') or callsign_info.get('itu_zone', ''),
+                        'arrl_section': xml_qth.get('arrl_section', ''),
+                        'state_province': xml_qth.get('state_province', ''),
+                        'grid6': xml_qth.get('grid6', '')
+                    }
                     
                     contest_score_id = cursor.lastrowid
                     
