@@ -32,7 +32,7 @@ class CallsignLookup:
 
     def _create_result_dict(self, prefix: str, info: dict) -> dict:
         return {
-            "prefix": info.get('Prefix', prefix),
+            "prefix": prefix,  # Store the actual matching prefix
             "country": info.get("Country", ""),
             "continent": info.get("Continent", ""),
             "adif": info.get("ADIF", 0),
