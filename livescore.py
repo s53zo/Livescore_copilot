@@ -226,10 +226,26 @@ class ContestDatabaseHandler:
                 root = ET.fromstring(xml_doc)
                 callsign = root.findtext('call', '')
                 
-                # Get callsign info early to use prefix for country
-                callsign_info = None
-                if callsign:
-                    callsign_info = self.callsign_lookup.get_callsign_info(callsign)
+                # Get QTH info from XML first
+                qth_elem = root.find('qth')
+                qth_data = {
+                    'cq_zone': qth_elem.findtext('cqzone', ''),
+                    'iaru_zone': qth_elem.findtext('iaruzone', ''),
+                    'arrl_section': qth_elem.findtext('arrlsection', ''),
+                    'state_province': qth_elem.findtext('stprvoth', ''),
+                    'grid6': qth_elem.findtext('grid6', '')
+                } if qth_elem is not None else {}
+                
+                # Get callsign info from cty.plist
+                callsign_info = self.callsign_lookup.get_callsign_info(callsign)
+                if callsign_info:
+                    # Merge cty.plist data with XML data, preferring XML for zones if present
+                    qth_data['dxcc_country'] = callsign_info['prefix']
+                    qth_data['continent'] = callsign_info['continent']
+                    if not qth_data.get('cq_zone'):
+                        qth_data['cq_zone'] = callsign_info['cq_zone']
+                    if not qth_data.get('iaru_zone'):
+                        qth_data['iaru_zone'] = callsign_info['itu_zone']
                 
                 # Extract basic contest data
                 contest_data = {
@@ -238,7 +254,8 @@ class ContestDatabaseHandler:
                     'timestamp': root.findtext('timestamp', ''),
                     'club': root.findtext('club', '').strip(),
                     'section': root.find('.//qth/arrlsection').text if root.find('.//qth/arrlsection') is not None else '',
-                    'score': int(root.findtext('score', 0))
+                    'score': int(root.findtext('score', 0)),
+                    'qth': qth_data
                 }
                 
                 # Extract class attributes
@@ -253,28 +270,7 @@ class ContestDatabaseHandler:
                         'mode': class_elem.get('mode', '')
                     })
                 
-                # Extract QTH data and use prefix instead of country name
-                qth_elem = root.find('qth')
-                if qth_elem is not None:
-                    qth_data = {
-                        'cq_zone': qth_elem.findtext('cqzone', ''),
-                        'iaru_zone': qth_elem.findtext('iaruzone', ''),
-                        'arrl_section': qth_elem.findtext('arrlsection', ''),
-                        'state_province': qth_elem.findtext('stprvoth', ''),
-                        'grid6': qth_elem.findtext('grid6', '')
-                    }
-                    
-                    # Use prefix from callsign_info instead of country name
-                    if callsign_info:
-                        qth_data['dxcc_country'] = callsign_info.get('prefix')  # This will now use the correct Prefix from cty.plist
-                        qth_data['continent'] = callsign_info.get('continent')
-                    else:
-                        qth_data['dxcc_country'] = ''
-                        qth_data['continent'] = ''
-                    
-                    contest_data['qth'] = qth_data
-                
-                # Extract breakdown totals [rest of the code remains the same]
+                # Extract breakdown totals
                 breakdown = root.find('breakdown')
                 if breakdown is not None:
                     # Get total QSOs, points, and multipliers
@@ -302,12 +298,13 @@ class ContestDatabaseHandler:
                 
                 results.append(contest_data)
                 logging.debug(f"Successfully parsed data for {contest_data['callsign']}")
+                
             except ET.ParseError as e:
                 logging.error(f"Error parsing XML: {e}")
             except Exception as e:
                 logging.error(f"Error processing data: {e}")
                 logging.error(traceback.format_exc())
-                    
+                
         return results
 
 
