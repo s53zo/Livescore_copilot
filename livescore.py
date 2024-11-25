@@ -312,7 +312,7 @@ class ContestDatabaseHandler:
 
 
     def store_data(self, contest_data):
-        """Store contest data in the database with normalized country codes (prefixes)."""
+        """Store contest data in the database with normalized QTH info from prefix database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -337,14 +337,30 @@ class ContestDatabaseHandler:
                     
                     contest_score_id = cursor.lastrowid
                     
-                    # Get callsign information - this will return the prefix
+                    # Get callsign info from cty.plist
                     callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
                     
-                    # Use prefix from callsign info or fallback to empty string
-                    country_prefix = callsign_info['prefix'] if callsign_info else ''
-                    continent = callsign_info['continent'] if callsign_info else ''
+                    if not callsign_info:
+                        # Try to extract prefix from callsign
+                        call_parts = data['callsign'].split('/')
+                        base_call = call_parts[0]
+                        for i in range(len(base_call), 0, -1):
+                            prefix_try = base_call[:i]
+                            callsign_info = self.callsign_lookup.get_callsign_info(prefix_try)
+                            if callsign_info:
+                                break
                     
-                    # Store QTH data with prefix as country code
+                    # Store QTH info, using callsign_info as primary source
+                    qth_data = {
+                        'dxcc_country': callsign_info.get('prefix') if callsign_info else '',
+                        'continent': callsign_info.get('continent') if callsign_info else '',
+                        'cq_zone': callsign_info.get('cq_zone') if callsign_info else data.get('qth', {}).get('cq_zone', ''),
+                        'iaru_zone': data.get('qth', {}).get('iaru_zone', ''),
+                        'arrl_section': data.get('qth', {}).get('arrl_section', ''),
+                        'state_province': data.get('qth', {}).get('state_province', ''),
+                        'grid6': data.get('qth', {}).get('grid6', '')
+                    }
+                    
                     cursor.execute('''
                         INSERT INTO qth_info (
                             contest_score_id, dxcc_country, continent, cq_zone, 
@@ -352,13 +368,13 @@ class ContestDatabaseHandler:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         contest_score_id,
-                        country_prefix,  # Use prefix here, not country name
-                        continent,
-                        data.get('qth', {}).get('cq_zone', ''),
-                        data.get('qth', {}).get('iaru_zone', ''),
-                        data.get('qth', {}).get('arrl_section', ''),
-                        data.get('qth', {}).get('state_province', ''),
-                        data.get('qth', {}).get('grid6', '')
+                        qth_data['dxcc_country'],
+                        qth_data['continent'],
+                        qth_data['cq_zone'],
+                        qth_data['iaru_zone'],
+                        qth_data['arrl_section'],
+                        qth_data['state_province'],
+                        qth_data['grid6']
                     ))
                     
                     # Insert band breakdown data
