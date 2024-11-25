@@ -213,57 +213,48 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details using materialized view for all filters"""
+        """Get station details for filtered or unfiltered view"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Base query using CTEs for better performance
+                # Start with base query
                 query = """
-                WITH latest_scores AS (
-                    SELECT cs.id
-                    FROM contest_scores cs
-                    WHERE cs.contest = ?
-                    GROUP BY cs.callsign
-                    HAVING cs.timestamp = MAX(cs.timestamp)
-                ),
-                filtered_scores AS (
-                    SELECT 
-                        cs.id,
-                        cs.callsign,
-                        cs.score,
-                        cs.power,
-                        cs.assisted,
-                        cs.timestamp,
-                        cs.qsos,
-                        cs.multipliers,
-                        qi.dxcc_country,
-                        qi.continent,
-                        qi.cq_zone,
-                        qi.iaru_zone,
-                        qi.arrl_section,
-                        qi.state_province,
-                        CASE 
-                            WHEN cs.callsign = ? THEN 'current'
-                            WHEN cs.score > (
-                                SELECT score 
-                                FROM contest_scores 
-                                WHERE callsign = ? 
-                                AND contest = ?
-                                ORDER BY timestamp DESC 
-                                LIMIT 1
-                            ) THEN 'above'
-                            ELSE 'below'
-                        END as position
-                    FROM contest_scores cs
-                    JOIN latest_scores ls ON cs.id = ls.id
-                    JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE 1=1
+                SELECT 
+                    cs.id,
+                    cs.callsign,
+                    cs.score,
+                    cs.power,
+                    cs.assisted,
+                    cs.timestamp,
+                    cs.qsos,
+                    cs.multipliers,
+                    CASE 
+                        WHEN cs.callsign = ? THEN 'current'
+                        WHEN cs.score > (
+                            SELECT score 
+                            FROM contest_scores 
+                            WHERE callsign = ? 
+                            AND contest = ?
+                            ORDER BY timestamp DESC 
+                            LIMIT 1
+                        ) THEN 'above'
+                        ELSE 'below'
+                    END as position
+                FROM contest_scores cs
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ?
+                AND cs.id IN (
+                    SELECT MAX(id)
+                    FROM contest_scores
+                    WHERE contest = ?
+                    GROUP BY callsign
+                )
                 """
                 
-                params = [contest, callsign, callsign, contest]
+                params = [callsign, callsign, contest, contest, contest]
                 
-                # Add filter if specified and valid
+                # Add filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
                         'DXCC': 'dxcc_country',
@@ -278,34 +269,23 @@ class ScoreReporter:
                         query += f" AND qi.{field} = ?"
                         params.append(filter_value)
                 
-                # Complete the query with ordering
+                # Add final ordering
                 query += " ORDER BY cs.score DESC"
                 
-                # Log the query for debugging
-                self.logger.debug(f"Executing filter query: {query}")
-                self.logger.debug(f"Query parameters: {params}")
+                # Log query for debugging
+                self.logger.debug(f"Executing query with params: {params}")
+                self.logger.debug(f"Full query: {query}")
                 
+                # Execute and fetch results
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 
-                if not results:
-                    self.logger.warning(f"No results found for {contest} with filter {filter_type}={filter_value}")
-                    # Debug query to check available values
-                    if filter_type and filter_type.lower() != 'none':
-                        field = filter_map.get(filter_type)
-                        cursor.execute(f"""
-                            SELECT DISTINCT qi.{field} as value, COUNT(*) as count
-                            FROM contest_scores cs
-                            JOIN qth_info qi ON qi.contest_score_id = cs.id
-                            WHERE cs.contest = ?
-                            GROUP BY qi.{field}
-                            ORDER BY count DESC
-                        """, (contest,))
-                        available_values = cursor.fetchall()
-                        self.logger.debug(f"Available {filter_type} values for {contest}:")
-                        for value, count in available_values:
-                            self.logger.debug(f"  {value}: {count} stations")
+                # Log results count
+                self.logger.debug(f"Query returned {len(results)} results")
                 
+                if not results:
+                    self.logger.warning(f"No results for {contest} with filter {filter_type}={filter_value}")
+                    
                 return results
                 
         except Exception as e:
