@@ -250,14 +250,23 @@ def get_filters():
     try:
         with get_db() as db:
             cursor = db.cursor()
+            # First get the QTH info for the selected station
             cursor.execute("""
-                SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                       qi.arrl_section, qi.state_province, qi.continent
+                WITH latest_score AS (
+                    SELECT MAX(id) as id
+                    FROM contest_scores
+                    WHERE contest = ? AND callsign = ?
+                )
+                SELECT DISTINCT
+                    qi.dxcc_country, 
+                    qi.cq_zone, 
+                    qi.iaru_zone,
+                    qi.arrl_section,
+                    qi.state_province,
+                    qi.continent
                 FROM contest_scores cs
+                JOIN latest_score ls ON cs.id = ls.id
                 JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ? AND cs.callsign = ?
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
             """, (contest, callsign))
             
             row = cursor.fetchone()
