@@ -272,18 +272,11 @@ class ScoreReporter:
                 
                 # Add final ordering
                 query += " ORDER BY cs.score DESC"
-                
-                # Log query for debugging
-                self.logger.debug(f"Executing query with params: {params}")
-                self.logger.debug(f"Full query: {query}")
-                
+               
                 # Execute and fetch results
                 cursor.execute(query, params)
                 results = cursor.fetchall()
-                
-                # Log results count
-                self.logger.debug(f"Query returned {len(results)} results")
-                
+                               
                 if not results:
                     if filter_type and filter_value and filter_type.lower() != 'none':
                         # Debug query to check actual values in database
