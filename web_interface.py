@@ -250,23 +250,14 @@ def get_filters():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            # First get the QTH info for the selected station
             cursor.execute("""
-                WITH latest_score AS (
-                    SELECT MAX(id) as id
-                    FROM contest_scores
-                    WHERE contest = ? AND callsign = ?
-                )
-                SELECT DISTINCT
-                    qi.dxcc_country, 
-                    qi.cq_zone, 
-                    qi.iaru_zone,
-                    qi.arrl_section,
-                    qi.state_province,
-                    qi.continent
+                SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                       qi.arrl_section, qi.state_province, qi.continent
                 FROM contest_scores cs
-                JOIN latest_score ls ON cs.id = ls.id
                 JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ? AND cs.callsign = ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
             """, (contest, callsign))
             
             row = cursor.fetchone()
@@ -294,38 +285,6 @@ def get_filters():
     except Exception as e:
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
-def get_active_operators(db_path):
-    """
-    Query the database to fetch active operators per band.
-    """
-    query = """
-    SELECT 
-        band, 
-        COUNT(DISTINCT callsign) AS active_operators 
-    FROM 
-        contest_scores 
-    WHERE 
-        rate_15m > 0  -- Active if 15-minute rate is positive
-    GROUP BY 
-        band;
-    """
-    try:
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(query)
-            results = cursor.fetchall()
-            return {row[0]: row[1] for row in results}
-    except sqlite3.Error as e:
-        print(f"Database error: {e}")
-        return {}
-
-@app.route('/api/active_operators', methods=['GET'])
-def active_operators():
-    db_path = "contest_data.db"  # Path to your database
-    data = get_active_operators(db_path)
-    return jsonify(data)
-
 
 if __name__ == '__main__':
     logger.info("Starting development server")
