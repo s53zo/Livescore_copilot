@@ -295,6 +295,38 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+def get_active_operators(db_path):
+    """
+    Query the database to fetch active operators per band.
+    """
+    query = """
+    SELECT 
+        band, 
+        COUNT(DISTINCT callsign) AS active_operators 
+    FROM 
+        contest_scores 
+    WHERE 
+        rate_15m > 0  -- Active if 15-minute rate is positive
+    GROUP BY 
+        band;
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            results = cursor.fetchall()
+            return {row[0]: row[1] for row in results}
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
+        return {}
+
+@app.route('/api/active_operators', methods=['GET'])
+def active_operators():
+    db_path = "contest_data.db"  # Path to your database
+    data = get_active_operators(db_path)
+    return jsonify(data)
+
+
 if __name__ == '__main__':
     logger.info("Starting development server")
     app.run(host='127.0.0.1', port=8089)
