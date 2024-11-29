@@ -648,13 +648,26 @@ class ScoreReporter:
                 </tr>"""
                 table_rows.append(row)
     
-            # Get average top rates for each band
-            # Get average top rates for each band
+            # Get average rates directly from stations data
             band_avg_rates = {}
-            for band in ['160', '80', '40', '20', '15', '10']:
-                avg_rate = self.get_band_rates_from_table(cursor, callsign, contest, timestamp)
-                if avg_rate:
-                    band_avg_rates[band] = self.format_band_rates(avg_rate)
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                for band in ['160', '80', '40', '20', '15', '10']:
+                    rates = []
+                    for station in stations:
+                        station_id = station[0]
+                        station_timestamp = station[5]
+                        breakdown = self.get_band_breakdown_with_rates(
+                            station_id, station[1], contest, station_timestamp
+                        )
+                        for band_name, band_data in breakdown.items():
+                            if band_name == band and band_data[3] > 0:  # 15-minute rate
+                                rates.append(band_data[3])
+                    
+                    if rates:
+                        top_rates = sorted(rates, reverse=True)[:10]
+                        avg_rate = round(sum(top_rates) / len(top_rates))
+                        band_avg_rates[band] = self.format_band_rates(avg_rate)
     
             # Add CSS for rate display
             additional_css = """
