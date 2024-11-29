@@ -73,11 +73,15 @@ class QsoRateCalculator:
         return long_rate, short_rate
 
     def calculate_band_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
-        """Calculate per-band QSO rates for both time windows"""
+        """Calculate per-band QSO rates for both time windows, capping the data age."""
         
         # Calculate effective window sizes
         short_window_effective = min(short_window, 20)  # Cap at 20 minutes
         long_window_effective = min(long_window, 90)    # Cap at 90 minutes
+        
+        # Construct window strings
+        window_long_str = f"-{long_window_effective} minutes"
+        window_short_str = f"-{short_window_effective} minutes"
         
         query = """
             WITH current_bands AS (
@@ -103,6 +107,7 @@ class QsoRateCalculator:
                 AND cs.timestamp <= ?
                 AND cs.timestamp >= datetime(?, ?)
                 ORDER BY cs.timestamp DESC
+                LIMIT 1
             ),
             short_window_bands AS (
                 SELECT 
@@ -115,6 +120,7 @@ class QsoRateCalculator:
                 AND cs.timestamp <= ?
                 AND cs.timestamp >= datetime(?, ?)
                 ORDER BY cs.timestamp DESC
+                LIMIT 1
             )
             SELECT 
                 cb.band,
@@ -129,21 +135,17 @@ class QsoRateCalculator:
             ORDER BY cb.band
         """
         
-        # Create window strings with effective limits
-        window_long_str = f"-{long_window_effective} minutes"
-        window_short_str = f"-{short_window_effective} minutes"
-        
-        # Execute query with limited windows
         cursor.execute(query, (
-            callsign, contest, current_ts,                  # current_bands parameters (3)
-            callsign, contest, current_ts, current_ts, window_long_str,   # long_window_bands parameters (5)
-            callsign, contest, current_ts, current_ts, window_short_str   # short_window_bands parameters (5)
+            callsign, contest, current_ts,
+            callsign, contest, current_ts, current_ts, window_long_str,
+            callsign, contest, current_ts, current_ts, window_short_str
         ))
         
         results = cursor.fetchall()
         band_data = {}
         
         for row in results:
+            band = row[0]
             band_data[band] = [row[1], row[2], row[3], row[4]]  # current_qsos, multipliers, long_window_qsos, short_window_qsos
-            
+        
         return band_data
