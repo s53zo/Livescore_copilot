@@ -72,39 +72,68 @@ class QsoRateCalculator:
                 
         return long_rate, short_rate
 
-    def calculate_band_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
-        """Calculate per-band QSO rates considering current time and actual QSO increases"""
+    def calculate_band_rates(self, cursor, callsign, contest, timestamp):
+        """Calculate per-band QSO rates"""
         try:
+            # First convert timestamp to datetime and check if data is too old
+            score_time = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            current_time = datetime.utcnow()
+            
+            # Check if data is too old (> 75 minutes)
+            time_diff = (current_time - score_time).total_seconds() / 60
+    
+            # If data is too old, just get band info without rates
+            if time_diff > 75:
+                query = """
+                    SELECT bb.band, bb.qsos, bb.multipliers
+                    FROM contest_scores cs
+                    JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                    WHERE cs.callsign = ?
+                    AND cs.contest = ?
+                    AND cs.timestamp = ?
+                    AND bb.qsos > 0
+                    ORDER BY bb.band
+                """
+                cursor.execute(query, (callsign, contest, timestamp))
+                return {row[0]: [row[1], row[2], 0, 0] for row in cursor.fetchall()}
+    
+            # Otherwise get band data with rate calculations
             query = """
-            WITH now AS (
-                SELECT datetime('now') as current_utc
-            ),
-            total_qsos AS (
-                SELECT cs.timestamp, bb.band, bb.qsos, bb.multipliers
+                WITH now AS (
+                    SELECT datetime('now') as current_utc
+                ),
+                band_qsos AS (
+                    SELECT cs.timestamp, bb.band, bb.qsos
+                    FROM contest_scores cs
+                    JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                    CROSS JOIN now n
+                    WHERE cs.callsign = ? 
+                    AND cs.contest = ?
+                    AND cs.timestamp >= ?
+                    AND cs.timestamp <= ?
+                    ORDER BY cs.timestamp DESC
+                )
+                SELECT bb.band,
+                       bb.qsos as current_qsos,
+                       bb.multipliers
                 FROM contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                CROSS JOIN now n 
-                WHERE cs.callsign = ? 
+                WHERE cs.callsign = ?
                 AND cs.contest = ?
                 AND cs.timestamp = ?
-                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
-            )
-            SELECT band, qsos, multipliers, 0 as long_rate, 0 as short_rate
-            FROM total_qsos
-            WHERE qsos > 0
-            ORDER BY band
+                AND bb.qsos > 0
+                ORDER BY bb.band
             """
-                
-            cursor.execute(query, (callsign, contest, timestamp))
-            results = cursor.fetchall()
-            
-            band_data = {}
-            for row in results:
-                band = row[0]
-                band_data[band] = [row[1], row[2], 0, 0]  # qsos, multipliers, long_rate=0, short_rate=0
     
-            return band_data
-                    
+            cursor.execute(query, (
+                callsign, contest,
+                score_time.strftime('%Y-%m-%d %H:%M:%S'),
+                timestamp,
+                callsign, contest, timestamp
+            ))
+    
+            return {row[0]: [row[1], row[2], 0, 0] for row in cursor.fetchall()}
+    
         except Exception as e:
             self.logger.error(f"Error calculating band rates: {e}")
             self.logger.debug(traceback.format_exc())
