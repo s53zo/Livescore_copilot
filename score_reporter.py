@@ -163,8 +163,8 @@ class ScoreReporter:
         self.template_path = template_path or 'templates/score_template.html'
         self.rate_calculator = RateCalculator(self.db_path)
         self.setup_logging()
-        #self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
-
+        self.current_timestamp = None
+        
     def setup_logging(self):
         """Setup logging configuration with both file and console handlers"""
         try:
@@ -409,10 +409,9 @@ class ScoreReporter:
             if qsos > 0:
                 # Always show 0 rates if timestamp is too old
                 now = datetime.utcnow()
-                score_time = datetime.strptime(self.current_timestamp, '%Y-%m-%d %H:%M:%S')
-                time_diff = (now - score_time).total_seconds() / 60
+                time_diff_minutes = (now - datetime.strptime(self.current_timestamp, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
                 
-                if time_diff > 75:
+                if time_diff_minutes > 75:
                     long_rate = 0
                     short_rate = 0
     
@@ -486,6 +485,7 @@ class ScoreReporter:
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
+            self.current_timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     
             # Calculate active operators per band (new)
             active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
