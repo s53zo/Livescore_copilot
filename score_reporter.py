@@ -455,81 +455,22 @@ class ScoreReporter:
         }
         return category_map.get((operator, transmitter, assisted), 'Unknown')
 
-    def get_band_top_rates(self, cursor, contest, band, filter_type=None, filter_value=None):
-        """Calculate average of top 15-minute rates for a specific band"""
-        query = """
-            WITH latest_score_times AS (
-                SELECT cs1.callsign, MAX(cs1.timestamp) as max_ts
-                FROM contest_scores cs1
-                WHERE cs1.contest = ?
-                GROUP BY cs1.callsign
-            ),
-            rate_calcs AS (
-                SELECT 
-                    cs.callsign,
-                    bb.band,
-                    cs.timestamp as current_ts,
-                    bb.qsos as current_qsos,
-                    (
-                        SELECT bb2.qsos
-                        FROM contest_scores cs2
-                        JOIN band_breakdown bb2 ON bb2.contest_score_id = cs2.id
-                        WHERE cs2.callsign = cs.callsign
-                        AND cs2.contest = cs.contest
-                        AND cs2.timestamp = (
-                            SELECT MAX(cs3.timestamp)
-                            FROM contest_scores cs3
-                            WHERE cs3.callsign = cs.callsign
-                            AND cs3.contest = cs.contest
-                            AND cs3.timestamp < cs.timestamp
-                            AND cs3.timestamp >= datetime(cs.timestamp, '-15 minutes')
-                        )
-                        AND bb2.band = bb.band
-                    ) as prev_qsos
-                FROM contest_scores cs
-                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                JOIN latest_score_times lst ON cs.callsign = lst.callsign
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ?
-                AND bb.band = ?
-                {filter_clause}
-            ),
-            valid_rates AS (
-                SELECT 
-                    callsign,
-                    CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate
-                FROM rate_calcs
-                WHERE current_qsos > COALESCE(prev_qsos, 0)
-                AND prev_qsos IS NOT NULL
-                AND hourly_rate > 0
-                AND hourly_rate <= 400
+    def get_band_rates_from_table(stations, band_index):
+        """Calculate average of top 10 rates for a band"""
+        # Get all non-zero 15-minute rates
+        rates = []
+        for row in stations:
+            band_breakdown = self.get_band_breakdown_with_rates(
+                row[0], row[1], row[2], row[5]
             )
-            SELECT ROUND(AVG(hourly_rate)) as avg_rate
-            FROM valid_rates
-        """
+            for band_data in band_breakdown.values():
+                if band_data[3] > 0:  # If there is a non-zero 15-minute rate
+                    rates.append(band_data[3])
         
-        filter_clause = ""
-        params = [contest, contest, band]
-        
-        if filter_type and filter_value and filter_type.lower() != 'none':
-            filter_map = {
-                'DXCC': 'dxcc_country',
-                'CQ Zone': 'cq_zone',
-                'IARU Zone': 'iaru_zone',
-                'ARRL Section': 'arrl_section',
-                'State/Province': 'state_province',
-                'Continent': 'continent'
-            }
-            if field := filter_map.get(filter_type):
-                filter_clause = f"AND qi.{field} = ?"
-                params.append(filter_value)
-        
-        query = query.format(filter_clause=filter_clause)
-        
-        cursor.execute(query, params)
-        result = cursor.fetchone()
-        return result[0] if result and result[0] else 0
-    
+        # Sort and take top 10
+        top_rates = sorted(rates, reverse=True)[:10]
+        return round(sum(top_rates) / len(top_rates)) if top_rates else 0
+
     def format_band_rates(self, rate):
         """Format average rate for display in header"""
         if rate > 0:
