@@ -455,17 +455,13 @@ class ScoreReporter:
         }
         return category_map.get((operator, transmitter, assisted), 'Unknown')
 
-    def get_band_rates_from_table(stations, band_index):
+    def get_band_rates_from_table(self, cursor, callsign, contest, timestamp):
         """Calculate average of top 10 rates for a band"""
         # Get all non-zero 15-minute rates
         rates = []
-        for row in stations:
-            band_breakdown = self.get_band_breakdown_with_rates(
-                row[0], row[1], row[2], row[5]
-            )
-            for band_data in band_breakdown.values():
-                if band_data[3] > 0:  # If there is a non-zero 15-minute rate
-                    rates.append(band_data[3])
+        for band_data in self.get_band_breakdown_with_rates(station_id, callsign, contest, timestamp).values():
+            if band_data[3] > 0:  # If there is a non-zero 15-minute rate
+                rates.append(band_data[3])
         
         # Sort and take top 10
         top_rates = sorted(rates, reverse=True)[:10]
@@ -653,19 +649,12 @@ class ScoreReporter:
                 table_rows.append(row)
     
             # Get average top rates for each band
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                band_avg_rates = {}
-                for band in ['160', '80', '40', '20', '15', '10']:
-                    avg_rate = self.get_band_top_rates(
-                        cursor, 
-                        contest, 
-                        band,
-                        request.args.get('filter_type'),
-                        request.args.get('filter_value')
-                    )
-                    if avg_rate:
-                        band_avg_rates[band] = self.format_band_rates(avg_rate)
+            # Get average top rates for each band
+            band_avg_rates = {}
+            for band in ['160', '80', '40', '20', '15', '10']:
+                avg_rate = self.get_band_rates_from_table(cursor, callsign, contest, timestamp)
+                if avg_rate:
+                    band_avg_rates[band] = self.format_band_rates(avg_rate)
     
             # Add CSS for rate display
             additional_css = """
