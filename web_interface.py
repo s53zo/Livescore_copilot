@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
-import sqlite3
 import os
-import logging
 import sys
+import logging
 import traceback
-from score_reporter import ScoreReporter
+import sqlite3
+import atexit
 from datetime import datetime
-from maintenance_tasks import DatabaseMaintenance
+from flask import Flask, render_template, request, jsonify, make_response
 
-# Define Config class only once at the top
+# Define Config class first
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
 
-# Set up detailed logging
+# Set up logging before any other initialization
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
@@ -25,25 +24,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Log startup
-logger.info("Starting web interface application")
+# Create Flask app
+app = Flask(__name__)
 
-try:
-    # Create Flask app
-    app = Flask(__name__)
-    logger.info("Flask app created successfully")
-
-    # Initialize maintenance scheduler
-    maintenance = DatabaseMaintenance(
-        db_path=Config.DB_PATH,
-        log_path='/opt/livescore/logs/maintenance.log'
-    )
-    maintenance.start()
-    logger.info("Database maintenance scheduler initialized")
-except Exception as e:
-    logger.error(f"Failed to create Flask app or initialize maintenance: {str(e)}")
-    logger.error(traceback.format_exc())
-    raise
+# Import other modules after Flask app is created
+from score_reporter import ScoreReporter
+from maintenance_tasks import DatabaseMaintenance
 
 def get_db():
     """Database connection with logging"""
@@ -57,90 +43,17 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-# Add this code at the top of web_interface.py, after the initial imports
-class MaintenanceHandler:
-    def __init__(self, db_path, log_path):
-        self.db_path = db_path
-        self.log_path = log_path
-        self.maintenance = None
-        self.logger = logging.getLogger('MaintenanceHandler')
-
-    def start(self):
-        """Start maintenance with verification and detailed logging"""
-        try:
-            if self.maintenance is None:
-                self.logger.info("Initializing database maintenance...")
-                self.maintenance = DatabaseMaintenance(
-                    db_path=self.db_path,
-                    log_path=self.log_path
-                )
-            
-            # Attempt to start maintenance
-            started = self.maintenance.start()
-            if started:
-                self.logger.info("Database maintenance started successfully")
-                # Verify maintenance is running
-                if not self.verify_maintenance_running():
-                    raise RuntimeError("Maintenance started but not running")
-            else:
-                raise RuntimeError("Failed to start maintenance")
-            
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to start maintenance: {str(e)}")
-            self.logger.error(traceback.format_exc())
-            # Try to stop maintenance if it partially started
-            self.stop()
-            return False
-
-    def stop(self):
-        """Stop maintenance safely"""
-        try:
-            if self.maintenance:
-                self.maintenance.stop()
-                self.logger.info("Database maintenance stopped")
-                self.maintenance = None
-        except Exception as e:
-            self.logger.error(f"Error stopping maintenance: {str(e)}")
-
-    def verify_maintenance_running(self):
-        """Verify that maintenance is actually running"""
-        try:
-            if not self.maintenance:
-                return False
-            
-            # Check if maintenance thread is alive
-            if not hasattr(self.maintenance, '_maintenance_thread') or \
-               not self.maintenance._maintenance_thread or \
-               not self.maintenance._maintenance_thread.is_alive():
-                return False
-            
-            # Check last maintenance time
-            if not hasattr(self.maintenance, 'last_maintenance_time') or \
-               (datetime.now() - self.maintenance.last_maintenance_time).days > 7:
-                self.logger.warning("Maintenance appears stale")
-                return False
-                
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error verifying maintenance: {str(e)}")
-            return False
-
-    def get_status(self):
-        """Get current maintenance status"""
-        if not self.maintenance:
-            return "Not initialized"
-        
-        try:
-            if self.verify_maintenance_running():
-                last_run = self.maintenance.last_maintenance_time
-                return f"Running (Last maintenance: {last_run.strftime('%Y-%m-%d %H:%M:%S')})"
-            else:
-                return "Stopped"
-        except:
-            return "Error checking status"
+# Initialize maintenance scheduler
+try:
+    maintenance = DatabaseMaintenance(
+        db_path=Config.DB_PATH,
+        log_path='/opt/livescore/logs/maintenance.log'
+    )
+    maintenance.start()
+    logger.info("Database maintenance scheduler initialized")
+except Exception as e:
+    logger.error(f"Failed to initialize maintenance: {str(e)}")
+    logger.error(traceback.format_exc())
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -210,9 +123,6 @@ def live_report():
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
-        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
-                   f"filter_type={filter_type}, filter_value={filter_value}")
-
         # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
 
@@ -246,27 +156,14 @@ def live_report():
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
             
-            logger.info(f"Successfully generated report for {callsign} in {contest}")
             return response
         else:
-            logger.error(f"No station data found for {callsign} in {contest}")
             return render_template('error.html', error="No data found for the selected criteria")
 
     except Exception as e:
         logger.error("Exception in live_report:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
-
-@app.errorhandler(404)
-def not_found_error(error):
-    logger.error(f"404 error: {error}")
-    return render_template('error.html', error="Page not found"), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logger.error(f"500 error: {error}")
-    logger.error(traceback.format_exc())
-    return render_template('error.html', error="Internal server error"), 500
 
 @app.route('/livescore-pilot/api/contests')
 def get_contests():
@@ -365,9 +262,21 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.errorhandler(404)
+def not_found_error(error):
+    logger.error(f"404 error: {error}")
+    return render_template('error.html', error="Page not found"), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 error: {error}")
+    logger.error(traceback.format_exc())
+    return render_template('error.html', error="Internal server error"), 500
+
 if __name__ == '__main__':
     logger.info("Starting development server")
     app.run(host='127.0.0.1', port=8089)
 else:
     # When running under gunicorn
     logger.info("Starting under gunicorn")
+    
