@@ -455,7 +455,7 @@ class ScoreReporter:
         }
         return category_map.get((operator, transmitter, assisted), 'Unknown')
 
-    def get_band_top_rates(self, cursor, contest, band, filter_type=None, filter_value=None, limit=10):
+    def get_band_top_rates(self, cursor, contest, band, filter_type=None, filter_value=None):
         """Calculate average of top 15-minute rates for a specific band"""
         query = """
             WITH latest_score_times AS (
@@ -497,19 +497,17 @@ class ScoreReporter:
             valid_rates AS (
                 SELECT 
                     callsign,
-                    CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate,
-                    current_ts,
-                    prev_qsos
+                    CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate
                 FROM rate_calcs
                 WHERE current_qsos > COALESCE(prev_qsos, 0)
                 AND prev_qsos IS NOT NULL
                 AND hourly_rate > 0
-                AND hourly_rate <= 400  -- Reasonable maximum rate per band
+                AND hourly_rate <= 400
             )
             SELECT ROUND(AVG(hourly_rate)) as avg_rate
             FROM valid_rates
         """
-     
+        
         filter_clause = ""
         params = [contest, contest, band]
         
@@ -527,7 +525,6 @@ class ScoreReporter:
                 params.append(filter_value)
         
         query = query.format(filter_clause=filter_clause)
-        params.append(limit)
         
         cursor.execute(query, params)
         result = cursor.fetchone()
