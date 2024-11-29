@@ -457,12 +457,23 @@ class ScoreReporter:
 
     
     def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display"""
+        """Generate HTML content with updated category display and band activity counts"""
         try:
             # Get filter information for the header if available
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
+    
+            # Calculate active operators per band (new)
+            active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
+            for station in stations:
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                for band, data in band_breakdown.items():
+                    if data[3] > 0:  # Check 15-minute rate
+                        active_ops[band] += 1
     
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -619,9 +630,18 @@ class ScoreReporter:
                     <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-                
-            # Format final HTML
-            html_content = template.format(
+    
+            # Replace band headers in template with active operator counts
+            html_content = template
+            for band in ['160', '80', '40', '20', '15', '10']:
+                count = active_ops[band]
+                html_content = html_content.replace(
+                    f'>{band}m</th>', 
+                    f'>{band}m ({count}OPs)</th>'
+                )
+    
+            # Format final HTML with updated headers
+            html_content = html_content.format(
                 contest=contest,
                 callsign=callsign,
                 timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
