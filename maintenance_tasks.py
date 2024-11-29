@@ -53,15 +53,31 @@ class DatabaseMaintenance:
                 self.logger.error(f"Failed to setup file logging: {e}")
 
     def start(self):
-        """Start the maintenance scheduler thread"""
-        if not self._maintenance_thread or not self._maintenance_thread.is_alive():
-            self._stop_flag = False
-            self._maintenance_thread = threading.Thread(target=self.maintenance_worker)
-            self._maintenance_thread.daemon = True
-            self._maintenance_thread.start()
-            self.logger.info("Maintenance scheduler started")
-            return True
-        return False
+        """Start the maintenance scheduler thread with state verification"""
+        try:
+            if not self._maintenance_thread or not self._maintenance_thread.is_alive():
+                self._stop_flag = False
+                self._maintenance_thread = threading.Thread(target=self.maintenance_worker)
+                self._maintenance_thread.daemon = True
+                self._maintenance_thread.start()
+                
+                # Wait briefly and verify thread started
+                time.sleep(1)
+                if not self._maintenance_thread.is_alive():
+                    raise RuntimeError("Maintenance thread failed to start")
+                
+                self.logger.info("Maintenance scheduler started")
+                return True
+                
+            self.logger.warning("Maintenance already running")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start maintenance: {e}")
+            self.logger.debug(traceback.format_exc())
+            self._stop_flag = True
+            self._maintenance_thread = None
+            return False
 
     def stop(self):
         """Stop the maintenance scheduler"""
