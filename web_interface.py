@@ -61,7 +61,90 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
+# Add this code at the top of web_interface.py, after the initial imports
+class MaintenanceHandler:
+    def __init__(self, db_path, log_path):
+        self.db_path = db_path
+        self.log_path = log_path
+        self.maintenance = None
+        self.logger = logging.getLogger('MaintenanceHandler')
 
+    def start(self):
+        """Start maintenance with verification and detailed logging"""
+        try:
+            if self.maintenance is None:
+                self.logger.info("Initializing database maintenance...")
+                self.maintenance = DatabaseMaintenance(
+                    db_path=self.db_path,
+                    log_path=self.log_path
+                )
+            
+            # Attempt to start maintenance
+            started = self.maintenance.start()
+            if started:
+                self.logger.info("Database maintenance started successfully")
+                # Verify maintenance is running
+                if not self.verify_maintenance_running():
+                    raise RuntimeError("Maintenance started but not running")
+            else:
+                raise RuntimeError("Failed to start maintenance")
+            
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to start maintenance: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            # Try to stop maintenance if it partially started
+            self.stop()
+            return False
+
+    def stop(self):
+        """Stop maintenance safely"""
+        try:
+            if self.maintenance:
+                self.maintenance.stop()
+                self.logger.info("Database maintenance stopped")
+                self.maintenance = None
+        except Exception as e:
+            self.logger.error(f"Error stopping maintenance: {str(e)}")
+
+    def verify_maintenance_running(self):
+        """Verify that maintenance is actually running"""
+        try:
+            if not self.maintenance:
+                return False
+            
+            # Check if maintenance thread is alive
+            if not hasattr(self.maintenance, '_maintenance_thread') or \
+               not self.maintenance._maintenance_thread or \
+               not self.maintenance._maintenance_thread.is_alive():
+                return False
+            
+            # Check last maintenance time
+            if not hasattr(self.maintenance, 'last_maintenance_time') or \
+               (datetime.now() - self.maintenance.last_maintenance_time).days > 7:
+                self.logger.warning("Maintenance appears stale")
+                return False
+                
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error verifying maintenance: {str(e)}")
+            return False
+
+    def get_status(self):
+        """Get current maintenance status"""
+        if not self.maintenance:
+            return "Not initialized"
+        
+        try:
+            if self.verify_maintenance_running():
+                last_run = self.maintenance.last_maintenance_time
+                return f"Running (Last maintenance: {last_run.strftime('%Y-%m-%d %H:%M:%S')})"
+            else:
+                return "Stopped"
+        except:
+            return "Error checking status"
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
