@@ -33,17 +33,27 @@ try:
     app = Flask(__name__)
     logger.info("Flask app created successfully")
 
-    # Initialize maintenance scheduler
-    maintenance = DatabaseMaintenance(
+    # Initialize maintenance handler
+    maintenance_handler = MaintenanceHandler(
         db_path=Config.DB_PATH,
         log_path='/opt/livescore/logs/maintenance.log'
     )
-    maintenance.start()
-    logger.info("Database maintenance scheduler initialized")
-except Exception as e:
-    logger.error(f"Failed to create Flask app or initialize maintenance: {str(e)}")
-    logger.error(traceback.format_exc())
-    raise
+    
+    if not maintenance_handler.start():
+        logger.error("Failed to start maintenance - continuing without maintenance")
+    
+    # Add maintenance status endpoint
+    @app.route('/livescore-pilot/maintenance/status')
+    def maintenance_status():
+        return jsonify({
+            "status": maintenance_handler.get_status(),
+            "running": maintenance_handler.verify_maintenance_running()
+        })
+    
+    # Cleanup on shutdown
+    @atexit.register
+    def cleanup():
+        maintenance_handler.stop()
 
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
