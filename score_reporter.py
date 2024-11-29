@@ -407,20 +407,26 @@ class ScoreReporter:
         if band_data:
             qsos, mults, long_rate, short_rate = band_data
             if qsos > 0:
+                # Always show 0 rates if timestamp is too old
+                now = datetime.utcnow()
+                score_time = datetime.strptime(self.current_timestamp, '%Y-%m-%d %H:%M:%S')
+                time_diff = (now - score_time).total_seconds() / 60
+                
+                if time_diff > 75:
+                    long_rate = 0
+                    short_rate = 0
+    
                 # Get reference rates for this band
                 ref_short_rate = 0
                 if reference_rates and band in reference_rates:
                     _, _, _, ref_short_rate = reference_rates[band]
-                
-                # Determine if 15-minute rate is better
-                better_rate = short_rate > ref_short_rate
                 
                 # Format rates
                 long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
                 short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
                 
                 # Apply CSS class based on 15-minute rate comparison
-                rate_class = "better-rate" if better_rate else "worse-rate"
+                rate_class = "better-rate" if short_rate > ref_short_rate else "worse-rate"
                 
                 return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
