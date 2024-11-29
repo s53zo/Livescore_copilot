@@ -455,7 +455,6 @@ class ScoreReporter:
         }
         return category_map.get((operator, transmitter, assisted), 'Unknown')
 
-    
     def get_band_top_rates(self, cursor, contest, band, filter_type=None, filter_value=None, limit=10):
         """Calculate average of top 15-minute rates for a specific band"""
         query = """
@@ -469,7 +468,7 @@ class ScoreReporter:
                 SELECT 
                     cs.callsign,
                     bb.band,
-                    cs.timestamp,
+                    cs.timestamp as current_ts,
                     bb.qsos as current_qsos,
                     (
                         SELECT bb2.qsos
@@ -477,10 +476,15 @@ class ScoreReporter:
                         JOIN band_breakdown bb2 ON bb2.contest_score_id = cs2.id
                         WHERE cs2.callsign = cs.callsign
                         AND cs2.contest = cs.contest
-                        AND cs2.timestamp <= datetime(cs.timestamp, '-15 minutes')
+                        AND cs2.timestamp = (
+                            SELECT MAX(cs3.timestamp)
+                            FROM contest_scores cs3
+                            WHERE cs3.callsign = cs.callsign
+                            AND cs3.contest = cs.contest
+                            AND cs3.timestamp < cs.timestamp
+                            AND cs3.timestamp >= datetime(cs.timestamp, '-15 minutes')
+                        )
                         AND bb2.band = bb.band
-                        ORDER BY cs2.timestamp DESC
-                        LIMIT 1
                     ) as prev_qsos
                 FROM contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
@@ -490,19 +494,22 @@ class ScoreReporter:
                 AND bb.band = ?
                 {filter_clause}
             ),
-            hourly_rates AS (
+            valid_rates AS (
                 SELECT 
-                    CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate
+                    callsign,
+                    CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate,
+                    current_ts,
+                    prev_qsos
                 FROM rate_calcs
                 WHERE current_qsos > COALESCE(prev_qsos, 0)
-                ORDER BY hourly_rate DESC
-                LIMIT ?
+                AND prev_qsos IS NOT NULL
+                AND hourly_rate > 0
+                AND hourly_rate <= 400  -- Reasonable maximum rate per band
             )
             SELECT ROUND(AVG(hourly_rate)) as avg_rate
-            FROM hourly_rates
-            WHERE hourly_rate > 0
+            FROM valid_rates
         """
-        
+     
         filter_clause = ""
         params = [contest, contest, band]
         
