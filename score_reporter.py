@@ -637,7 +637,7 @@ class ScoreReporter:
                 count = active_ops[band]
                 html_content = html_content.replace(
                     f'>{band}m</th>', 
-                    f'>{band}m ({count}OPs)</th>'
+                    f'>({count}OPs)@ {band}m </th>'
                 )
     
             # Format final HTML with updated headers
