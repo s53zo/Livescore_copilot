@@ -470,7 +470,7 @@ class ScoreReporter:
     def format_band_rates(self, rate):
         """Format average rate for display in header"""
         if rate > 0:
-            return f'<div class="band-rates">Avg: {rate}/h</div>'
+            return f'<div class="band-rates">{rate}/h</div>'
         return ""
     
     def generate_html_content(self, template, callsign, contest, stations):
@@ -698,10 +698,9 @@ class ScoreReporter:
                 rates_html = band_avg_rates.get(band, "")
                 html_content = html_content.replace(
                     f'>{band}m</th>',
-                    f' class="band-header">{count}OPs@ {band}m{rates_html}</th>'
+                    f' class="band-header"><div class="band-rates">{count}OPs@</div> {band}m{rates_html}</th>'
                 )
-     
-    
+         
             # Format final HTML with updated headers
             html_content = html_content.format(
                 contest=contest,
