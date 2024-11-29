@@ -73,15 +73,11 @@ class QsoRateCalculator:
         return long_rate, short_rate
 
     def calculate_band_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
-        """Calculate per-band QSO rates for both time windows, capping the data age."""
+        """Calculate per-band QSO rates for both time windows"""
         
         # Calculate effective window sizes
-        short_window_effective = min(short_window, 30)
-        long_window_effective = min(long_window, 120)
-        
-        # Construct window strings
-        window_long_str = f"-{long_window_effective} minutes"
-        window_short_str = f"-{short_window_effective} minutes"
+        short_window_effective = min(short_window, 20)  # Cap at 20 minutes
+        long_window_effective = min(long_window, 90)    # Cap at 90 minutes
         
         query = """
             WITH current_bands AS (
@@ -133,28 +129,21 @@ class QsoRateCalculator:
             ORDER BY cb.band
         """
         
-        # Execute the query with the updated parameters
+        # Create window strings with effective limits
+        window_long_str = f"-{long_window_effective} minutes"
+        window_short_str = f"-{short_window_effective} minutes"
+        
+        # Execute query with limited windows
         cursor.execute(query, (
-            callsign, contest, current_ts,
-            callsign, contest, current_ts, current_ts, window_long_str,
-            callsign, contest, current_ts, current_ts, window_short_str
+            callsign, contest, current_ts,                  # current_bands parameters (3)
+            callsign, contest, current_ts, current_ts, window_long_str,   # long_window_bands parameters (5)
+            callsign, contest, current_ts, current_ts, window_short_str   # short_window_bands parameters (5)
         ))
         
         results = cursor.fetchall()
         band_data = {}
         
-        # Populate band_data with the fetched results
         for row in results:
-            band = row[0]
-            current_qsos = row[1]
-            multipliers = row[2]
-            long_window_qsos = row[3] if row[3] is not None else 0
-            short_window_qsos = row[4] if row[4] is not None else 0
-            band_data[band] = {
-                'current_qsos': current_qsos,
-                'multipliers': multipliers,
-                'long_window_qsos': long_window_qsos,
-                'short_window_qsos': short_window_qsos
-            }
-        
+            band_data[band] = [row[1], row[2], row[3], row[4]]  # current_qsos, multipliers, long_window_qsos, short_window_qsos
+            
         return band_data
