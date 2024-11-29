@@ -9,7 +9,7 @@ from score_reporter import ScoreReporter
 from datetime import datetime
 from maintenance_tasks import DatabaseMaintenance
 
-# Define Config class first
+# Define Config class only once at the top
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
@@ -33,31 +33,17 @@ try:
     app = Flask(__name__)
     logger.info("Flask app created successfully")
 
-    # Initialize maintenance handler
-    maintenance_handler = MaintenanceHandler(
+    # Initialize maintenance scheduler
+    maintenance = DatabaseMaintenance(
         db_path=Config.DB_PATH,
         log_path='/opt/livescore/logs/maintenance.log'
     )
-    
-    if not maintenance_handler.start():
-        logger.error("Failed to start maintenance - continuing without maintenance")
-    
-    # Add maintenance status endpoint
-    @app.route('/livescore-pilot/maintenance/status')
-    def maintenance_status():
-        return jsonify({
-            "status": maintenance_handler.get_status(),
-            "running": maintenance_handler.verify_maintenance_running()
-        })
-    
-    # Cleanup on shutdown
-    @atexit.register
-    def cleanup():
-        maintenance_handler.stop()
-
-class Config:
-    DB_PATH = '/opt/livescore/contest_data.db'
-    OUTPUT_DIR = '/opt/livescore/reports'
+    maintenance.start()
+    logger.info("Database maintenance scheduler initialized")
+except Exception as e:
+    logger.error(f"Failed to create Flask app or initialize maintenance: {str(e)}")
+    logger.error(traceback.format_exc())
+    raise
 
 def get_db():
     """Database connection with logging"""
