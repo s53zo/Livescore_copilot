@@ -456,6 +456,94 @@ class ScoreReporter:
         return category_map.get((operator, transmitter, assisted), 'Unknown')
 
     
+    def get_band_top_rates(self, cursor, contest, band, filter_type=None, filter_value=None, limit=10):
+        """Calculate top 15-minute rates for a specific band"""
+        query = """
+            WITH latest_score_times AS (
+                SELECT cs1.callsign, MAX(cs1.timestamp) as max_ts
+                FROM contest_scores cs1
+                WHERE cs1.contest = ?
+                GROUP BY cs1.callsign
+            ),
+            rate_calcs AS (
+                SELECT 
+                    cs.callsign,
+                    bb.band,
+                    cs.timestamp,
+                    bb.qsos as current_qsos,
+                    (
+                        SELECT bb2.qsos
+                        FROM contest_scores cs2
+                        JOIN band_breakdown bb2 ON bb2.contest_score_id = cs2.id
+                        WHERE cs2.callsign = cs.callsign
+                        AND cs2.contest = cs.contest
+                        AND cs2.timestamp <= datetime(cs.timestamp, '-15 minutes')
+                        AND bb2.band = bb.band
+                        ORDER BY cs2.timestamp DESC
+                        LIMIT 1
+                    ) as prev_qsos
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                JOIN latest_score_times lst ON cs.callsign = lst.callsign
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ?
+                AND bb.band = ?
+                {filter_clause}
+            )
+            SELECT 
+                callsign,
+                CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate
+            FROM rate_calcs
+            WHERE current_qsos > COALESCE(prev_qsos, 0)
+            ORDER BY hourly_rate DESC
+            LIMIT ?
+        """
+        
+        filter_clause = ""
+        params = [contest, contest, band]
+        
+        if filter_type and filter_value and filter_type.lower() != 'none':
+            filter_map = {
+                'DXCC': 'dxcc_country',
+                'CQ Zone': 'cq_zone',
+                'IARU Zone': 'iaru_zone',
+                'ARRL Section': 'arrl_section',
+                'State/Province': 'state_province',
+                'Continent': 'continent'
+            }
+            if field := filter_map.get(filter_type):
+                filter_clause = f"AND qi.{field} = ?"
+                params.append(filter_value)
+        
+        query = query.format(filter_clause=filter_clause)
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        # Format results as list of (callsign, rate) tuples
+        return [(row[0], row[1]) for row in results if row[1] > 0]
+    
+    def format_band_rates(self, rates):
+        """Format top rates for display in header"""
+        if not rates:
+            return ""
+        
+        top_rate = rates[0][1]
+        formatted_rates = []
+        for call, rate in rates[:3]:  # Show top 3
+            if rate == top_rate:
+                formatted_rates.append(f'<span class="top-rate">{call}({rate})</span>')
+            else:
+                formatted_rates.append(f'{call}({rate})')
+        
+        return f"""
+            <div class="band-rates">
+                {', '.join(formatted_rates)}
+                {f' +{len(rates)-3} more' if len(rates) > 3 else ''}
+            </div>
+        """
+    
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with updated category display and band activity counts"""
         try:
@@ -631,14 +719,53 @@ class ScoreReporter:
                 </tr>"""
                 table_rows.append(row)
     
-            # Replace band headers in template with active operator counts
+            # Get top rates for each band
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                band_top_rates = {}
+                for band in ['160', '80', '40', '20', '15', '10']:
+                    rates = self.get_band_top_rates(
+                        cursor, 
+                        contest, 
+                        band,
+                        request.args.get('filter_type'),
+                        request.args.get('filter_value')
+                    )
+                    if rates:
+                        band_top_rates[band] = self.format_band_rates(rates)
+    
+            # Add CSS for rate display
+            additional_css = """
+                <style>
+                    /* Existing CSS */
+                    
+                    .band-rates {
+                        font-size: 0.75rem;
+                        color: #666;
+                        margin-top: 2px;
+                    }
+                    
+                    .top-rate {
+                        color: #c71212;
+                        font-weight: bold;
+                    }
+                    
+                    th.band-header {
+                        min-width: 120px;
+                    }
+                </style>
+            """
+    
+            # Replace band headers with rates
             html_content = template
             for band in ['160', '80', '40', '20', '15', '10']:
                 count = active_ops[band]
+                rates_html = band_top_rates.get(band, "")
                 html_content = html_content.replace(
-                    f'>{band}m</th>', 
-                    f'>{count}OPs@ {band}m </th>'
+                    f'>{band}m</th>',
+                    f' class="band-header">{count}OPs@ {band}m{rates_html}</th>'
                 )
+     
     
             # Format final HTML with updated headers
             html_content = html_content.format(
