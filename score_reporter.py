@@ -457,7 +457,7 @@ class ScoreReporter:
 
     
     def get_band_top_rates(self, cursor, contest, band, filter_type=None, filter_value=None, limit=10):
-        """Calculate top 15-minute rates for a specific band"""
+        """Calculate average of top 15-minute rates for a specific band"""
         query = """
             WITH latest_score_times AS (
                 SELECT cs1.callsign, MAX(cs1.timestamp) as max_ts
@@ -489,14 +489,18 @@ class ScoreReporter:
                 WHERE cs.contest = ?
                 AND bb.band = ?
                 {filter_clause}
+            ),
+            hourly_rates AS (
+                SELECT 
+                    CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate
+                FROM rate_calcs
+                WHERE current_qsos > COALESCE(prev_qsos, 0)
+                ORDER BY hourly_rate DESC
+                LIMIT ?
             )
-            SELECT 
-                callsign,
-                CAST(((current_qsos - COALESCE(prev_qsos, 0)) * 4) AS INTEGER) as hourly_rate
-            FROM rate_calcs
-            WHERE current_qsos > COALESCE(prev_qsos, 0)
-            ORDER BY hourly_rate DESC
-            LIMIT ?
+            SELECT ROUND(AVG(hourly_rate)) as avg_rate
+            FROM hourly_rates
+            WHERE hourly_rate > 0
         """
         
         filter_clause = ""
@@ -519,30 +523,14 @@ class ScoreReporter:
         params.append(limit)
         
         cursor.execute(query, params)
-        results = cursor.fetchall()
-        
-        # Format results as list of (callsign, rate) tuples
-        return [(row[0], row[1]) for row in results if row[1] > 0]
+        result = cursor.fetchone()
+        return result[0] if result and result[0] else 0
     
-    def format_band_rates(self, rates):
-        """Format top rates for display in header"""
-        if not rates:
-            return ""
-        
-        top_rate = rates[0][1]
-        formatted_rates = []
-        for call, rate in rates[:3]:  # Show top 3
-            if rate == top_rate:
-                formatted_rates.append(f'<span class="top-rate">{call}({rate})</span>')
-            else:
-                formatted_rates.append(f'{call}({rate})')
-        
-        return f"""
-            <div class="band-rates">
-                {', '.join(formatted_rates)}
-                {f' +{len(rates)-3} more' if len(rates) > 3 else ''}
-            </div>
-        """
+    def format_band_rates(self, rate):
+        """Format average rate for display in header"""
+        if rate > 0:
+            return f'<div class="band-rates">Avg: {rate}/h</div>'
+        return ""
     
     def generate_html_content(self, template, callsign, contest, stations):
         """Generate HTML content with updated category display and band activity counts"""
@@ -719,20 +707,20 @@ class ScoreReporter:
                 </tr>"""
                 table_rows.append(row)
     
-            # Get top rates for each band
+            # Get average top rates for each band
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                band_top_rates = {}
+                band_avg_rates = {}
                 for band in ['160', '80', '40', '20', '15', '10']:
-                    rates = self.get_band_top_rates(
+                    avg_rate = self.get_band_top_rates(
                         cursor, 
                         contest, 
                         band,
                         request.args.get('filter_type'),
                         request.args.get('filter_value')
                     )
-                    if rates:
-                        band_top_rates[band] = self.format_band_rates(rates)
+                    if avg_rate:
+                        band_avg_rates[band] = self.format_band_rates(avg_rate)
     
             # Add CSS for rate display
             additional_css = """
@@ -756,11 +744,11 @@ class ScoreReporter:
                 </style>
             """
     
-            # Replace band headers with rates
+            # Replace band headers with average rates
             html_content = template
             for band in ['160', '80', '40', '20', '15', '10']:
                 count = active_ops[band]
-                rates_html = band_top_rates.get(band, "")
+                rates_html = band_avg_rates.get(band, "")
                 html_content = html_content.replace(
                     f'>{band}m</th>',
                     f' class="band-header">{count}OPs@ {band}m{rates_html}</th>'
