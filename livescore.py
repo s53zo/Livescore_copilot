@@ -17,7 +17,11 @@ from callsign_utils import CallsignLookup
 from maintenance_tasks import DatabaseMaintenance
 
 class ContestServer:
-    def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False):
+    def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False, *args, **kwargs):
+        # Call parent class initialization if inheriting
+        super().__init__(*args, **kwargs) if args or kwargs else None
+        
+        # Basic server configuration
         self.host = host
         self.port = port
         self.db_path = db_path
@@ -27,12 +31,12 @@ class ContestServer:
         # Initialize database handler
         self.db_handler = ContestDatabaseHandler(db_path)
         
-        # Initialize maintenance scheduler
+        # Initialize maintenance scheduler with detailed logging
         self.maintenance = DatabaseMaintenance(
             db_path=db_path,
             log_path='/opt/livescore/logs/maintenance.log'
         )
-
+        
     def start(self):
         """Start the server and maintenance scheduler"""
         try:
@@ -222,10 +226,27 @@ class ContestDatabaseHandler:
                 root = ET.fromstring(xml_doc)
                 callsign = root.findtext('call', '')
                 
-                # Get callsign info early to use prefix for country
-                callsign_info = None
-                if callsign:
-                    callsign_info = self.callsign_lookup.get_callsign_info(callsign)
+                # Get QTH info from XML first
+                qth_elem = root.find('qth')
+                qth_data = {
+                    'cq_zone': qth_elem.findtext('cqzone', ''),
+                    'iaru_zone': qth_elem.findtext('iaruzone', ''),
+                    'arrl_section': qth_elem.findtext('arrlsection', ''),
+                    'state_province': qth_elem.findtext('stprvoth', ''),
+                    'grid6': qth_elem.findtext('grid6', '')
+                } if qth_elem is not None else {}
+                
+                # Get callsign info from cty.plist
+                callsign_info = self.callsign_lookup.get_callsign_info(callsign)
+                if callsign_info:
+                    qth_data['dxcc_country'] = callsign_info['prefix']
+                    qth_data['continent'] = callsign_info['continent']
+                    #if not qth_data.get('cq_zone'):
+                    if qth_data.get('cq_zone') in [None, '', '0']:
+                        qth_data['cq_zone'] = callsign_info['cq_zone']
+                    #if not qth_data.get('iaru_zone'):
+                    if qth_data.get('iaru_zone') in [None, '', '0']:
+                        qth_data['iaru_zone'] = callsign_info['itu_zone']
                 
                 # Extract basic contest data
                 contest_data = {
@@ -234,7 +255,8 @@ class ContestDatabaseHandler:
                     'timestamp': root.findtext('timestamp', ''),
                     'club': root.findtext('club', '').strip(),
                     'section': root.find('.//qth/arrlsection').text if root.find('.//qth/arrlsection') is not None else '',
-                    'score': int(root.findtext('score', 0))
+                    'score': int(root.findtext('score', 0)),
+                    'qth': qth_data
                 }
                 
                 # Extract class attributes
@@ -249,28 +271,7 @@ class ContestDatabaseHandler:
                         'mode': class_elem.get('mode', '')
                     })
                 
-                # Extract QTH data and use prefix instead of country name
-                qth_elem = root.find('qth')
-                if qth_elem is not None:
-                    qth_data = {
-                        'cq_zone': qth_elem.findtext('cqzone', ''),
-                        'iaru_zone': qth_elem.findtext('iaruzone', ''),
-                        'arrl_section': qth_elem.findtext('arrlsection', ''),
-                        'state_province': qth_elem.findtext('stprvoth', ''),
-                        'grid6': qth_elem.findtext('grid6', '')
-                    }
-                    
-                    # Use prefix from callsign_info instead of country name
-                    if callsign_info:
-                        qth_data['dxcc_country'] = callsign_info.get('prefix')  # This will now use the correct Prefix from cty.plist
-                        qth_data['continent'] = callsign_info.get('continent')
-                    else:
-                        qth_data['dxcc_country'] = ''
-                        qth_data['continent'] = ''
-                    
-                    contest_data['qth'] = qth_data
-                
-                # Extract breakdown totals [rest of the code remains the same]
+                # Extract breakdown totals
                 breakdown = root.find('breakdown')
                 if breakdown is not None:
                     # Get total QSOs, points, and multipliers
@@ -298,81 +299,104 @@ class ContestDatabaseHandler:
                 
                 results.append(contest_data)
                 logging.debug(f"Successfully parsed data for {contest_data['callsign']}")
+                
             except ET.ParseError as e:
                 logging.error(f"Error parsing XML: {e}")
             except Exception as e:
                 logging.error(f"Error processing data: {e}")
                 logging.error(traceback.format_exc())
-                    
+                
         return results
 
 
     def store_data(self, contest_data):
-        """Store contest data in the database with normalized country codes (prefixes)."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            for data in contest_data:
-                try:
-                    # Insert main contest data
+    """Store contest data in the database with debugging."""
+    logging.debug(f"Received {len(contest_data)} records to store")
+    
+    with sqlite3.connect(self.db_path) as conn:
+        cursor = conn.cursor()
+        
+        for data in contest_data:
+            try:
+                logging.debug(f"Processing {data['callsign']} in {data['contest']}")
+                logging.debug(f"QTH data from XML: {data.get('qth', {})}")
+                
+                # Insert main contest data
+                cursor.execute('''
+                    INSERT INTO contest_scores (
+                        timestamp, contest, callsign, power, assisted, transmitter,
+                        ops, bands, mode, overlay, club, section, score, qsos,
+                        multipliers, points
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    data['timestamp'], data['contest'], data['callsign'],
+                    data.get('power', ''), data.get('assisted', ''),
+                    data.get('transmitter', ''), data.get('ops', ''),
+                    data.get('bands', ''), data.get('mode', ''),
+                    data.get('overlay', ''), data['club'], data['section'],
+                    data['score'], data.get('qsos', 0), data.get('multipliers', 0),
+                    data.get('points', 0)
+                ))
+                
+                contest_score_id = cursor.lastrowid
+                logging.debug(f"Inserted contest_score record {contest_score_id}")
+                
+                # Get callsign info
+                callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
+                logging.debug(f"Callsign info from lookup: {callsign_info}")
+                
+                # Store QTH info
+                xml_qth = data.get('qth', {})
+                qth_data = {
+                    'dxcc_country': callsign_info.get('prefix', ''),
+                    'continent': callsign_info.get('continent', ''),
+                    'cq_zone': xml_qth.get('cq_zone') or callsign_info.get('cq_zone', ''),
+                    'iaru_zone': xml_qth.get('iaru_zone') or callsign_info.get('itu_zone', ''),
+                    'arrl_section': xml_qth.get('arrl_section', ''),
+                    'state_province': xml_qth.get('state_province', ''),
+                    'grid6': xml_qth.get('grid6', '')
+                }
+                logging.debug(f"Final QTH data: {qth_data}")
+                
+                cursor.execute('''
+                    INSERT INTO qth_info (
+                        contest_score_id, dxcc_country, continent, cq_zone, 
+                        iaru_zone, arrl_section, state_province, grid6
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    contest_score_id,
+                    qth_data['dxcc_country'],
+                    qth_data['continent'],
+                    qth_data['cq_zone'],
+                    qth_data['iaru_zone'],
+                    qth_data['arrl_section'],
+                    qth_data['state_province'],
+                    qth_data['grid6']
+                ))
+
+                # Insert band breakdown data
+                for band_data in data.get('band_breakdown', []):
+                    logging.debug(f"Inserting band breakdown: {band_data}")
                     cursor.execute('''
-                        INSERT INTO contest_scores (
-                            timestamp, contest, callsign, power, assisted, transmitter,
-                            ops, bands, mode, overlay, club, section, score, qsos,
-                            multipliers, points
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        data['timestamp'], data['contest'], data['callsign'],
-                        data.get('power', ''), data.get('assisted', ''),
-                        data.get('transmitter', ''), data.get('ops', ''),
-                        data.get('bands', ''), data.get('mode', ''),
-                        data.get('overlay', ''), data['club'], data['section'],
-                        data['score'], data.get('qsos', 0), data.get('multipliers', 0),
-                        data.get('points', 0)
-                    ))
-                    
-                    contest_score_id = cursor.lastrowid
-                    
-                    # Get callsign information - this will return the prefix
-                    callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
-                    
-                    # Use prefix from callsign info or fallback to empty string
-                    country_prefix = callsign_info['prefix'] if callsign_info else ''
-                    continent = callsign_info['continent'] if callsign_info else ''
-                    
-                    # Store QTH data with prefix as country code
-                    cursor.execute('''
-                        INSERT INTO qth_info (
-                            contest_score_id, dxcc_country, continent, cq_zone, 
-                            iaru_zone, arrl_section, state_province, grid6
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO band_breakdown (
+                            contest_score_id, band, mode, qsos, points, multipliers
+                        ) VALUES (?, ?, ?, ?, ?, ?)
                     ''', (
                         contest_score_id,
-                        country_prefix,  # Use prefix here, not country name
-                        continent,
-                        data.get('qth', {}).get('cq_zone', ''),
-                        data.get('qth', {}).get('iaru_zone', ''),
-                        data.get('qth', {}).get('arrl_section', ''),
-                        data.get('qth', {}).get('state_province', ''),
-                        data.get('qth', {}).get('grid6', '')
+                        band_data['band'],
+                        band_data['mode'],
+                        band_data['qsos'],
+                        band_data['points'],
+                        band_data['multipliers']
                     ))
+                
+                conn.commit()
+                logging.debug(f"Successfully stored data for {data['callsign']}")
                     
-                    # Insert band breakdown data
-                    for band_data in data.get('band_breakdown', []):
-                        cursor.execute('''
-                            INSERT INTO band_breakdown (
-                                contest_score_id, band, mode, qsos, points, multipliers
-                            ) VALUES (?, ?, ?, ?, ?, ?)
-                        ''', (
-                            contest_score_id, band_data['band'], band_data['mode'],
-                            band_data['qsos'], band_data['points'],
-                            band_data['multipliers']
-                        ))
-                            
-                except Exception as e:
-                    logging.error(f"Error storing data for {data['callsign']}: {e}")
-                    logging.debug("Error details:", exc_info=True)
-                    raise
+            except Exception as e:
+                logging.error(f"Error storing data for {data['callsign']}: {e}")
+                logging.error(traceback.format_exc())
+                raise
     
     def cleanup_old_data(self, days=3):
         """Remove data older than specified number of days."""
