@@ -306,6 +306,28 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+    
+                # First check if data is recent enough 
+                cursor.execute("""
+                    SELECT (julianday(datetime('now')) - julianday(?)) * 24 * 60 as age
+                    FROM contest_scores 
+                    WHERE id = ?
+                """, (timestamp, station_id))
+                
+                age_minutes = cursor.fetchone()[0]
+                
+                # If data is older than 75 minutes, return only QSOs and mults with zero rates
+                if age_minutes > 75:
+                    query = """
+                        SELECT bb.band, bb.qsos, bb.multipliers
+                        FROM band_breakdown bb
+                        WHERE bb.contest_score_id = ?
+                        AND bb.qsos > 0
+                        ORDER BY bb.band
+                    """
+                    cursor.execute(query, (station_id,))
+                    return {row[0]: [row[1], row[2], 0, 0] for row in cursor.fetchall()}
+    
                 query = """
                     WITH current_score AS (
                         SELECT cs.id, cs.timestamp, bb.band, bb.qsos, bb.multipliers
@@ -349,40 +371,40 @@ class ScoreReporter:
                 """
     
                 params = (
-                    callsign, contest, timestamp,                  # current_score parameters (3)
-                    callsign, contest, timestamp, timestamp,       # long_window_score parameters (4)
-                    callsign, contest, timestamp, timestamp        # short_window_score parameters (4)
+                    callsign, contest, timestamp,
+                    callsign, contest, timestamp, timestamp,
+                    callsign, contest, timestamp, timestamp
                 )
     
-                # Log query details when debugging
-                #self.logger.debug(f"Running band breakdown query with {len(params)} parameters")
-                #self.logger.debug(f"Parameters: {params}")
-                
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 band_data = {}
-                
+    
                 for row in results:
-                    band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
-                    
+                    band = row[0]
+                    current_qsos = row[1]
+                    multipliers = row[2]
+                    long_window_qsos = row[3]
+                    short_window_qsos = row[4]
+    
                     # Calculate 60-minute rate
                     long_rate = 0
                     if long_window_qsos is not None:
                         qso_diff = current_qsos - long_window_qsos
                         if qso_diff > 0:
-                            long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
-                    
+                            long_rate = int(round((qso_diff * 60) / 60))
+    
                     # Calculate 15-minute rate
                     short_rate = 0
                     if short_window_qsos is not None:
                         qso_diff = current_qsos - short_window_qsos
                         if qso_diff > 0:
-                            short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
-                    
+                            short_rate = int(round((qso_diff * 60) / 15))
+    
                     band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
-                
+    
                 return band_data
-                        
+    
         except Exception as e:
             self.logger.error(f"Error in get_band_breakdown_with_rates: {e}")
             self.logger.error(traceback.format_exc())
