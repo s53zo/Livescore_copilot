@@ -73,41 +73,83 @@ class QsoRateCalculator:
         return long_rate, short_rate
 
     def calculate_band_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
-        """Calculate per-band QSO rates for both time windows, capping the data age."""
-        try:
-            # Base query that first checks if data is recent enough against current UTC
-            query = """
+        """Calculate per-band QSO rates for both time windows"""
+        query = """
             WITH current_bands AS (
-                SELECT bb.band, bb.qsos as current_qsos, bb.multipliers
+                SELECT 
+                    bb.band,
+                    bb.qsos as current_qsos,
+                    bb.multipliers,
+                    cs.timestamp as current_ts
                 FROM contest_scores cs
                 JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
                 AND cs.timestamp = ?
-                AND (julianday(datetime('now')) - julianday(cs.timestamp)) * 24 * 60 <= 75
+            ),
+            long_window_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as long_window_qsos
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= ?
+                AND cs.timestamp >= datetime(?, ? || ' minutes')
+                ORDER BY cs.timestamp DESC
+            ),
+            short_window_bands AS (
+                SELECT 
+                    bb.band,
+                    bb.qsos as short_window_qsos
+                FROM contest_scores cs
+                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+                WHERE cs.callsign = ?
+                AND cs.contest = ?
+                AND cs.timestamp <= ?
+                AND cs.timestamp >= datetime(?, ? || ' minutes')
+                ORDER BY cs.timestamp DESC
             )
             SELECT 
-                band,
-                current_qsos,
-                multipliers,
-                0 as long_window_qsos,
-                0 as short_window_qsos
+                cb.band,
+                cb.current_qsos,
+                cb.multipliers,
+                lwb.long_window_qsos,
+                swb.short_window_qsos
             FROM current_bands cb
-            WHERE current_qsos > 0
-            ORDER BY band
-            """
+            LEFT JOIN long_window_bands lwb ON cb.band = lwb.band
+            LEFT JOIN short_window_bands swb ON cb.band = swb.band
+            WHERE cb.current_qsos > 0
+            ORDER BY cb.band
+        """
+        
+        cursor.execute(query, (
+            callsign, contest, current_ts,
+            callsign, contest, current_ts, current_ts, f"-{long_window}",
+            callsign, contest, current_ts, current_ts, f"-{short_window}"
+        ))
+        
+        results = cursor.fetchall()
+        band_data = {}
+        
+        for row in results:
+            band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
             
-            cursor.execute(query, (callsign, contest, current_ts))
-            results = cursor.fetchall()
-            band_data = {}
+            # Calculate long window rate (60-minute)
+            long_rate = 0
+            if long_window_qsos is not None:
+                qso_diff = current_qsos - long_window_qsos
+                if qso_diff > 0:
+                    long_rate = int(round((qso_diff * 60) / long_window))
             
-            for row in results:
-                band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
-                band_data[band] = [current_qsos, multipliers, 0, 0]
+            # Calculate short window rate (15-minute)
+            short_rate = 0
+            if short_window_qsos is not None:
+                qso_diff = current_qsos - short_window_qsos
+                if qso_diff > 0:
+                    short_rate = int(round((qso_diff * 60) / short_window))
             
-            return band_data
-                
-        except Exception as e:
-            self.logger.error(f"Error calculating band rates: {e}")
-            self.logger.debug(traceback.format_exc())
-            return {}
+            band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
+        
+        return band_data

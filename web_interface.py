@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-import os
-import sys
-import logging
-import traceback
+from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
 import sqlite3
-import atexit
+import os
+import logging
+import sys
+import traceback
+from score_reporter import ScoreReporter
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, make_response
+from maintenance_tasks import DatabaseMaintenance
 
 # Define Config class first
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
 
-# Set up logging before any other initialization
+# Set up detailed logging
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
@@ -24,12 +25,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create Flask app
-app = Flask(__name__)
+# Log startup
+logger.info("Starting web interface application")
 
-# Import other modules after Flask app is created
-from score_reporter import ScoreReporter
-from maintenance_tasks import DatabaseMaintenance
+try:
+    # Create Flask app
+    app = Flask(__name__)
+    logger.info("Flask app created successfully")
+
+    # Initialize maintenance scheduler
+    maintenance = DatabaseMaintenance(
+        db_path=Config.DB_PATH,
+        log_path='/opt/livescore/logs/maintenance.log'
+    )
+    maintenance.start()
+    logger.info("Database maintenance scheduler initialized")
+except Exception as e:
+    logger.error(f"Failed to create Flask app or initialize maintenance: {str(e)}")
+    logger.error(traceback.format_exc())
+    raise
+
+class Config:
+    DB_PATH = '/opt/livescore/contest_data.db'
+    OUTPUT_DIR = '/opt/livescore/reports'
 
 def get_db():
     """Database connection with logging"""
@@ -43,17 +61,7 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-# Initialize maintenance scheduler
-try:
-    maintenance = DatabaseMaintenance(
-        db_path=Config.DB_PATH,
-        log_path='/opt/livescore/logs/maintenance.log'
-    )
-    maintenance.start()
-    logger.info("Database maintenance scheduler initialized")
-except Exception as e:
-    logger.error(f"Failed to initialize maintenance: {str(e)}")
-    logger.error(traceback.format_exc())
+
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -123,6 +131,9 @@ def live_report():
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
 
+        logger.info(f"Generating report for: contest={contest}, callsign={callsign}, "
+                   f"filter_type={filter_type}, filter_value={filter_value}")
+
         # Create reporter instance
         reporter = ScoreReporter(Config.DB_PATH)
 
@@ -156,14 +167,27 @@ def live_report():
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
             
+            logger.info(f"Successfully generated report for {callsign} in {contest}")
             return response
         else:
+            logger.error(f"No station data found for {callsign} in {contest}")
             return render_template('error.html', error="No data found for the selected criteria")
 
     except Exception as e:
         logger.error("Exception in live_report:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
+
+@app.errorhandler(404)
+def not_found_error(error):
+    logger.error(f"404 error: {error}")
+    return render_template('error.html', error="Page not found"), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 error: {error}")
+    logger.error(traceback.format_exc())
+    return render_template('error.html', error="Internal server error"), 500
 
 @app.route('/livescore-pilot/api/contests')
 def get_contests():
@@ -262,21 +286,9 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.errorhandler(404)
-def not_found_error(error):
-    logger.error(f"404 error: {error}")
-    return render_template('error.html', error="Page not found"), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logger.error(f"500 error: {error}")
-    logger.error(traceback.format_exc())
-    return render_template('error.html', error="Internal server error"), 500
-
 if __name__ == '__main__':
     logger.info("Starting development server")
     app.run(host='127.0.0.1', port=8089)
 else:
     # When running under gunicorn
     logger.info("Starting under gunicorn")
-    

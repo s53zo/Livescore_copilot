@@ -163,8 +163,8 @@ class ScoreReporter:
         self.template_path = template_path or 'templates/score_template.html'
         self.rate_calculator = RateCalculator(self.db_path)
         self.setup_logging()
-        self.current_timestamp = None
-        
+        #self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
+
     def setup_logging(self):
         """Setup logging configuration with both file and console handlers"""
         try:
@@ -306,28 +306,6 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-    
-                # First check if data is recent enough 
-                cursor.execute("""
-                    SELECT (julianday(datetime('now')) - julianday(?)) * 24 * 60 as age
-                    FROM contest_scores 
-                    WHERE id = ?
-                """, (timestamp, station_id))
-                
-                age_minutes = cursor.fetchone()[0]
-                
-                # If data is older than 75 minutes, return only QSOs and mults with zero rates
-                if age_minutes > 75:
-                    query = """
-                        SELECT bb.band, bb.qsos, bb.multipliers
-                        FROM band_breakdown bb
-                        WHERE bb.contest_score_id = ?
-                        AND bb.qsos > 0
-                        ORDER BY bb.band
-                    """
-                    cursor.execute(query, (station_id,))
-                    return {row[0]: [row[1], row[2], 0, 0] for row in cursor.fetchall()}
-    
                 query = """
                     WITH current_score AS (
                         SELECT cs.id, cs.timestamp, bb.band, bb.qsos, bb.multipliers
@@ -371,40 +349,40 @@ class ScoreReporter:
                 """
     
                 params = (
-                    callsign, contest, timestamp,
-                    callsign, contest, timestamp, timestamp,
-                    callsign, contest, timestamp, timestamp
+                    callsign, contest, timestamp,                  # current_score parameters (3)
+                    callsign, contest, timestamp, timestamp,       # long_window_score parameters (4)
+                    callsign, contest, timestamp, timestamp        # short_window_score parameters (4)
                 )
     
+                # Log query details when debugging
+                #self.logger.debug(f"Running band breakdown query with {len(params)} parameters")
+                #self.logger.debug(f"Parameters: {params}")
+                
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 band_data = {}
-    
+                
                 for row in results:
-                    band = row[0]
-                    current_qsos = row[1]
-                    multipliers = row[2]
-                    long_window_qsos = row[3]
-                    short_window_qsos = row[4]
-    
+                    band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
+                    
                     # Calculate 60-minute rate
                     long_rate = 0
                     if long_window_qsos is not None:
                         qso_diff = current_qsos - long_window_qsos
                         if qso_diff > 0:
-                            long_rate = int(round((qso_diff * 60) / 60))
-    
+                            long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
+                    
                     # Calculate 15-minute rate
                     short_rate = 0
                     if short_window_qsos is not None:
                         qso_diff = current_qsos - short_window_qsos
                         if qso_diff > 0:
-                            short_rate = int(round((qso_diff * 60) / 15))
-    
+                            short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
+                    
                     band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
-    
+                
                 return band_data
-    
+                        
         except Exception as e:
             self.logger.error(f"Error in get_band_breakdown_with_rates: {e}")
             self.logger.error(traceback.format_exc())
@@ -429,25 +407,20 @@ class ScoreReporter:
         if band_data:
             qsos, mults, long_rate, short_rate = band_data
             if qsos > 0:
-                # Always show 0 rates if timestamp is too old
-                now = datetime.utcnow()
-                time_diff_minutes = (now - datetime.strptime(self.current_timestamp, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-                
-                if time_diff_minutes > 75:
-                    long_rate = 0
-                    short_rate = 0
-    
                 # Get reference rates for this band
                 ref_short_rate = 0
                 if reference_rates and band in reference_rates:
                     _, _, _, ref_short_rate = reference_rates[band]
+                
+                # Determine if 15-minute rate is better
+                better_rate = short_rate > ref_short_rate
                 
                 # Format rates
                 long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
                 short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
                 
                 # Apply CSS class based on 15-minute rate comparison
-                rate_class = "better-rate" if short_rate > ref_short_rate else "worse-rate"
+                rate_class = "better-rate" if better_rate else "worse-rate"
                 
                 return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
         return "-/- (0/0)"
@@ -507,7 +480,6 @@ class ScoreReporter:
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
-            self.current_timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     
             # Calculate active operators per band (new)
             active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
