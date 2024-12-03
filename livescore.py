@@ -348,7 +348,7 @@ class ContestDatabaseHandler:
                     # Store QTH info with correct DXCC handling
                     xml_qth = data.get('qth', {})
                     qth_data = {
-                        'dxcc_country': callsign_info.get('country', ''),  # Use country, not prefix
+                        'dxcc_country': callsign_info.get('prefix', ''),  # Use the Prefix field as DXCC
                         'continent': callsign_info.get('continent', ''),
                         'cq_zone': xml_qth.get('cq_zone') or str(callsign_info.get('cq_zone', '')),
                         'iaru_zone': xml_qth.get('iaru_zone') or str(callsign_info.get('itu_zone', '')),
