@@ -589,20 +589,8 @@ class CustomServer(HTTPServer):
         super().__init__(*args, **kwargs)
         self.db_handler = ContestDatabaseHandler(db_path)
         self.debug = debug  # Store debug setting
-        # Initialize maintenance scheduler
-        self.maintenance = DatabaseMaintenance(
-            db_path=db_path,
-            log_path='/opt/livescore/logs/maintenance.log'
-        )
-        # Start maintenance scheduler
-        self.maintenance.start()
-        logging.info("Maintenance scheduler started")
-        
+                
     def server_close(self):
-        # Stop maintenance scheduler
-        if hasattr(self, 'maintenance'):
-            self.maintenance.stop()
-            logging.info("Maintenance scheduler stopped")
         # Cleanup database handler
         if hasattr(self, 'db_handler'):
             self.db_handler.cleanup()
