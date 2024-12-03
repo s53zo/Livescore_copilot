@@ -213,49 +213,37 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        """Get station details for filtered or unfiltered view"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Start with base query including ROW_NUMBER()
-                query = """
-                SELECT 
-                    cs.id,
-                    cs.callsign,
-                    cs.score,
-                    cs.power,
-                    cs.assisted,
-                    cs.timestamp,
-                    cs.qsos,
-                    cs.multipliers,
-                    CASE 
-                        WHEN cs.callsign = ? THEN 'current'
-                        WHEN cs.score > (
-                            SELECT score 
-                            FROM contest_scores 
-                            WHERE callsign = ? 
-                            AND contest = ?
-                            ORDER BY timestamp DESC 
-                            LIMIT 1
-                        ) THEN 'above'
-                        ELSE 'below'
-                    END as position,
-                    ROW_NUMBER() OVER (ORDER BY cs.score DESC) as rn
-                FROM contest_scores cs
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ?
-                AND cs.id IN (
-                    SELECT MAX(id)
-                    FROM contest_scores
-                    WHERE contest = ?
-                    GROUP BY callsign
-                )
+                # Get base query results
+                base_query = """
+                WITH ranked_stations AS (
+                    SELECT 
+                        cs.id,
+                        cs.callsign,
+                        cs.score,
+                        cs.power,
+                        cs.assisted,
+                        cs.timestamp,
+                        cs.qsos,
+                        cs.multipliers,
+                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.contest = ?
+                    AND cs.id IN (
+                        SELECT MAX(id)
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    )
                 """
                 
-                params = [callsign, callsign, contest, contest, contest]
+                params = [contest, contest]
                 
-                # Add filter if specified
+                # Add QTH filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
                         'DXCC': 'dxcc_country',
@@ -267,35 +255,42 @@ class ScoreReporter:
                     }
                     
                     if field := filter_map.get(filter_type):
-                        query += f" AND qi.{field} = ?"
+                        base_query += f" AND qi.{field} = ?"
                         params.append(filter_value)
-                
-                # Add final ordering
-                query += " ORDER BY cs.score DESC"
-               
-                # Execute and fetch results
+    
+                base_query += ")"
+    
+                # Handle position filter
+                position_filter = request.args.get('position_filter', 'all')
+                if position_filter == 'range':
+                    query = base_query + """
+                    SELECT rs.*, 
+                           CASE WHEN rs.callsign = ? THEN 'current'
+                                WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                THEN 'above' ELSE 'below' END as rel_pos
+                    FROM ranked_stations rs
+                    WHERE EXISTS (
+                        SELECT 1 FROM ranked_stations ref 
+                        WHERE ref.callsign = ? 
+                        AND ABS(rs.position - ref.position) <= 5
+                    )
+                    ORDER BY rs.score DESC
+                    """
+                    params.extend([callsign, callsign, callsign])
+                else:
+                    query = base_query + """
+                    SELECT *, 
+                           CASE WHEN callsign = ? THEN 'current'
+                                WHEN score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                THEN 'above' ELSE 'below' END as rel_pos
+                    FROM ranked_stations
+                    ORDER BY score DESC
+                    """
+                    params.extend([callsign, callsign])
+    
                 cursor.execute(query, params)
-                results = cursor.fetchall()
-                               
-                if not results:
-                    if filter_type and filter_value and filter_type.lower() != 'none':
-                        # Debug query to check actual values in database
-                        field = filter_map.get(filter_type)
-                        cursor.execute(f"""
-                            SELECT DISTINCT qi.{field}, COUNT(*) as count
-                            FROM contest_scores cs
-                            JOIN qth_info qi ON qi.contest_score_id = cs.id
-                            WHERE cs.contest = ?
-                            GROUP BY qi.{field}
-                            ORDER BY count DESC
-                        """, (contest,))
-                        available = cursor.fetchall()
-                        self.logger.debug(f"Available {filter_type} values in database:")
-                        for value, count in available:
-                            self.logger.debug(f"  {value}: {count} stations")
-                    
-                return results
-                
+                return cursor.fetchall()
+    
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
@@ -480,7 +475,24 @@ class ScoreReporter:
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
-    
+
+            # In generate_html_content method
+            position_filter = request.args.get('position_filter', 'all')
+            position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={current_filter_type}&filter_value={current_filter_value}"
+            position_toggle = f"""
+            <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
+               class="filter-link {' active-filter' if position_filter == 'range' else ''}">
+               ±5 Positions
+            </a>
+            """
+            
+            filter_info_div = f"""
+            <div class="filter-info">
+                <span class="filter-label">Filters:</span> 
+                {' | '.join(filter_parts)} | {position_toggle}
+            </div>
+            """
+
             # Calculate active operators per band (new)
             active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
             for station in stations:
