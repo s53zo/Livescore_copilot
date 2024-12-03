@@ -521,7 +521,7 @@ class ScoreReporter:
                         position_toggle = f"""
                         <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
                            class="filter-link {' active-filter' if position_filter == 'range' else ''}">
-                           ±5 Positions
+                           Select ±5 Positions or ALL
                         </a>
                         """
     
