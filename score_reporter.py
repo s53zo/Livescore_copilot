@@ -474,7 +474,7 @@ class ScoreReporter:
         return ""
     
     def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display and band activity counts"""
+        """Generate HTML content with updated category display"""
         try:
             # Get filter information for the header if available
             filter_info_div = ""
@@ -647,7 +647,7 @@ class ScoreReporter:
                     <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-    
+                
             # Get average rates directly from stations data
             band_avg_rates = {}
             with sqlite3.connect(self.db_path) as conn:
@@ -670,10 +670,8 @@ class ScoreReporter:
                         band_avg_rates[band] = self.format_band_rates(avg_rate)
     
             # Add CSS for rate display
-            additional_css = """
+            additional_css += """
                 <style>
-                    /* Existing CSS */
-                    
                     .band-rates {
                         font-size: 0.75rem;
                         color: #666;
@@ -690,7 +688,7 @@ class ScoreReporter:
                     }
                 </style>
             """
-    
+
             # Replace band headers with average rates
             html_content = template
             for band in ['160', '80', '40', '20', '15', '10']:
@@ -700,8 +698,8 @@ class ScoreReporter:
                     f'>{band}m</th>',
                     f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
                 )
-         
-            # Format final HTML with updated headers
+            
+            # Format final HTML
             html_content = html_content.format(
                 contest=contest,
                 callsign=callsign,
