@@ -149,32 +149,6 @@ def perform_maintenance(db_path, dry_run):
         logger.error(f"Database error: {e}")
     except Exception as e:
         logger.error(f"Error: {e}")
-import subprocess
-import os
-import threading
-import time
-
-# Define the script path for maintenance_newdeal.py
-script_path = os.path.join(os.getcwd(), 'maintenance_task.py')
-
-# Function to run maintenance task
-def run_maintenance_task():
-    while True:
-        current_time = time.strftime("%H:%M")
-        if current_time == "00:00":  # Every day at midnight
-            try:
-                subprocess.run(["python3", script_path, "--db", "/opt/livescore/contest_data.db"], check=True)
-                print("Maintenance task executed successfully!")
-            except subprocess.CalledProcessError as e:
-                print(f"Error occurred while running maintenance task: {e}")
-            time.sleep(60)  # Sleep for a minute to avoid running multiple times in the same minute
-        time.sleep(1)
-
-# Start maintenance task thread
-def start_maintenance_thread():
-    maintenance_thread = threading.Thread(target=run_maintenance_task)
-    maintenance_thread.daemon = True
-    maintenance_thread.start()
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Maintenance Script for Contest Database.")
