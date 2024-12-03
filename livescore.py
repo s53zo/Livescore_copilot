@@ -310,7 +310,7 @@ class ContestDatabaseHandler:
 
 
     def store_data(self, contest_data):
-        """Store contest data in the database with debugging."""
+        """Store contest data in the database with correct DXCC handling."""
         logging.debug(f"Received {len(contest_data)} records to store")
         
         with sqlite3.connect(self.db_path) as conn:
@@ -341,17 +341,17 @@ class ContestDatabaseHandler:
                     contest_score_id = cursor.lastrowid
                     logging.debug(f"Inserted contest_score record {contest_score_id}")
                     
-                    # Get callsign info
+                    # Get callsign info with corrected DXCC handling
                     callsign_info = self.callsign_lookup.get_callsign_info(data['callsign'])
                     logging.debug(f"Callsign info from lookup: {callsign_info}")
                     
-                    # Store QTH info
+                    # Store QTH info with correct DXCC handling
                     xml_qth = data.get('qth', {})
                     qth_data = {
-                        'dxcc_country': callsign_info.get('prefix', ''),
+                        'dxcc_country': callsign_info.get('country', ''),  # Use country, not prefix
                         'continent': callsign_info.get('continent', ''),
-                        'cq_zone': xml_qth.get('cq_zone') or callsign_info.get('cq_zone', ''),
-                        'iaru_zone': xml_qth.get('iaru_zone') or callsign_info.get('itu_zone', ''),
+                        'cq_zone': xml_qth.get('cq_zone') or str(callsign_info.get('cq_zone', '')),
+                        'iaru_zone': xml_qth.get('iaru_zone') or str(callsign_info.get('itu_zone', '')),
                         'arrl_section': xml_qth.get('arrl_section', ''),
                         'state_province': xml_qth.get('state_province', ''),
                         'grid6': xml_qth.get('grid6', '')
