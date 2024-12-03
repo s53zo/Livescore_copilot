@@ -31,9 +31,10 @@ class CallsignLookup:
         return None
 
     def _create_result_dict(self, prefix: str, info: dict) -> dict:
+        """Create result dictionary with correct DXCC handling"""
         return {
-            "prefix": prefix,  # Store the actual matching prefix
-            "country": info.get("Country", ""),
+            "prefix": prefix,
+            "country": info.get("Country", ""),  # This will be the full country name
             "continent": info.get("Continent", ""),
             "adif": info.get("ADIF", 0),
             "cq_zone": info.get("CQZone", 0),
