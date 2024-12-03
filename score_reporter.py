@@ -469,40 +469,12 @@ class ScoreReporter:
         return ""
     
     def generate_html_content(self, template, callsign, contest, stations):
-        """Generate HTML content with updated category display"""
         try:
             # Get filter information for the header if available
             filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
-
-            # In generate_html_content method
             position_filter = request.args.get('position_filter', 'all')
-            position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={current_filter_type}&filter_value={current_filter_value}"
-            position_toggle = f"""
-            <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
-               class="filter-link {' active-filter' if position_filter == 'range' else ''}">
-               ±5 Positions
-            </a>
-            """
-            
-            filter_info_div = f"""
-            <div class="filter-info">
-                <span class="filter-label">Filters:</span> 
-                {' | '.join(filter_parts)} | {position_toggle}
-            </div>
-            """
-
-            # Calculate active operators per band (new)
-            active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
-            for station in stations:
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                band_breakdown = self.get_band_breakdown_with_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                for band, data in band_breakdown.items():
-                    if data[3] > 0:  # Check 15-minute rate
-                        active_ops[band] += 1
     
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -532,64 +504,99 @@ class ScoreReporter:
                                 filter_parts.append(
                                     f'<a href="/reports/live.html?contest={contest}'
                                     f'&callsign={callsign}&filter_type={label}'
-                                    f'&filter_value={value}" class="filter-link">'
-                                    f'{label}: {value}</a>'
+                                    f'&filter_value={value}&position_filter={position_filter}" '
+                                    f'class="filter-link">{label}: {value}</a>'
                                 )
-                    
+    
                     if filter_parts:
                         if current_filter_type != 'none':
                             filter_parts.append(
                                 f'<a href="/reports/live.html?contest={contest}'
                                 f'&callsign={callsign}&filter_type=none'
-                                f'&filter_value=none" class="filter-link clear-filter">'
-                                f'Show All</a>'
+                                f'&filter_value=none&position_filter={position_filter}" '
+                                f'class="filter-link clear-filter">Show All</a>'
                             )
-                        
+    
+                        position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={current_filter_type}&filter_value={current_filter_value}"
+                        position_toggle = f"""
+                        <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
+                           class="filter-link {' active-filter' if position_filter == 'range' else ''}">
+                           ±5 Positions
+                        </a>
+                        """
+    
                         filter_info_div = f"""
                         <div class="filter-info">
                             <span class="filter-label">Filters:</span> 
-                            {' | '.join(filter_parts)}
+                            {' | '.join(filter_parts)} | {position_toggle}
                         </div>
                         """
     
-            # Add category-specific CSS
+            # Calculate active operators per band
+            active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
+            for station in stations:
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                for band, data in band_breakdown.items():
+                    if data[3] > 0:  # Check 15-minute rate
+                        active_ops[band] += 1
+    
+            # Add CSS for rate display
             additional_css = """
-                <style>
-                    .category-group {
-                        display: inline-flex;
-                        gap: 4px;
-                        font-size: 0.75rem;
-                        line-height: 1;
-                        align-items: center;
-                    }
-                    
-                    .category-tag {
-                        display: inline-block;
-                        padding: 3px 6px;
-                        border-radius: 3px;
-                        white-space: nowrap;
-                        font-family: monospace;
-                    }
-                    
-                    /* Category colors */
-                    .cat-power-high { background: #ffebee; color: #c62828; }
-                    .cat-power-low { background: #e8f5e9; color: #2e7d32; }
-                    .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
-                    
-                    .cat-soa { background: #e3f2fd; color: #1565c0; }
-                    .cat-so { background: #f3e5f5; color: #6a1b9a; }
-                    .cat-ms { background: #fff8e1; color: #ff8f00; }
-                    .cat-mm { background: #f1f8e9; color: #558b2f; }
-                </style>
-            """
+                    <style>
+                        .category-group {
+                            display: inline-flex;
+                            gap: 4px;
+                            font-size: 0.75rem;
+                            line-height: 1;
+                            align-items: center;
+                        }
+                        
+                        .category-tag {
+                            display: inline-block;
+                            padding: 3px 6px;
+                            border-radius: 3px;
+                            white-space: nowrap;
+                            font-family: monospace;
+                        }
+                        
+                        /* Category colors */
+                        .cat-power-high { background: #ffebee; color: #c62828; }
+                        .cat-power-low { background: #e8f5e9; color: #2e7d32; }
+                        .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
+                        
+                        .cat-soa { background: #e3f2fd; color: #1565c0; }
+                        .cat-so { background: #f3e5f5; color: #6a1b9a; }
+                        .cat-ms { background: #fff8e1; color: #ff8f00; }
+                        .cat-mm { background: #f1f8e9; color: #558b2f; }
+                    </style>
+                """
+    
+            additional_css += """
+                    <style>
+                        .band-rates {
+                            font-size: 0.75rem;
+                            color: #666;
+                            margin-top: 2px;
+                        }
+                        
+                        .top-rate {
+                            color: #c71212;
+                            font-weight: bold;
+                        }
+                        
+                        th.band-header {
+                            min-width: 120px;
+                        }
+                    </style>
+                """
     
             table_rows = []
             for i, station in enumerate(stations, 1):
                 station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-
-                callsign_cell = f"""<td><a href="/reports/live.html?contest={contest.strip()}&callsign={callsign_val.strip()}&filter_type={current_filter_type.strip()}&filter_value={current_filter_value.strip()}" style="color: inherit; text-decoration: none;">{callsign_val}</a></td>"""
                 
-                # Get additional category information from database
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
                     cursor.execute("""
@@ -601,30 +608,25 @@ class ScoreReporter:
                     ops = result[0] if result else None
                     transmitter = result[1] if result else None
     
-                # Calculate operator category
                 op_category = self.get_operator_category(ops or 'SINGLE-OP', 
                                                        transmitter or 'ONE', 
                                                        assisted or 'NON-ASSISTED')
                 
-                # Format power class tag
                 power_class = power.upper() if power else 'Unknown'
                 display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
                 power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
                 
-                # Create category display
                 category_html = f"""
                     <div class="category-group">
                         <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
                         {power_tag}
                     </div>
                 """
-                
-                # Get band breakdown with rates
+    
                 band_breakdown = self.get_band_breakdown_with_rates(
                     station_id, callsign_val, contest, timestamp
                 )
                 
-                # Get reference station for rate comparison
                 reference_station = next((s for s in stations if s[1] == callsign), None)
                 if reference_station:
                     reference_breakdown = self.get_band_breakdown_with_rates(
@@ -633,18 +635,16 @@ class ScoreReporter:
                 else:
                     reference_breakdown = {}
     
-                # Calculate total rates
                 total_long_rate, total_short_rate = self.get_total_rates(
                     station_id, callsign_val, contest, timestamp
                 )
                 
-                # Format timestamp
                 ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
                 
-                # Add highlight for current station
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
+    
+                callsign_cell = f"""<td><a href="/reports/live.html?contest={contest.strip()}&callsign={callsign_val.strip()}&filter_type={current_filter_type.strip()}&filter_value={current_filter_value.strip()}&position_filter={position_filter}" style="color: inherit; text-decoration: none;">{callsign_val}</a></td>"""
                 
-                # Generate table row
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
@@ -661,8 +661,8 @@ class ScoreReporter:
                     <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-                
-            # Get average rates directly from stations data
+    
+            # Get average rates from stations data
             band_avg_rates = {}
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -683,27 +683,6 @@ class ScoreReporter:
                         avg_rate = round(sum(top_rates) / len(top_rates))
                         band_avg_rates[band] = self.format_band_rates(avg_rate)
     
-            # Add CSS for rate display
-            additional_css += """
-                <style>
-                    .band-rates {
-                        font-size: 0.75rem;
-                        color: #666;
-                        margin-top: 2px;
-                    }
-                    
-                    .top-rate {
-                        color: #c71212;
-                        font-weight: bold;
-                    }
-                    
-                    th.band-header {
-                        min-width: 120px;
-                    }
-                </style>
-            """
-
-            # Replace band headers with average rates
             html_content = template
             for band in ['160', '80', '40', '20', '15', '10']:
                 count = active_ops[band]
@@ -712,8 +691,7 @@ class ScoreReporter:
                     f'>{band}m</th>',
                     f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
                 )
-            
-            # Format final HTML
+    
             html_content = html_content.format(
                 contest=contest,
                 callsign=callsign,
