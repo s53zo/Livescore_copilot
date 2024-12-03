@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+import plistlib
+import logging
+from typing import Dict, Optional
+
 class CallsignLookup:
     def __init__(self, plist_path: str = "cty.plist"):
         self.cty_list = self._load_plist(plist_path)
