@@ -575,11 +575,7 @@ class ScoreReporter:
             for i, station in enumerate(stations, 1):
                 station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
 
-                callsign_cell = f"""<td><a href="/reports/live.html?contest={contest}
-                    &callsign={callsign_val}
-                    &filter_type={current_filter_type}
-                    &filter_value={current_filter_value}" 
-                    style="color: inherit; text-decoration: none;">{callsign_val}</a></td>"""
+                callsign_cell = f"""<td><a href="/reports/live.html?contest={contest.strip()}&callsign={callsign_val.strip()}&filter_type={current_filter_type.strip()}&filter_value={current_filter_value.strip()}" style="color: inherit; text-decoration: none;">{callsign_val}</a></td>"""
                 
                 # Get additional category information from database
                 with sqlite3.connect(self.db_path) as conn:
