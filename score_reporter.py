@@ -474,9 +474,9 @@ class ScoreReporter:
         try:
             # Get filter information for the header if available
             #filter_info_div = ""
-            current_filter_type = request.args.get('filter_type', 'none')
-            current_filter_value = request.args.get('filter_value', 'none')
-            position_filter = request.args.get('position_filter', 'all')
+            #current_filter_type = request.args.get('filter_type', 'none')
+            #current_filter_value = request.args.get('filter_value', 'none')
+            #position_filter = request.args.get('position_filter', 'all')
     
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
