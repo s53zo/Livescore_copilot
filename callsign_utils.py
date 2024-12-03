@@ -13,28 +13,29 @@ class CallsignLookup:
         
         base_call = callsign.split('/')[0]
         
+        # First check for exact callsign match
         if base_call in self.cty_list:
             info = self.cty_list[base_call]
-            result = self._create_result_dict(base_call, info)
+            result = self._create_result_dict(info)
             self._cache[callsign] = result
             return result
             
+        # Then check for prefix match
         for i in range(len(base_call), 0, -1):
             prefix = base_call[:i]
             if prefix in self.cty_list:
                 info = self.cty_list[prefix]
-                result = self._create_result_dict(prefix, info)
+                result = self._create_result_dict(info)
                 self._cache[callsign] = result
                 return result
         
         self._cache[callsign] = None
         return None
 
-    # Modified section of callsign_utils.py
-    def _create_result_dict(self, prefix: str, info: dict) -> dict:
-        """Create result dictionary with DXCC as main prefix"""
+    def _create_result_dict(self, info: dict) -> dict:
+        """Create result dictionary using the DXCC prefix from CTY.plist"""
         return {
-            "prefix": info.get("Prefix", ""),  # Use the Prefix field as DXCC identifier
+            "prefix": info.get("Prefix", ""),  # This is the DXCC entity prefix from CTY.plist
             "country": info.get("Country", ""),
             "continent": info.get("Continent", ""),
             "adif": info.get("ADIF", 0),
@@ -43,7 +44,7 @@ class CallsignLookup:
             "latitude": info.get("Latitude", 0.0),
             "longitude": info.get("Longitude", 0.0)
         }
-    
+
     def clear_cache(self) -> None:
         self._cache.clear()
 
@@ -57,7 +58,7 @@ class CallsignLookup:
         except Exception as e:
             logging.error(f"Error loading {plist_path}: {e}")
             raise
-
+    
     def get_country(self, callsign: str) -> Optional[str]:
         info = self.get_callsign_info(callsign)
         return info["country"] if info else None
