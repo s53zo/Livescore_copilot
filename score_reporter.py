@@ -473,7 +473,7 @@ class ScoreReporter:
     def generate_html_content(self, template, callsign, contest, stations):
         try:
             # Get filter information for the header if available
-            filter_info_div = ""
+            #filter_info_div = ""
             current_filter_type = request.args.get('filter_type', 'none')
             current_filter_value = request.args.get('filter_value', 'none')
             position_filter = request.args.get('position_filter', 'all')
@@ -518,11 +518,8 @@ class ScoreReporter:
                                 f'&filter_value=none&position_filter={position_filter}" '
                                 f'class="filter-link clear-filter">Show All</a>'
                             )
-    
-                        position_filter = request.args.get('position_filter', 'all')
-                        position_range = request.args.get('position_range', '5')
+                    
                         position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={current_filter_type}&filter_value={current_filter_value}"
-                        
                         position_toggle = f"""
                         <span class="position-filter-group">
                             <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}&position_range={position_range}" 
@@ -536,6 +533,13 @@ class ScoreReporter:
                                </select> Positions
                             </a>
                         </span>
+                        """
+                    
+                        filter_info_div = f"""
+                        <div class="filter-info">
+                            <span class="filter-label">Filters:</span> 
+                            {' | '.join(filter_parts)} | {position_toggle}
+                        </div>
                         """
     
             # Calculate active operators per band
