@@ -14,7 +14,30 @@ import threading
 import time
 import queue
 from callsign_utils import CallsignLookup
-from maintenance_tasks import DatabaseMaintenance
+from maintenance_task import start_maintenance_thread
+
+# Define the script path
+script_path = os.path.join(os.getcwd(), 'maintenance_newdeal.py')
+
+# Function to run maintenance task
+def run_maintenance_task():
+    while True:
+        current_time = time.strftime("%H:%M")
+        if current_time == "00:00":  # Every day at midnight
+            try:
+                subprocess.run(["python3", script_path], check=True)
+                print("Maintenance task executed successfully!")
+            except subprocess.CalledProcessError as e:
+                print(f"Error occurred while running maintenance task: {e}")
+            time.sleep(60)  # Sleep for a minute to avoid running multiple times in the same minute
+        time.sleep(1)
+
+# Start maintenance task thread
+def start_maintenance_thread():
+    maintenance_thread = threading.Thread(target=run_maintenance_task)
+    maintenance_thread.daemon = True
+    maintenance_thread.start()
+
 
 class ContestServer:
     def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False, *args, **kwargs):
@@ -31,18 +54,13 @@ class ContestServer:
         # Initialize database handler
         self.db_handler = ContestDatabaseHandler(db_path)
         
-        # Initialize maintenance scheduler with detailed logging
-        self.maintenance = DatabaseMaintenance(
-            db_path=db_path,
-            log_path='/opt/livescore/logs/maintenance.log'
-        )
-        
+                
     def start(self):
-        """Start the server and maintenance scheduler"""
+        """Start the server"""
         try:
-            # Start maintenance scheduler
-            self.maintenance.start()
-            self.logger.info("Maintenance scheduler started")
+            # Start the new maintenance thread
+            start_maintenance_thread()
+            self.logger.info("Maintenance thread started")
             
             # Start HTTP server
             server_address = (self.host, self.port)
@@ -64,11 +82,7 @@ class ContestServer:
     def cleanup(self):
         """Cleanup resources"""
         try:
-            # Stop maintenance scheduler
-            if hasattr(self, 'maintenance'):
-                self.maintenance.stop()
-                self.logger.info("Maintenance scheduler stopped")
-            
+                        
             # Cleanup database handler
             if hasattr(self, 'db_handler'):
                 self.db_handler.cleanup()
@@ -637,6 +651,9 @@ def run_server(host='127.0.0.1', port=8088, debug=False, db_path='contest_data.d
         httpd.server_close()
 
 if __name__ == "__main__":
+    # Start the maintenance thread
+    start_maintenance_thread()
+    
     # Parse command line arguments
     args = parse_arguments()
     
