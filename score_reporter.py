@@ -262,8 +262,6 @@ class ScoreReporter:
     
                 # Handle position filter
                 position_filter = request.args.get('position_filter', 'all')
-                position_range = int(request.args.get('position_range', '5'))
-                
                 if position_filter == 'range':
                     query = base_query + """
                     SELECT rs.*, 
@@ -274,11 +272,11 @@ class ScoreReporter:
                     WHERE EXISTS (
                         SELECT 1 FROM ranked_stations ref 
                         WHERE ref.callsign = ? 
-                        AND ABS(rs.position - ref.position) <= ?
+                        AND ABS(rs.position - ref.position) <= 5
                     )
                     ORDER BY rs.score DESC
                     """
-                    params.extend([callsign, callsign, callsign, position_range])
+                    params.extend([callsign, callsign, callsign])
                 else:
                     query = base_query + """
                     SELECT *, 
@@ -472,7 +470,12 @@ class ScoreReporter:
     
     def generate_html_content(self, template, callsign, contest, stations):
         try:
-                
+            # Get filter information for the header if available
+            filter_info_div = ""
+            current_filter_type = request.args.get('filter_type', 'none')
+            current_filter_value = request.args.get('filter_value', 'none')
+            position_filter = request.args.get('position_filter', 'all')
+    
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -513,23 +516,15 @@ class ScoreReporter:
                                 f'&filter_value=none&position_filter={position_filter}" '
                                 f'class="filter-link clear-filter">Show All</a>'
                             )
-                    
+    
                         position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={current_filter_type}&filter_value={current_filter_value}"
                         position_toggle = f"""
-                        <span class="position-filter-group">
-                            <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}&position_range={position_range}" 
-                               class="filter-link {' active-filter' if position_filter == 'range' else ''}">
-                               ±<select id="position-range" onchange="updatePositionRange(this.value)" 
-                                        class="range-select {' active-select' if position_filter == 'range' else ''}">
-                                   <option value="3" {' selected' if position_range == '3' else ''}>3</option>
-                                   <option value="5" {' selected' if position_range == '5' else ''}>5</option>
-                                   <option value="10" {' selected' if position_range == '10' else ''}>10</option>
-                                   <option value="15" {' selected' if position_range == '15' else ''}>15</option>
-                               </select> Positions
-                            </a>
-                        </span>
+                        <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
+                           class="filter-link {' active-filter' if position_filter == 'range' else ''}">
+                           Only ±5 Positions
+                        </a>
                         """
-                    
+    
                         filter_info_div = f"""
                         <div class="filter-info">
                             <span class="filter-label">Filters:</span> 
@@ -551,34 +546,6 @@ class ScoreReporter:
             # Add CSS for rate display
             additional_css = """
                     <style>
-                        .position-filter-group {
-                            display: inline-flex;
-                            align-items: center;
-                            gap: 4px;
-                        }
-                        
-                        .range-select {
-                            border: none;
-                            background: transparent;
-                            color: inherit;
-                            font-size: inherit;
-                            font-family: inherit;
-                            padding: 0 2px;
-                            width: 40px;
-                            cursor: pointer;
-                            -webkit-appearance: none;
-                            -moz-appearance: none;
-                            appearance: none;
-                            text-align: center;
-                        }
-                        
-                        .range-select.active-select {
-                            color: white;
-                        }
-                        
-                        .range-select:focus {
-                            outline: none;
-                        }
                         .category-group {
                             display: inline-flex;
                             gap: 4px;
@@ -605,13 +572,6 @@ class ScoreReporter:
                         .cat-ms { background: #fff8e1; color: #ff8f00; }
                         .cat-mm { background: #f1f8e9; color: #558b2f; }
                     </style>
-                    <script>
-                        function updatePositionRange(value) {
-                            const params = new URLSearchParams(window.location.search);
-                            params.set('position_range', value);
-                            window.location.href = '/reports/live.html?' + params.toString();
-                        }
-                    </script>
                 """
     
             additional_css += """
