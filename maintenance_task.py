@@ -51,6 +51,109 @@ def check_qso_consistency(cursor):
 
     return true_inconsistencies, total_without_breakdown
 
+def analyze_orphaned_records(cursor):
+    """
+    Analyze orphaned records to provide detailed information about their origin
+    """
+    # Analyze orphaned band breakdown records
+    cursor.execute("""
+        SELECT bb.contest_score_id, 
+               COUNT(*) as record_count,
+               SUM(bb.qsos) as total_qsos,
+               GROUP_CONCAT(DISTINCT bb.band) as bands,
+               MIN(bb.qsos) as min_qsos,
+               MAX(bb.qsos) as max_qsos
+        FROM band_breakdown bb 
+        WHERE NOT EXISTS (
+            SELECT 1 FROM contest_scores cs 
+            WHERE cs.id = bb.contest_score_id
+        )
+        GROUP BY bb.contest_score_id
+        ORDER BY total_qsos DESC
+        LIMIT 10
+    """)
+    bb_analysis = cursor.fetchall()
+
+    # Analyze orphaned QTH info records
+    cursor.execute("""
+        SELECT qi.contest_score_id,
+               qi.dxcc_country,
+               qi.continent,
+               qi.cq_zone,
+               qi.iaru_zone
+        FROM qth_info qi 
+        WHERE NOT EXISTS (
+            SELECT 1 FROM contest_scores cs 
+            WHERE cs.id = qi.contest_score_id
+        )
+        LIMIT 10
+    """)
+    qth_analysis = cursor.fetchall()
+
+    return bb_analysis, qth_analysis
+
+def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
+    """
+    Handle orphaned records with safeguards
+    """
+    # Get counts
+    cursor.execute("SELECT COUNT(*) FROM band_breakdown bb WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = bb.contest_score_id)")
+    orphaned_bb = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM qth_info qi WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = qi.contest_score_id)")
+    orphaned_qth = cursor.fetchone()[0]
+
+    if orphaned_bb > 0 or orphaned_qth > 0:
+        logger.warning(f"Found orphaned records:")
+        logger.warning(f"  Band breakdown: {orphaned_bb:,}")
+        logger.warning(f"  QTH info: {orphaned_qth:,}")
+
+        # Get sample analysis
+        bb_analysis, qth_analysis = analyze_orphaned_records(cursor)
+
+        logger.info("\nAnalysis of orphaned band breakdown records (top 10):")
+        for record in bb_analysis:
+            logger.info(f"Contest Score ID {record[0]}: {record[1]} records, {record[2]} QSOs")
+            logger.info(f"  Bands: {record[3]}")
+            logger.info(f"  QSO range: {record[4]} - {record[5]}")
+
+        logger.info("\nAnalysis of orphaned QTH info records (top 10):")
+        for record in qth_analysis:
+            logger.info(f"Contest Score ID {record[0]}: {record[1]}, {record[2]}, CQ:{record[3]}, IARU:{record[4]}")
+
+        # Safety check - if too many orphaned records, require manual confirmation
+        if orphaned_bb > threshold or orphaned_qth > threshold:
+            logger.warning("\nWARNING: Large number of orphaned records detected!")
+            logger.warning("This might indicate a database issue that needs investigation.")
+            logger.warning("Please run with --analyze-only first to review the analysis.")
+            return False
+
+        if not dry_run:
+            logger.info("\nRemoving orphaned records...")
+            # Begin transaction
+            cursor.execute("BEGIN TRANSACTION")
+            try:
+                # Delete orphaned records
+                cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                bb_deleted = cursor.rowcount
+                
+                cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                qth_deleted = cursor.rowcount
+                
+                cursor.execute("COMMIT")
+                logger.info(f"Successfully removed {bb_deleted:,} band breakdown and {qth_deleted:,} QTH info orphaned records")
+                return True
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                logger.error(f"Error during orphaned record cleanup: {e}")
+                return False
+        else:
+            logger.info("\nDry run - no records were deleted")
+            return True
+    else:
+        logger.info("No orphaned records found")
+        return True
+
 def perform_maintenance(db_path, dry_run):
     """
     Performs enhanced maintenance tasks including data integrity checks,
@@ -63,6 +166,11 @@ def perform_maintenance(db_path, dry_run):
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
 
+            # 0. Handle orphaned records with new function
+            logger.info("Checking for orphaned records...")
+            if not handle_orphaned_records(cursor, dry_run):
+                logger.warning("Skipping orphaned record cleanup due to safety threshold")
+            
             # 1. Data Integrity Checks
             logger.info("Performing data integrity checks...")
             
@@ -215,6 +323,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Enhanced Maintenance Script for Contest Database.")
     parser.add_argument("--db", required=True, help="Path to the SQLite database file.")
     parser.add_argument("--dry-run", action="store_true", help="Preview the changes without making any deletions or modifications.")
+    parser.add_argument("--analyze-only", action="store_true", help="Only analyze orphaned records without deletion.")
+    parser.add_argument("--threshold", type=int, default=1000, help="Safety threshold for automatic orphaned record deletion.")
     args = parser.parse_args()
 
     logger.info(f"Starting maintenance script on database: {args.db}")
