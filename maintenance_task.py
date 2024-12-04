@@ -232,11 +232,11 @@ def perform_maintenance(db_path, dry_run):
 
             # 4. Database Optimization
             if not dry_run:
-                logger.info("Performing database optimization...")
-                cursor.execute("ANALYZE")
-                cursor.execute("REINDEX")
-                cursor.execute("VACUUM")
-                logger.info("Database optimization completed")
+                logger.info("Starting database optimization...")
+                optimize_database(db_path)
+            else:
+                logger.info("Dry-run: Skipping database optimization")
+
 
             # 5. File System Maintenance
             backup_dir = "./backups"
@@ -295,6 +295,38 @@ def cleanup_old_files(directory, days, dry_run, file_type):
                     os.remove(file_path)
                     logger.info(f"Deleted old {file_type} file: {file_path}")
 
+def optimize_database(db_path):
+    """
+    Perform database optimization operations separately from other maintenance
+    """
+    try:
+        # VACUUM must be run outside of a transaction and needs a separate connection
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            logger.info("Running database optimizations...")
+            
+            # First run ANALYZE and REINDEX which can be in a transaction
+            cursor.execute("BEGIN")
+            try:
+                cursor.execute("ANALYZE")
+                cursor.execute("REINDEX")
+                cursor.execute("COMMIT")
+                logger.info("ANALYZE and REINDEX completed")
+            except:
+                cursor.execute("ROLLBACK")
+                raise
+
+        # Now run VACUUM with a fresh connection
+        with sqlite3.connect(db_path) as vacuum_conn:
+            logger.info("Running VACUUM...")
+            vacuum_conn.execute("VACUUM")
+            logger.info("VACUUM completed")
+            
+        return True
+    except sqlite3.Error as e:
+        logger.error(f"Database optimization error: {e}")
+        return False
+        
 def archive_old_records(cursor, archive_dir, conn):
     """Helper function to archive old records"""
     logger.info("Archiving old contest records...")
