@@ -9,156 +9,186 @@ import shutil
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def perform_maintenance(db_path, dry_run):
+      
+def perform_enhanced_maintenance(db_path, dry_run):
     """
-    Performs maintenance tasks such as vacuuming, analyzing, and reindexing the database.
-    Deletes contests with less than 5 unique callsigns reporting.
-    Additional maintenance tasks include cleaning up old backups, deleting old reports, and archiving old records.
-
-    :param db_path: Path to the SQLite database.
-    :param dry_run: If True, no changes are made to the database; just prints the deletions.
+    Enhanced maintenance tasks for contest database including data integrity checks,
+    performance optimizations, and statistics gathering.
     """
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
+            logger.info("Starting enhanced maintenance tasks")
 
-            # Fetch contests with less than 5 unique callsigns
-            logger.info("Fetching contests with fewer than 5 unique callsigns.")
+            # 1. Data Integrity Checks
+            logger.info("Performing data integrity checks...")
+            
+            # Check for orphaned band_breakdown records
             cursor.execute("""
-                SELECT contest, COUNT(DISTINCT callsign) as num_callsigns
+                SELECT COUNT(*) FROM band_breakdown bb 
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM contest_scores cs 
+                    WHERE cs.id = bb.contest_score_id
+                )
+            """)
+            orphaned_bb = cursor.fetchone()[0]
+            
+            # Check for orphaned qth_info records
+            cursor.execute("""
+                SELECT COUNT(*) FROM qth_info qi 
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM contest_scores cs 
+                    WHERE cs.id = qi.contest_score_id
+                )
+            """)
+            orphaned_qth = cursor.fetchone()[0]
+
+            if not dry_run and (orphaned_bb > 0 or orphaned_qth > 0):
+                logger.info(f"Removing {orphaned_bb} orphaned band_breakdown records")
+                logger.info(f"Removing {orphaned_qth} orphaned qth_info records")
+                cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+
+            # 2. Check for data consistency
+            cursor.execute("""
+                SELECT cs.id, cs.callsign, cs.contest, cs.qsos,
+                       (SELECT SUM(bb.qsos) FROM band_breakdown bb WHERE bb.contest_score_id = cs.id) as band_qsos
+                FROM contest_scores cs
+                WHERE cs.qsos != (
+                    SELECT COALESCE(SUM(bb.qsos), 0) 
+                    FROM band_breakdown bb 
+                    WHERE bb.contest_score_id = cs.id
+                )
+            """)
+            inconsistent_qsos = cursor.fetchall()
+            if inconsistent_qsos:
+                logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches")
+                for record in inconsistent_qsos:
+                    logger.warning(f"Contest Score ID {record[0]} ({record[1]} in {record[2]}): "
+                                 f"Total QSOs={record[3]}, Sum of band QSOs={record[4]}")
+
+            # 3. Performance Optimization
+            logger.info("Analyzing table statistics...")
+            
+            # Get table statistics before optimization
+            cursor.execute("SELECT COUNT(*) FROM contest_scores")
+            total_scores = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(DISTINCT contest) FROM contest_scores")
+            total_contests = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(DISTINCT callsign) FROM contest_scores")
+            total_stations = cursor.fetchone()[0]
+
+            if not dry_run:
+                # Rebuild indexes if needed
+                logger.info("Rebuilding indexes...")
+                cursor.execute("REINDEX contest_scores")
+                cursor.execute("REINDEX band_breakdown")
+                cursor.execute("REINDEX qth_info")
+
+                # Update table statistics
+                logger.info("Updating table statistics...")
+                cursor.execute("ANALYZE contest_scores")
+                cursor.execute("ANALYZE band_breakdown")
+                cursor.execute("ANALYZE qth_info")
+
+                # Optimize database file
+                logger.info("Optimizing database file...")
+                cursor.execute("VACUUM")
+
+            # 4. Storage Management
+            cursor.execute("""
+                SELECT contest, 
+                       COUNT(*) as record_count,
+                       MIN(timestamp) as oldest_record,
+                       MAX(timestamp) as newest_record,
+                       SUM(qsos) as total_qsos
                 FROM contest_scores
                 GROUP BY contest
-                HAVING num_callsigns < 5
+                ORDER BY newest_record DESC
             """)
-            contests_to_delete = cursor.fetchall()
+            contest_stats = cursor.fetchall()
 
-            if contests_to_delete:
-                logger.info(f"Found {len(contests_to_delete)} contests to delete.")
-                for contest, num_callsigns in contests_to_delete:
-                    logger.info(f"Contest: {contest}, Callsigns: {num_callsigns}")
-                    if not dry_run:
-                        # Delete related entries from contest_scores
-                        cursor.execute("DELETE FROM contest_scores WHERE contest = ?", (contest,))
-                        # Delete related entries from band_breakdown
-                        cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id IN (SELECT id FROM contest_scores WHERE contest = ?)", (contest,))
-                        # Delete related entries from qth_info
-                        cursor.execute("DELETE FROM qth_info WHERE contest_score_id IN (SELECT id FROM contest_scores WHERE contest = ?)", (contest,))
-                        logger.info(f"Deleted all entries related to contest '{contest}'")
-                if not dry_run:
-                    conn.commit()
-                    logger.info("Database changes committed.")
-            else:
-                logger.info("No contests found with fewer than 5 unique callsigns.")
+            logger.info("\nDatabase Statistics:")
+            logger.info(f"Total Contests: {total_contests}")
+            logger.info(f"Total Stations: {total_stations}")
+            logger.info(f"Total Score Records: {total_scores}")
+            logger.info("\nPer-Contest Statistics:")
+            
+            for stat in contest_stats:
+                logger.info(f"\nContest: {stat[0]}")
+                logger.info(f"Records: {stat[1]}")
+                logger.info(f"Date Range: {stat[2]} to {stat[3]}")
+                logger.info(f"Total QSOs: {stat[4]}")
 
-            # Delete contest data older than a specific threshold (e.g., 7 days)
-            logger.info("Deleting contest data older than 7 days.")
-            threshold_date = datetime.now() - timedelta(days=7)
-            cursor.execute("SELECT id, contest FROM contest_scores WHERE timestamp < ?", (threshold_date,))
-            old_contests = cursor.fetchall()
-
-            if old_contests:
-                for record_id, contest in old_contests:
-                    logger.info(f"Deleting old contest record ID: {record_id}, Contest: {contest}")
-                    if not dry_run:
-                        # Delete related entries from contest_scores
-                        cursor.execute("DELETE FROM contest_scores WHERE id = ?", (record_id,))
-                        # Delete related entries from band_breakdown
-                        cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id = ?", (record_id,))
-                        # Delete related entries from qth_info
-                        cursor.execute("DELETE FROM qth_info WHERE contest_score_id = ?", (record_id,))
-                        logger.info(f"Deleted all entries related to contest record ID '{record_id}'")
-                if not dry_run:
-                    conn.commit()
-                    logger.info("Old contest data deletion committed.")
-            else:
-                logger.info("No old contest data found to delete.")
-
-            # Perform database maintenance
-            if not dry_run:
-                logger.info("Performing database maintenance (VACUUM, ANALYZE, REINDEX).")
-                cursor.execute("VACUUM")
-                cursor.execute("ANALYZE")
-                cursor.execute("REINDEX")
-                logger.info("Database maintenance completed.")
-            else:
-                logger.info("Dry-run mode: Skipping actual database maintenance.")
-
-            # Additional maintenance tasks
-            # Cleanup old backups
-            backup_dir = "./backups"
-            if os.path.exists(backup_dir):
-                logger.info("Cleaning up old backups.")
-                for filename in os.listdir(backup_dir):
-                    file_path = os.path.join(backup_dir, filename)
-                    if os.path.isfile(file_path):
-                        file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(file_path))
-                        if file_age > timedelta(days=30):
-                            if dry_run:
-                                logger.info(f"Dry-run: Would delete old backup file: {file_path}")
-                            else:
-                                os.remove(file_path)
-                                logger.info(f"Deleted old backup file: {file_path}")
-
-            # Delete old reports
-            reports_dir = "./reports"
-            if os.path.exists(reports_dir):
-                logger.info("Deleting old reports.")
-                for filename in os.listdir(reports_dir):
-                    file_path = os.path.join(reports_dir, filename)
-                    if os.path.isfile(file_path):
-                        file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(file_path))
-                        if file_age > timedelta(days=3):
-                            if dry_run:
-                                logger.info(f"Dry-run: Would delete old report file: {file_path}")
-                            else:
-                                os.remove(file_path)
-                                logger.info(f"Deleted old report file: {file_path}")
-
-            # Archive old records
-            archive_dir = "./archive"
-            if not os.path.exists(archive_dir):
-                os.makedirs(archive_dir)
-
-            logger.info("Archiving old contest records.")
+            # 5. Identify Potential Issues
+            # Check for stations with abnormal QSO rates
             cursor.execute("""
-                SELECT id, contest, timestamp
-                FROM contest_scores
-                WHERE timestamp < ?
-            """, (datetime.now() - timedelta(days=365),))
-            old_records = cursor.fetchall()
+                WITH rate_calc AS (
+                    SELECT cs.callsign, 
+                           cs.contest,
+                           cs.qsos - LAG(cs.qsos) OVER (
+                               PARTITION BY cs.callsign, cs.contest 
+                               ORDER BY cs.timestamp
+                           ) as qso_diff,
+                           (JULIANDAY(cs.timestamp) - JULIANDAY(LAG(cs.timestamp) OVER (
+                               PARTITION BY cs.callsign, cs.contest 
+                               ORDER BY cs.timestamp
+                           ))) * 24 * 60 as minute_diff
+                    FROM contest_scores cs
+                )
+                SELECT callsign, 
+                       contest,
+                       ROUND(CAST(qso_diff as FLOAT) / NULLIF(minute_diff, 0) * 60, 2) as hourly_rate
+                FROM rate_calc
+                WHERE qso_diff > 0 
+                AND minute_diff > 0
+                AND (CAST(qso_diff as FLOAT) / NULLIF(minute_diff, 0) * 60) > 400
+                ORDER BY hourly_rate DESC
+                LIMIT 10
+            """)
+            high_rates = cursor.fetchall()
+            
+            if high_rates:
+                logger.warning("\nPotentially problematic QSO rates detected:")
+                for rate in high_rates:
+                    logger.warning(f"Station: {rate[0]}, Contest: {rate[1]}, Rate: {rate[2]} QSOs/hour")
 
-            if old_records:
-                for record_id, contest, timestamp in old_records:
-                    archive_file = os.path.join(archive_dir, f"{contest}_{record_id}.txt")
-                    if dry_run:
-                        logger.info(f"Dry-run: Would archive record {record_id} for contest '{contest}'")
-                    else:
-                        with open(archive_file, 'w') as f:
-                            f.write(f"Archived Record ID: {record_id}\nContest: {contest}\nTimestamp: {timestamp}\n")
-                        cursor.execute("DELETE FROM contest_scores WHERE id = ?", (record_id,))
-                        cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id = ?", (record_id,))
-                        cursor.execute("DELETE FROM qth_info WHERE contest_score_id = ?", (record_id,))
-                        logger.info(f"Archived and deleted record {record_id} for contest '{contest}'")
-                if not dry_run:
-                    conn.commit()
-                    logger.info("Archiving completed and changes committed.")
-            else:
-                logger.info("No old records found to archive.")
+            return {
+                'total_contests': total_contests,
+                'total_stations': total_stations,
+                'total_scores': total_scores,
+                'orphaned_records_removed': orphaned_bb + orphaned_qth if not dry_run else 0,
+                'inconsistent_qsos': len(inconsistent_qsos),
+                'high_rate_stations': len(high_rates)
+            }
 
     except sqlite3.Error as e:
-        logger.error(f"Database error: {e}")
+        logger.error(f"Database error during maintenance: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Error: {e}")
-    
+        logger.error(f"Error during maintenance: {e}")
+        raise
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Maintenance Script for Contest Database.")
     parser.add_argument("--db", required=True, help="Path to the SQLite database file.")
-    parser.add_argument("--dry-run", action="store_true", help="Preview the changes without making any deletions or modifications.")
+    parser.add_argument("--dry-run", action="store_true", help="Preview changes without making modifications.")
     args = parser.parse_args()
 
     logger.info(f"Starting maintenance script on database: {args.db}")
     logger.info(f"Dry-run mode: {'ON' if args.dry_run else 'OFF'}")
     
-    perform_maintenance(args.db, args.dry_run)
-
-    logger.info("Maintenance script finished.")
+    try:
+        stats = perform_enhanced_maintenance(args.db, args.dry_run)
+        logger.info("\nMaintenance Summary:")
+        logger.info(f"Total Contests: {stats['total_contests']}")
+        logger.info(f"Total Stations: {stats['total_stations']}")
+        logger.info(f"Total Score Records: {stats['total_scores']}")
+        logger.info(f"Orphaned Records Removed: {stats['orphaned_records_removed']}")
+        logger.info(f"Inconsistent QSO Records: {stats['inconsistent_qsos']}")
+        logger.info(f"High Rate Stations Found: {stats['high_rate_stations']}")
+    except Exception as e:
+        logger.error(f"Maintenance failed: {e}")
+        sys.exit(1)
