@@ -34,10 +34,7 @@ class ContestServer:
     def start(self):
         """Start the server"""
         try:
-            # Start the new maintenance thread
-            start_maintenance_thread()
-            self.logger.info("Maintenance thread started")
-            
+                        
             # Start HTTP server
             server_address = (self.host, self.port)
             httpd = CustomServer(server_address, 
