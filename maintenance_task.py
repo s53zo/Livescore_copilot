@@ -49,24 +49,6 @@ def perform_enhanced_maintenance(db_path, dry_run):
                 cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
                 cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
 
-            # 2. Check for data consistency
-            cursor.execute("""
-                SELECT cs.id, cs.callsign, cs.contest, cs.qsos,
-                       (SELECT SUM(bb.qsos) FROM band_breakdown bb WHERE bb.contest_score_id = cs.id) as band_qsos
-                FROM contest_scores cs
-                WHERE cs.qsos != (
-                    SELECT COALESCE(SUM(bb.qsos), 0) 
-                    FROM band_breakdown bb 
-                    WHERE bb.contest_score_id = cs.id
-                )
-            """)
-            inconsistent_qsos = cursor.fetchall()
-            if inconsistent_qsos:
-                logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches")
-                for record in inconsistent_qsos:
-                    logger.warning(f"Contest Score ID {record[0]} ({record[1]} in {record[2]}): "
-                                 f"Total QSOs={record[3]}, Sum of band QSOs={record[4]}")
-
             # 3. Performance Optimization
             logger.info("Analyzing table statistics...")
             
