@@ -36,6 +36,15 @@ class BatchProcessor:
         self.queue.put(xml_data)
         self.batch_size += 1
         self.logger.debug(f"Added to batch. Current size: {self.batch_size}")
+
+    # In batch_processor.py, add:
+    def pause_processing(self):
+        """Pause batch processing temporarily"""
+        self.paused = True
+        
+    def resume_processing(self):
+        """Resume batch processing"""
+        self.paused = False
     
     def _process_batch_loop(self):
         """Main processing loop - runs every batch_interval seconds"""
