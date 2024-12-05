@@ -152,32 +152,72 @@ class ContestDatabaseHandler:
 
     def _extract_breakdown_data(self, breakdown):
         """Extract breakdown data from XML breakdown element."""
-        data = {
-            'qsos': int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0)) or 
-                   sum(int(elem.text) for elem in breakdown.findall('qso[@band="total"]')),
-            'points': int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0)) or 
-                     sum(int(elem.text) for elem in breakdown.findall('point[@band="total"]')),
-            'multipliers': int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0)) or 
-                         sum(int(elem.text) for elem in breakdown.findall('mult[@band="total"]')),
-            'band_breakdown': []
-        }
-
-        # Extract per-band breakdown
-        for band in ['160', '80', '40', '20', '15', '10']:
-            qsos = sum(int(elem.text) for elem in breakdown.findall(f'qso[@band="{band}"]'))
-            points = sum(int(elem.text) for elem in breakdown.findall(f'point[@band="{band}"]'))
-            multipliers = sum(int(elem.text) for elem in breakdown.findall(f'mult[@band="{band}"]'))
-            
-            if qsos > 0:
-                data['band_breakdown'].append({
-                    'band': band,
-                    'mode': 'ALL',
-                    'qsos': qsos,
-                    'points': points,
-                    'multipliers': multipliers
-                })
-
-        return data
+        try:
+            # Handle 'None' text value in XML safely
+            def safe_int(elem_text, default=0):
+                try:
+                    return int(elem_text) if elem_text is not None else default
+                except (ValueError, TypeError):
+                    return default
+    
+            # Get total QSOs, points, and multipliers safely
+            total_qsos = safe_int(breakdown.findtext('qso[@band="total"][@mode="ALL"]', 0))
+            if total_qsos == 0:
+                total_qsos = sum(safe_int(elem.text) for elem in breakdown.findall('qso[@band="total"]'))
+    
+            total_points = safe_int(breakdown.findtext('point[@band="total"][@mode="ALL"]', 0))
+            if total_points == 0:
+                total_points = sum(safe_int(elem.text) for elem in breakdown.findall('point[@band="total"]'))
+    
+            total_mults = safe_int(breakdown.findtext('mult[@band="total"][@mode="ALL"]', 0))
+            if total_mults == 0:
+                total_mults = sum(safe_int(elem.text) for elem in breakdown.findall('mult[@band="total"]'))
+    
+            data = {
+                'qsos': total_qsos,
+                'points': total_points,
+                'multipliers': total_mults,
+                'band_breakdown': []
+            }
+    
+            # Extract per-band breakdown
+            for band in ['160', '80', '40', '20', '15', '10']:
+                qsos = sum(safe_int(elem.text) for elem in breakdown.findall(f'qso[@band="{band}"]'))
+                points = sum(safe_int(elem.text) for elem in breakdown.findall(f'point[@band="{band}"]'))
+                multipliers = sum(safe_int(elem.text) for elem in breakdown.findall(f'mult[@band="{band}"]'))
+                
+                if qsos > 0:
+                    data['band_breakdown'].append({
+                        'band': band,
+                        'mode': 'ALL',
+                        'qsos': qsos,
+                        'points': points,
+                        'multipliers': multipliers
+                    })
+    
+            return data
+        except Exception as e:
+            self.logger.error(f"Error extracting breakdown data: {e}")
+            self.logger.debug(f"Breakdown XML: {ET.tostring(breakdown, encoding='unicode')}")
+            raise
+    
+    def _store_qth_info(self, cursor, contest_score_id, qth_data):
+        """Store QTH information in database."""
+        cursor.execute('''
+            INSERT INTO qth_info (
+                contest_score_id, dxcc_country, continent, cq_zone, 
+                iaru_zone, arrl_section, state_province, grid6
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            contest_score_id,
+            qth_data.get('dxcc_country', ''),
+            qth_data.get('continent', ''),  # Fixed typo in variable name
+            qth_data.get('cq_zone', ''),
+            qth_data.get('iaru_zone', ''),
+            qth_data.get('arrl_section', ''),
+            qth_data.get('state_province', ''),
+            qth_data.get('grid6', '')
+        ))
 
     def store_data(self, contest_data):
         """Store contest data in the database."""
@@ -218,24 +258,7 @@ class ContestDatabaseHandler:
                     self.logger.error(traceback.format_exc())
                     raise
 
-    def _store_qth_info(self, cursor, contest_score_id, qth_data):
-        """Store QTH information in database."""
-        cursor.execute('''
-            INSERT INTO qth_info (
-                contest_score_id, dxcc_country, continent, cq_zone, 
-                iaru_zone, arrl_section, state_province, grid6
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            contest_score_id,
-            qth_data.get('dxcc_country', ''),
-            qqth_data.get('continent', ''),
-            qth_data.get('cq_zone', ''),
-            qth_data.get('iaru_zone', ''),
-            qth_data.get('arrl_section', ''),
-            qth_data.get('state_province', ''),
-            qth_data.get('grid6', '')
-        ))
-
+    
     def _store_band_breakdown(self, cursor, contest_score_id, band_breakdown):
         """Store band breakdown information in database."""
         for band_data in band_breakdown:
