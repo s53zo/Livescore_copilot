@@ -32,7 +32,6 @@ try:
     app = Flask(__name__)
     logger.info("Flask app created successfully")
 
-        )
     except Exception as e:
     logger.error(f"Failed to create Flask app")
     logger.error(traceback.format_exc())
