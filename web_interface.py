@@ -7,7 +7,6 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
-from maintenance_tasks import DatabaseMaintenance
 
 # Define Config class first
 class Config:
@@ -33,15 +32,9 @@ try:
     app = Flask(__name__)
     logger.info("Flask app created successfully")
 
-    # Initialize maintenance scheduler
-    maintenance = DatabaseMaintenance(
-        db_path=Config.DB_PATH,
-        log_path='/opt/livescore/logs/maintenance.log'
-    )
-    maintenance.start()
-    logger.info("Database maintenance scheduler initialized")
-except Exception as e:
-    logger.error(f"Failed to create Flask app or initialize maintenance: {str(e)}")
+        )
+    except Exception as e:
+    logger.error(f"Failed to create Flask app")
     logger.error(traceback.format_exc())
     raise
 
