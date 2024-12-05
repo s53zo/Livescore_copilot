@@ -297,35 +297,47 @@ def cleanup_old_files(directory, days, dry_run, file_type):
 
 def optimize_database(db_path):
     """
-    Perform database optimization operations separately from other maintenance
+    Perform database optimization operations with improved locking handling
     """
-    try:
-        # VACUUM must be run outside of a transaction and needs a separate connection
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            logger.info("Running database optimizations...")
-            
+    max_retries = 3
+    retry_delay = 5  # seconds
+    current_try = 0
+    
+    while current_try < max_retries:
+        try:
             # First run ANALYZE and REINDEX which can be in a transaction
-            cursor.execute("BEGIN")
-            try:
-                cursor.execute("ANALYZE")
-                cursor.execute("REINDEX")
-                cursor.execute("COMMIT")
-                logger.info("ANALYZE and REINDEX completed")
-            except:
-                cursor.execute("ROLLBACK")
-                raise
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                logger.info("Running database optimizations...")
+                
+                cursor.execute("BEGIN IMMEDIATE")  # Get exclusive lock
+                try:
+                    cursor.execute("ANALYZE")
+                    cursor.execute("REINDEX")
+                    cursor.execute("COMMIT")
+                    logger.info("ANALYZE and REINDEX completed")
+                except:
+                    cursor.execute("ROLLBACK")
+                    raise
 
-        # Now run VACUUM with a fresh connection
-        with sqlite3.connect(db_path) as vacuum_conn:
-            logger.info("Running VACUUM...")
-            vacuum_conn.execute("VACUUM")
-            logger.info("VACUUM completed")
-            
-        return True
-    except sqlite3.Error as e:
-        logger.error(f"Database optimization error: {e}")
-        return False
+            # Now run VACUUM with a fresh connection and timeout
+            with sqlite3.connect(db_path, timeout=30) as vacuum_conn:
+                vacuum_conn.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+                logger.info("Running VACUUM...")
+                vacuum_conn.execute("VACUUM")
+                logger.info("VACUUM completed")
+                
+            return True
+
+        except sqlite3.Error as e:
+            current_try += 1
+            if "database is locked" in str(e):
+                if current_try < max_retries:
+                    logger.warning(f"Database locked, retry {current_try}/{max_retries} in {retry_delay} seconds")
+                    time.sleep(retry_delay)
+                    continue
+            logger.error(f"Database optimization error: {e}")
+            return False
         
 def archive_old_records(cursor, archive_dir, conn):
     """Helper function to archive old records"""
