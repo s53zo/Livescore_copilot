@@ -52,45 +52,48 @@ def check_qso_consistency(cursor):
     return true_inconsistencies, total_without_breakdown
 
 def analyze_orphaned_records(cursor):
-    """
-    Analyze orphaned records to provide detailed information about their origin
-    """
-    # Analyze orphaned band breakdown records
-    cursor.execute("""
-        SELECT bb.contest_score_id, 
-               COUNT(*) as record_count,
-               SUM(bb.qsos) as total_qsos,
-               GROUP_CONCAT(DISTINCT bb.band) as bands,
-               MIN(bb.qsos) as min_qsos,
-               MAX(bb.qsos) as max_qsos
-        FROM band_breakdown bb 
-        WHERE NOT EXISTS (
-            SELECT 1 FROM contest_scores cs 
-            WHERE cs.id = bb.contest_score_id
-        )
-        GROUP BY bb.contest_score_id
-        ORDER BY total_qsos DESC
-        LIMIT 10
-    """)
-    bb_analysis = cursor.fetchall()
+    """Analyze orphaned records to provide detailed information"""
+    try:
+        # Analyze orphaned band breakdown records
+        cursor.execute("""
+            SELECT bb.contest_score_id, 
+                   COUNT(*) as record_count,
+                   SUM(bb.qsos) as total_qsos,
+                   GROUP_CONCAT(bb.band) as bands,
+                   MIN(bb.qsos) as min_qsos,
+                   MAX(bb.qsos) as max_qsos
+            FROM band_breakdown bb 
+            WHERE NOT EXISTS (
+                SELECT 1 FROM contest_scores cs 
+                WHERE cs.id = bb.contest_score_id
+            )
+            GROUP BY bb.contest_score_id
+            ORDER BY total_qsos DESC
+            LIMIT 10
+        """)
+        bb_analysis = cursor.fetchall()
 
-    # Analyze orphaned QTH info records
-    cursor.execute("""
-        SELECT qi.contest_score_id,
-               qi.dxcc_country,
-               qi.continent,
-               qi.cq_zone,
-               qi.iaru_zone
-        FROM qth_info qi 
-        WHERE NOT EXISTS (
-            SELECT 1 FROM contest_scores cs 
-            WHERE cs.id = qi.contest_score_id
-        )
-        LIMIT 10
-    """)
-    qth_analysis = cursor.fetchall()
+        # Analyze orphaned QTH info records
+        cursor.execute("""
+            SELECT qi.contest_score_id,
+                   qi.dxcc_country,
+                   qi.continent,
+                   qi.cq_zone,
+                   qi.iaru_zone
+            FROM qth_info qi 
+            WHERE NOT EXISTS (
+                SELECT 1 FROM contest_scores cs 
+                WHERE cs.id = qi.contest_score_id
+            )
+            LIMIT 10
+        """)
+        qth_analysis = cursor.fetchall()
 
-    return bb_analysis, qth_analysis
+        return {'band_breakdown': bb_analysis, 'qth_info': qth_analysis}
+
+    except Exception as e:
+        logger.error(f"Error analyzing orphaned records: {e}")
+        return None
 
 def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
     """
@@ -156,113 +159,119 @@ def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
 
 def perform_maintenance(db_path, dry_run):
     """
-    Performs enhanced maintenance tasks including data integrity checks,
-    cleanup operations, and database optimization.
-
-    :param db_path: Path to the SQLite database.
-    :param dry_run: If True, no changes are made to the database; just prints the deletions.
+    Performs enhanced maintenance tasks with improved database locking handling.
+    Uses SQLite-compatible query patterns.
     """
     try:
-        with sqlite3.connect(db_path) as conn:
+        with sqlite3.connect(db_path, timeout=30) as conn:
+            conn.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
             cursor = conn.cursor()
 
-            # 0. Handle orphaned records with new function
+            # 1. First perform read-only analysis
             logger.info("Checking for orphaned records...")
-            if not handle_orphaned_records(cursor, dry_run):
-                logger.warning("Skipping orphaned record cleanup due to safety threshold")
-            
-            # 1. Data Integrity Checks
-            logger.info("Performing data integrity checks...")
-            
-            # Check for orphaned records
-            cursor.execute("SELECT COUNT(*) FROM band_breakdown bb WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = bb.contest_score_id)")
-            orphaned_bb = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM qth_info qi WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = qi.contest_score_id)")
-            orphaned_qth = cursor.fetchone()[0]
+            orphaned_analysis = analyze_orphaned_records(cursor)
+            if orphaned_analysis:
+                logger.info("Analysis completed, proceeding with maintenance")
 
-            if orphaned_bb > 0 or orphaned_qth > 0:
-                logger.info(f"Found orphaned records - Band breakdown: {orphaned_bb}, QTH info: {orphaned_qth}")
-                if not dry_run:
-                    cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
-                    cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
-                    logger.info("Orphaned records removed")
-
-            # 2. QSO Consistency Check
-            logger.info("Checking QSO count consistency...")
-            inconsistent_qsos, logs_without_breakdown = check_qso_consistency(cursor)
-            logger.info(f"Found {logs_without_breakdown} logs without band breakdown data (this is normal)")
-            if inconsistent_qsos:
-                logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches where band data exists")
-
-            # 3. Original Cleanup Tasks
-            # Fetch contests with less than 5 unique callsigns
-            logger.info("Fetching contests with fewer than 5 unique callsigns.")
-            cursor.execute("""
-                SELECT contest, COUNT(DISTINCT callsign) as num_callsigns
-                FROM contest_scores
-                GROUP BY contest
-                HAVING num_callsigns < 5
-            """)
-            contests_to_delete = cursor.fetchall()
-
-            if contests_to_delete:
-                logger.info(f"Found {len(contests_to_delete)} contests to delete.")
-                for contest, num_callsigns in contests_to_delete:
-                    logger.info(f"Contest: {contest}, Callsigns: {num_callsigns}")
-                    if not dry_run:
-                        cursor.execute("DELETE FROM contest_scores WHERE contest = ?", (contest,))
-                        cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id IN (SELECT id FROM contest_scores WHERE contest = ?)", (contest,))
-                        cursor.execute("DELETE FROM qth_info WHERE contest_score_id IN (SELECT id FROM contest_scores WHERE contest = ?)", (contest,))
-                        logger.info(f"Deleted all entries related to contest '{contest}'")
-
-            # Delete old contest data (3 days)
-            logger.info("Deleting contest data older than 3 days.")
-            threshold_date = datetime.now() - timedelta(days=3)
-            cursor.execute("SELECT id, contest FROM contest_scores WHERE timestamp < ?", (threshold_date,))
-            old_contests = cursor.fetchall()
-
-            if old_contests:
-                for record_id, contest in old_contests:
-                    if not dry_run:
-                        cursor.execute("DELETE FROM contest_scores WHERE id = ?", (record_id,))
-                        cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id = ?", (record_id,))
-                        cursor.execute("DELETE FROM qth_info WHERE contest_score_id = ?", (record_id,))
-                        logger.info(f"Deleted old contest record: {contest} (ID: {record_id})")
-
-            # 4. Database Optimization
+            # 2. Perform write operations in a single transaction
             if not dry_run:
-                logger.info("Starting database optimization...")
-                optimize_database(db_path)
-            else:
-                logger.info("Dry-run: Skipping database optimization")
+                cursor.execute("BEGIN IMMEDIATE")  # Get exclusive lock
+                try:
+                    # Handle orphaned records cleanup
+                    cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                    bb_deleted = cursor.rowcount
+                    cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                    qth_deleted = cursor.rowcount
+                    logger.info(f"Removed {bb_deleted} orphaned band records and {qth_deleted} orphaned QTH records")
 
+                    # QSO Consistency Check
+                    logger.info("Checking QSO count consistency...")
+                    inconsistent_qsos, logs_without_breakdown = check_qso_consistency(cursor)
+                    logger.info(f"Found {logs_without_breakdown} logs without band breakdown data (this is normal)")
+                    if inconsistent_qsos:
+                        logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches")
 
-            # 5. File System Maintenance
+                    # Clean up small contests
+                    cursor.execute("""
+                        SELECT contest, COUNT(DISTINCT callsign) as num_callsigns
+                        FROM contest_scores
+                        GROUP BY contest
+                        HAVING num_callsigns < 5
+                    """)
+                    contests_to_delete = cursor.fetchall()
+
+                    for contest, num_callsigns in contests_to_delete:
+                        logger.info(f"Removing contest: {contest} ({num_callsigns} callsigns)")
+                        # Get IDs first
+                        cursor.execute("SELECT id FROM contest_scores WHERE contest = ?", (contest,))
+                        contest_ids = [row[0] for row in cursor.fetchall()]
+                        
+                        # Delete related records
+                        if contest_ids:
+                            cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({','.join('?' * len(contest_ids))})", 
+                                         contest_ids)
+                            cursor.execute(f"DELETE FROM qth_info WHERE contest_score_id IN ({','.join('?' * len(contest_ids))})", 
+                                         contest_ids)
+                            
+                        # Delete main records
+                        cursor.execute("DELETE FROM contest_scores WHERE contest = ?", (contest,))
+                        logger.info(f"Deleted contest '{contest}' and all related records")
+
+                    # Delete old records
+                    threshold_date = datetime.now() - timedelta(days=3)
+                    cursor.execute("SELECT id FROM contest_scores WHERE timestamp < ?", (threshold_date,))
+                    old_ids = [row[0] for row in cursor.fetchall()]
+                    
+                    if old_ids:
+                        placeholders = ','.join('?' * len(old_ids))
+                        cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({placeholders})", old_ids)
+                        cursor.execute(f"DELETE FROM qth_info WHERE contest_score_id IN ({placeholders})", old_ids)
+                        cursor.execute(f"DELETE FROM contest_scores WHERE id IN ({placeholders})", old_ids)
+                        logger.info(f"Deleted {len(old_ids)} old contest records and related data")
+
+                    cursor.execute("COMMIT")
+                    logger.info("Database cleanup completed successfully")
+
+                except Exception as e:
+                    cursor.execute("ROLLBACK")
+                    logger.error(f"Error during maintenance, rolling back: {e}")
+                    raise
+
+                # 3. Perform optimization as a separate operation
+                try:
+                    optimize_result = optimize_database(db_path)
+                    if not optimize_result:
+                        logger.warning("Database optimization skipped due to locks")
+                except Exception as e:
+                    logger.error(f"Optimization error (non-fatal): {e}")
+
+            # 4. File System Maintenance
             backup_dir = "./backups"
             reports_dir = "./reports"
             archive_dir = "./archive"
 
-            # Cleanup old backups (30 days)
-            if os.path.exists(backup_dir):
-                cleanup_old_files(backup_dir, 30, dry_run, "backup")
+            for directory in [backup_dir, reports_dir, archive_dir]:
+                os.makedirs(directory, exist_ok=True)
 
-            # Cleanup old reports (3 days)
-            if os.path.exists(reports_dir):
-                cleanup_old_files(reports_dir, 3, dry_run, "report")
+            cleanup_old_files(backup_dir, 30, dry_run, "backup")
+            cleanup_old_files(reports_dir, 3, dry_run, "report")
 
-            # Archive old records (365 days)
             if not dry_run:
-                os.makedirs(archive_dir, exist_ok=True)
                 archive_old_records(cursor, archive_dir, conn)
 
-            # 6. Gather and Log Statistics
+            # 5. Final Statistics
             cursor.execute("SELECT COUNT(*) FROM contest_scores")
             total_scores = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(DISTINCT contest) FROM contest_scores")
             total_contests = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(DISTINCT callsign) FROM contest_scores")
             total_stations = cursor.fetchone()[0]
+
+            # Get orphaned records count
+            cursor.execute("SELECT COUNT(*) FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+            orphaned_bb = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+            orphaned_qth = cursor.fetchone()[0]
 
             logger.info("\nMaintenance Summary:")
             logger.info(f"Total Contests: {total_contests}")
@@ -272,14 +281,14 @@ def perform_maintenance(db_path, dry_run):
             logger.info(f"Logs without Band Breakdown: {logs_without_breakdown}")
             logger.info(f"True QSO Inconsistencies: {len(inconsistent_qsos)}")
 
-            if not dry_run:
-                conn.commit()
-                logger.info("All changes committed successfully")
+        return True
 
     except sqlite3.Error as e:
         logger.error(f"Database error: {e}")
+        return False
     except Exception as e:
         logger.error(f"Error: {e}")
+        return False
 
 def cleanup_old_files(directory, days, dry_run, file_type):
     """Helper function to clean up old files"""
@@ -296,48 +305,35 @@ def cleanup_old_files(directory, days, dry_run, file_type):
                     logger.info(f"Deleted old {file_type} file: {file_path}")
 
 def optimize_database(db_path):
-    """
-    Perform database optimization operations with improved locking handling
-    """
+    """Perform database optimization with retry logic"""
     max_retries = 3
     retry_delay = 5  # seconds
-    current_try = 0
     
-    while current_try < max_retries:
+    for attempt in range(max_retries):
         try:
             # First run ANALYZE and REINDEX which can be in a transaction
-            with sqlite3.connect(db_path) as conn:
-                cursor = conn.cursor()
-                logger.info("Running database optimizations...")
+            with sqlite3.connect(db_path, timeout=30) as conn:
+                conn.execute("PRAGMA busy_timeout = 30000")
+                logger.info("Running ANALYZE...")
+                conn.execute("ANALYZE")
+                logger.info("Running REINDEX...")
+                conn.execute("REINDEX")
                 
-                cursor.execute("BEGIN IMMEDIATE")  # Get exclusive lock
-                try:
-                    cursor.execute("ANALYZE")
-                    cursor.execute("REINDEX")
-                    cursor.execute("COMMIT")
-                    logger.info("ANALYZE and REINDEX completed")
-                except:
-                    cursor.execute("ROLLBACK")
-                    raise
-
-            # Now run VACUUM with a fresh connection and timeout
-            with sqlite3.connect(db_path, timeout=30) as vacuum_conn:
-                vacuum_conn.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+            # Now run VACUUM with a fresh connection
+            with sqlite3.connect(db_path, timeout=30) as conn:
                 logger.info("Running VACUUM...")
-                vacuum_conn.execute("VACUUM")
-                logger.info("VACUUM completed")
+                conn.execute("VACUUM")
+                return True
                 
-            return True
-
         except sqlite3.Error as e:
-            current_try += 1
-            if "database is locked" in str(e):
-                if current_try < max_retries:
-                    logger.warning(f"Database locked, retry {current_try}/{max_retries} in {retry_delay} seconds")
-                    time.sleep(retry_delay)
-                    continue
+            if "database is locked" in str(e) and attempt < max_retries - 1:
+                logger.warning(f"Database locked, retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                continue
             logger.error(f"Database optimization error: {e}")
             return False
+            
+    return False
         
 def archive_old_records(cursor, archive_dir, conn):
     """Helper function to archive old records"""
