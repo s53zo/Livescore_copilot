@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response, Response, stream_with_context
+from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
 import sqlite3
 import os
 import logging
@@ -7,7 +7,6 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
-from queue import Queue
 
 # Define Config class first
 class Config:
@@ -38,6 +37,10 @@ except Exception as e:
     logger.error(traceback.format_exc())
     raise
 
+class Config:
+    DB_PATH = '/opt/livescore/contest_data.db'
+    OUTPUT_DIR = '/opt/livescore/reports'
+
 def get_db():
     """Database connection with logging"""
     logger.debug("Attempting database connection")
@@ -50,9 +53,7 @@ def get_db():
         logger.error(traceback.format_exc())
         raise
 
-# Global list to keep track of SSE client connections
-# Each entry will be a function to send data to that client's queue
-sse_connections = []
+
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -76,6 +77,7 @@ def index():
             selected_callsign = request.form.get('callsign') or request.args.get('callsign')
             
             callsigns = []
+            
             if selected_contest:
                 # Fetch unique callsigns with their latest QSO count for the selected contest
                 cursor.execute("""
@@ -167,27 +169,6 @@ def live_report():
         logger.error("Exception in live_report:")
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
-
-@app.route('/livescore-pilot/updates')
-def sse_updates():
-    # SSE endpoint for pushing live updates
-    def event_stream():
-        q = Queue()
-        def send_message(data):
-            q.put(data)
-
-        # Register this client's sender
-        sse_connections.append(send_message)
-
-        try:
-            while True:
-                data = q.get()  # Wait for data
-                yield f"data: {data}\n\n"
-        except GeneratorExit:
-            # Client disconnected
-            sse_connections.remove(send_message)
-
-    return Response(stream_with_context(event_stream()), mimetype='text/event-stream')
 
 @app.errorhandler(404)
 def not_found_error(error):
@@ -285,9 +266,12 @@ def get_filters():
                 'Continent': row[5]
             }
 
-            for ftype, value in filter_map.items():
-                if value:
-                    filters.append({"type": ftype, "value": value})
+            for filter_type, value in filter_map.items():
+                if value:  # Only include non-empty values
+                    filters.append({
+                        "type": filter_type,
+                        "value": value
+                    })
 
             return jsonify(filters)
     except Exception as e:
