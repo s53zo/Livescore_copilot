@@ -41,8 +41,9 @@ class RateCalculator:
                 CROSS JOIN now n 
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
-                AND cs.timestamp >= datetime(n.current_utc, '-75 minutes')
+                AND cs.timestamp >= ?
                 AND cs.timestamp <= ?
+                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
                 GROUP BY cs.timestamp
                 ORDER BY cs.timestamp DESC
             )
@@ -109,8 +110,9 @@ class RateCalculator:
                 CROSS JOIN now n
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
-                AAND cs.timestamp >= datetime(n.current_utc, '-75 minutes')
+                AND cs.timestamp >= ?
                 AND cs.timestamp <= ?
+                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
                 ORDER BY cs.timestamp DESC
             )
             SELECT 
@@ -295,10 +297,8 @@ class ScoreReporter:
             return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
-        """Get band breakdown with both 60-minute and 15-minute rates, discarding too-old records."""
+        """Get band breakdown with both 60-minute and 15-minute rates"""
         try:
-            current_dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 query = """
@@ -311,23 +311,23 @@ class ScoreReporter:
                         AND cs.timestamp = ?
                     ),
                     long_window_score AS (
-                        SELECT bb.band, bb.qsos, cs.timestamp as prev_ts
+                        SELECT bb.band, bb.qsos
                         FROM contest_scores cs
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
                         AND cs.timestamp <= datetime(?, '-60 minutes')
-                        AND cs.timestamp >= datetime(?, '-75 minutes')
+                        AND cs.timestamp >= datetime(?, '-65 minutes')
                         ORDER BY cs.timestamp DESC
                     ),
                     short_window_score AS (
-                        SELECT bb.band, bb.qsos, cs.timestamp as prev_ts
+                        SELECT bb.band, bb.qsos
                         FROM contest_scores cs
                         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
                         WHERE cs.callsign = ?
                         AND cs.contest = ?
                         AND cs.timestamp <= datetime(?, '-15 minutes')
-                        AND cs.timestamp >= datetime(?, '-30 minutes')
+                        AND cs.timestamp >= datetime(?, '-20 minutes')
                         ORDER BY cs.timestamp DESC
                     )
                     SELECT 
@@ -335,9 +335,7 @@ class ScoreReporter:
                         cs.qsos as current_qsos,
                         cs.multipliers,
                         lws.qsos as long_window_qsos,
-                        lws.prev_ts as long_window_ts,
-                        sws.qsos as short_window_qsos,
-                        sws.prev_ts as short_window_ts
+                        sws.qsos as short_window_qsos
                     FROM current_score cs
                     LEFT JOIN long_window_score lws ON cs.band = lws.band
                     LEFT JOIN short_window_score sws ON cs.band = sws.band
@@ -346,37 +344,35 @@ class ScoreReporter:
                 """
     
                 params = (
-                    callsign, contest, timestamp,           # current_score params
-                    callsign, contest, timestamp, timestamp, # long_window_score params
-                    callsign, contest, timestamp, timestamp  # short_window_score params
+                    callsign, contest, timestamp,                  # current_score parameters (3)
+                    callsign, contest, timestamp, timestamp,       # long_window_score parameters (4)
+                    callsign, contest, timestamp, timestamp        # short_window_score parameters (4)
                 )
     
+                # Log query details when debugging
+                #self.logger.debug(f"Running band breakdown query with {len(params)} parameters")
+                #self.logger.debug(f"Parameters: {params}")
+                
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 band_data = {}
                 
                 for row in results:
-                    band, current_qsos, multipliers, long_window_qsos, long_window_ts, short_window_qsos, short_window_ts = row
-    
+                    band, current_qsos, multipliers, long_window_qsos, short_window_qsos = row
+                    
                     # Calculate 60-minute rate
                     long_rate = 0
-                    if long_window_qsos is not None and long_window_ts is not None:
-                        prev_dt = datetime.strptime(long_window_ts, '%Y-%m-%d %H:%M:%S')
-                        time_diff = (current_dt - prev_dt).total_seconds() / 60.0
-                        if time_diff <= 60:  # Only proceed if within 60 minutes
-                            qso_diff = current_qsos - long_window_qsos
-                            if qso_diff > 0:
-                                long_rate = int(round((qso_diff * 60) / time_diff))
-    
+                    if long_window_qsos is not None:
+                        qso_diff = current_qsos - long_window_qsos
+                        if qso_diff > 0:
+                            long_rate = int(round((qso_diff * 60) / 60))  # 60-minute rate
+                    
                     # Calculate 15-minute rate
                     short_rate = 0
-                    if short_window_qsos is not None and short_window_ts is not None:
-                        prev_dt = datetime.strptime(short_window_ts, '%Y-%m-%d %H:%M:%S')
-                        time_diff = (current_dt - prev_dt).total_seconds() / 60.0
-                        if time_diff <= 15:  # Only proceed if within 15 minutes
-                            qso_diff = current_qsos - short_window_qsos
-                            if qso_diff > 0:
-                                short_rate = int(round((qso_diff * 60) / time_diff))
+                    if short_window_qsos is not None:
+                        qso_diff = current_qsos - short_window_qsos
+                        if qso_diff > 0:
+                            short_rate = int(round((qso_diff * 60) / 15))  # Convert 15-minute to hourly rate
                     
                     band_data[band] = [current_qsos, multipliers, long_rate, short_rate]
                 
