@@ -91,27 +91,44 @@ class QsoRateCalculator:
         return long_rate, short_rate
 
 
-    def calculate_band_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
-        """Calculate band-specific QSO rates for both long and short windows, discarding too-old records."""
+    def calculate_band_rates(self, cursor, callsign, contest, lookback_minutes=60):
+        """
+        Calculate per-band QSO rates within the last `lookback_minutes` using the current UTC time.
+        Similar logic to calculate_total_rate: we find the latest record up to now and then find a 
+        record about `lookback_minutes` ago for comparison.
+    
+        Returns a dictionary {band: rate_per_hour}, or empty if no data.
+        """
         try:
-            current_dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            current_utc = datetime.utcnow()
             
-            # Fetch current band data
-            current_bands = self._fetch_band_data(cursor, callsign, contest, current_dt)
-            
-            # For each band, we try to find a previous data point at (current_dt - long_window) and (current_dt - short_window)
+            # Fetch current band data from the most recent record before or at current_utc
+            current_qsos_by_band, current_ts = self._fetch_band_data(cursor, callsign, contest, current_utc)
+            if not current_qsos_by_band:
+                # No current data means no band rates
+                return {}
+    
             band_rates = {}
-            for band, current_info in current_bands.items():
-                current_qsos = current_info[0]
-                multipliers = current_info[1]
+            for band, info in current_qsos_by_band.items():
+                current_qsos = info['qsos']
     
-                # 60-minute rate
-                long_rate = self._calculate_band_rate_for_window(cursor, callsign, contest, band, current_dt, long_window, current_qsos)
-                
-                # 15-minute rate
-                short_rate = self._calculate_band_rate_for_window(cursor, callsign, contest, band, current_dt, short_window, current_qsos)
+                # Find previous data for this band
+                prev_qsos, prev_ts = self._fetch_previous_band_data(cursor, callsign, contest, band, current_ts, lookback_minutes)
     
-                band_rates[band] = [current_qsos, multipliers, long_rate, short_rate]
+                rate = 0
+                if prev_qsos is not None and prev_ts:
+                    # Check time difference
+                    current_dt = datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S')
+                    prev_dt = datetime.strptime(prev_ts, '%Y-%m-%d %H:%M:%S')
+                    time_diff = (current_dt - prev_dt).total_seconds() / 60.0
+    
+                    if time_diff <= lookback_minutes:
+                        qso_diff = current_qsos - prev_qsos
+                        if qso_diff > 0:
+                            # QSOs per hour
+                            rate = int(round((qso_diff * 60) / time_diff))
+    
+                band_rates[band] = rate
     
             return band_rates
     
@@ -119,23 +136,71 @@ class QsoRateCalculator:
             self.logger.error(f"Error calculating band rates: {e}")
             return {}
     
-    def _fetch_band_data(self, cursor, callsign, contest, current_dt):
-        """Fetch the current band QSO and multiplier data."""
-        query = """
-            SELECT bb.band, bb.qsos, bb.multipliers
-            FROM contest_scores cs
-            JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-            WHERE cs.callsign = ? AND cs.contest = ? AND cs.timestamp = ?
+    def _fetch_band_data(self, cursor, callsign, contest, current_utc):
         """
-        params = (callsign, contest, current_dt.strftime('%Y-%m-%d %H:%M:%S'))
+        Fetch QSO counts for all bands from the latest record before or at current_utc.
+        Returns a dictionary {band: {'qsos': int, 'multipliers': int}} and the timestamp of that record.
+        """
+        query = """
+            WITH latest AS (
+                SELECT id, timestamp
+                FROM contest_scores
+                WHERE callsign = ? AND contest = ?
+                AND timestamp <= ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            )
+            SELECT bb.band, bb.qsos, bb.multipliers, l.timestamp
+            FROM latest l
+            JOIN band_breakdown bb ON bb.contest_score_id = l.id
+        """
+        params = (callsign, contest, current_utc.strftime('%Y-%m-%d %H:%M:%S'))
         cursor.execute(query, params)
         results = cursor.fetchall()
     
-        band_data = {}
-        for row in results:
-            band_data[row[0]] = [row[1], row[2]]  # qsos, multipliers
-        return band_data
+        if not results:
+            return {}, None
     
+        band_data = {}
+        record_ts = None
+        for row in results:
+            band, qsos, mults, ts = row
+            band_data[band] = {'qsos': qsos, 'multipliers': mults}
+            record_ts = ts  # All rows have the same timestamp, since they come from the same record
+    
+        return band_data, record_ts
+    
+    def _fetch_previous_band_data(self, cursor, callsign, contest, band, current_ts, window_minutes):
+        """
+        Fetch a previous QSO count for the given band at about current_ts - window_minutes.
+        We find the closest record before (current_ts - window_minutes).
+        Returns (prev_qsos, prev_ts) or (None, None) if not found.
+        """
+        current_dt = datetime.strptime(current_ts, '%Y-%m-%d %H:%M:%S')
+        lookback_time = current_dt - timedelta(minutes=window_minutes)
+    
+        query = """
+            SELECT bb.qsos, cs.timestamp
+            FROM contest_scores cs
+            JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+            WHERE cs.callsign = ? AND cs.contest = ? AND bb.band = ?
+            AND cs.timestamp <= ?
+            ORDER BY cs.timestamp DESC
+            LIMIT 1
+        """
+        params = (
+            callsign, contest, band,
+            lookback_time.strftime('%Y-%m-%d %H:%M:%S')
+        )
+        cursor.execute(query, params)
+        result = cursor.fetchone()
+    
+        if not result:
+            return None, None
+    
+        prev_qsos, prev_ts = result
+        return prev_qsos, prev_ts
+
     def _calculate_band_rate_for_window(self, cursor, callsign, contest, band, current_dt, window_minutes, current_qsos):
         """Calculate band QSO rate for a given time window, discarding outdated previous records."""
         lookback_time = current_dt - timedelta(minutes=window_minutes)
