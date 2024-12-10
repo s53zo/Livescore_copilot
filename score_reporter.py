@@ -41,9 +41,8 @@ class RateCalculator:
                 CROSS JOIN now n 
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
-                AND cs.timestamp >= ?
+                AND cs.timestamp >= datetime(n.current_utc, '-75 minutes')
                 AND cs.timestamp <= ?
-                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
                 GROUP BY cs.timestamp
                 ORDER BY cs.timestamp DESC
             )
@@ -110,9 +109,8 @@ class RateCalculator:
                 CROSS JOIN now n
                 WHERE cs.callsign = ? 
                 AND cs.contest = ?
-                AND cs.timestamp >= ?
+                AAND cs.timestamp >= datetime(n.current_utc, '-75 minutes')
                 AND cs.timestamp <= ?
-                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
                 ORDER BY cs.timestamp DESC
             )
             SELECT 
