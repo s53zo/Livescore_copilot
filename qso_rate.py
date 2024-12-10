@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import sqlite3
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+
 
 class QsoRateCalculator:
     def __init__(self, db_path):
         self.db_path = db_path
+        self.logger = logging.getLogger('QsoRateCalculator')
+        self.logger.setLevel(logging.INFO)
         
     def calculate_rates(self, cursor, callsign, contest, current_ts, long_window=60, short_window=15):
         """Calculate QSO rates for both long and short time windows with validation."""
