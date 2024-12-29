@@ -173,7 +173,14 @@ def perform_maintenance(db_path, dry_run):
             if orphaned_analysis:
                 logger.info("Analysis completed, proceeding with maintenance")
 
-            # 2. Perform write operations in a single transaction
+            # 2. Perform QSO consistency check (runs in both dry-run and normal modes)
+            logger.info("Checking QSO count consistency...")
+            inconsistent_qsos, logs_without_breakdown = check_qso_consistency(cursor)
+            logger.info(f"Found {logs_without_breakdown} logs without band breakdown data (this is normal)")
+            if inconsistent_qsos:
+                logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches")
+
+            # 3. Perform write operations in a single transaction (skipped in dry-run mode)
             if not dry_run:
                 cursor.execute("BEGIN IMMEDIATE")  # Get exclusive lock
                 try:
@@ -183,13 +190,6 @@ def perform_maintenance(db_path, dry_run):
                     cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
                     qth_deleted = cursor.rowcount
                     logger.info(f"Removed {bb_deleted} orphaned band records and {qth_deleted} orphaned QTH records")
-
-                    # QSO Consistency Check
-                    logger.info("Checking QSO count consistency...")
-                    inconsistent_qsos, logs_without_breakdown = check_qso_consistency(cursor)
-                    logger.info(f"Found {logs_without_breakdown} logs without band breakdown data (this is normal)")
-                    if inconsistent_qsos:
-                        logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches")
 
                     # Clean up small contests
                     cursor.execute("""
@@ -250,7 +250,7 @@ def perform_maintenance(db_path, dry_run):
                     logger.error(f"Error during maintenance, rolling back: {e}")
                     raise
 
-                # 3. Perform optimization as a separate operation
+                # 4. Perform optimization as a separate operation
                 try:
                     optimize_result = optimize_database(db_path)
                     if not optimize_result:
@@ -258,7 +258,7 @@ def perform_maintenance(db_path, dry_run):
                 except Exception as e:
                     logger.error(f"Optimization error (non-fatal): {e}")
 
-            # 4. Final Statistics
+            # 5. Final Statistics
             cursor.execute("SELECT COUNT(*) FROM contest_scores")
             total_scores = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(DISTINCT contest) FROM contest_scores")
