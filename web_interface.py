@@ -109,7 +109,7 @@ def index():
     except Exception as e:
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
-        return render_template('error.html', error=f"Error: {str(e)}")
+        return render_template('error.html', error=f"Error: {str(e).replace('\n', ' ')}")
 
 @app.route('/reports/live.html')
 def live_report():
