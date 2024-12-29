@@ -683,6 +683,19 @@ class ScoreReporter:
                         avg_rate = round(sum(top_rates) / len(top_rates))
                         band_avg_rates[band] = self.format_band_rates(avg_rate)
     
+            # Create a dictionary of template variables
+            template_vars = {
+                'contest': contest,
+                'callsign': callsign,
+                'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                'power': stations[0][3],
+                'assisted': stations[0][4],
+                'filter_info_div': filter_info_div,
+                'table_rows': '\n'.join(table_rows),
+                'additional_css': additional_css
+            }
+
+            # First process band headers
             html_content = template
             for band in ['160', '80', '40', '20', '15', '10']:
                 count = active_ops[band]
@@ -691,17 +704,11 @@ class ScoreReporter:
                     f'>{band}m</th>',
                     f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
                 )
-    
-            html_content = html_content.format(
-                contest=contest,
-                callsign=callsign,
-                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                power=stations[0][3],
-                assisted=stations[0][4],
-                filter_info_div=filter_info_div,
-                table_rows='\n'.join(table_rows),
-                additional_css=additional_css
-            )
+
+            # Safely replace template variables using string.Template
+            from string import Template
+            template = Template(html_content)
+            html_content = template.safe_substitute(template_vars)
             
             return html_content
     
