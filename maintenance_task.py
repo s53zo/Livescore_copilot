@@ -224,7 +224,12 @@ def perform_maintenance(db_path, dry_run):
                     
                     if old_ids:
                         placeholders = ','.join('?' * len(old_ids))
-                        cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({placeholders})", old_ids)
+                        # Old code (causes the error):
+                        # cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({placeholders})", old_ids)
+                        
+                        # New code (uses batch deletion):
+                        delete_in_batches(cursor, "band_breakdown", "contest_score_id", old_ids)
+                        #cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({placeholders})", old_ids)
                         cursor.execute(f"DELETE FROM qth_info WHERE contest_score_id IN ({placeholders})", old_ids)
                         cursor.execute(f"DELETE FROM contest_scores WHERE id IN ({placeholders})", old_ids)
                         logger.info(f"Deleted {len(old_ids)} old contest records and related data")
@@ -303,6 +308,13 @@ def cleanup_old_files(directory, days, dry_run, file_type):
                 else:
                     os.remove(file_path)
                     logger.info(f"Deleted old {file_type} file: {file_path}")
+
+def delete_in_batches(cursor, table, column, ids, batch_size=999):
+    for i in range(0, len(ids), batch_size):
+        batch = ids[i:i + batch_size]
+        placeholders = ','.join('?' * len(batch))
+        query = f"DELETE FROM {table} WHERE {column} IN ({placeholders})"
+        cursor.execute(query, batch)
 
 def optimize_database(db_path):
     """Perform database optimization with retry logic"""
