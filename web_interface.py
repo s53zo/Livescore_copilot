@@ -109,8 +109,7 @@ def index():
     except Exception as e:
         logger.error("Exception in index route:")
         logger.error(traceback.format_exc())
-        error_message = str(e).replace('\n', ' ')
-        return render_template('error.html', error=f"Error: {error_message}")
+        return render_template('error.html', error=f"Error: {str(e)}")
 
 @app.route('/reports/live.html')
 def live_report():
@@ -120,10 +119,6 @@ def live_report():
         contest = request.args.get('contest')
         filter_type = request.args.get('filter_type', 'none')
         filter_value = request.args.get('filter_value', 'none')
-
-        # Detect mobile devices
-        user_agent = request.headers.get('User-Agent', '').lower()
-        is_mobile = any(m in user_agent for m in ['mobile', 'android', 'iphone'])
 
         if not (callsign and contest):
             return render_template('error.html', error="Missing required parameters")
@@ -150,9 +145,8 @@ def live_report():
         stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
         if stations:
-            # Select appropriate template based on device
-            template_name = 'mobile_score_template.html' if is_mobile else 'score_template.html'
-            template_path = os.path.join(os.path.dirname(__file__), 'templates', template_name)
+            # Generate HTML content directly
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
             with open(template_path, 'r') as f:
                 template = f.read()
 
