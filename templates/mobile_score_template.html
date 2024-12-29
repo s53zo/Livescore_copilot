@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contest Progress Report - STEW-PERRY</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        /* Base styles */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 10px;
+            color: #333;
+            font-size: 14px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin: 10px 0;
+            font-size: 1.2rem;
+            word-break: break-word;
+        }
+
+        /* Responsive table container */
+        .table-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        /* Table styles */
+        table {
+            width: 100%;
+            min-width: 600px;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        th, td {
+            padding: 8px;
+            text-align: center;
+            border: 1px solid #ddd;
+            white-space: nowrap;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            position: sticky;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Fixed first column */
+        td:first-child, th:first-child {
+            position: sticky;
+            left: 0;
+            background-color: white;
+            z-index: 2;
+        }
+
+        /* Highlight row */
+        .highlight {
+            background-color: #e8f5e9 !important;
+        }
+
+        /* Band data formatting */
+        .band-data {
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        /* Filter controls */
+        .filter-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 10px 0;
+        }
+
+        .filter-controls select,
+        .filter-controls input {
+            padding: 6px;
+            font-size: 0.9rem;
+            flex: 1 1 auto;
+            min-width: 120px;
+        }
+
+        /* Refresh info */
+        .refresh-info {
+            background-color: #4caf50;
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            margin: 10px 0;
+            text-align: center;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 10px;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #666;
+            border-top: 1px solid #ddd;
+            margin-top: 20px;
+        }
+
+        /* Media queries for smaller screens */
+        @media (max-width: 480px) {
+            body {
+                padding: 5px;
+            }
+
+            h1 {
+                font-size: 1.1rem;
+            }
+
+            th, td {
+                padding: 6px;
+                font-size: 0.8rem;
+            }
+
+            .band-data {
+                font-size: 0.8rem;
+            }
+
+            .refresh-info {
+                font-size: 0.8rem;
+                padding: 6px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="refresh-info">
+        Next update in <span id="countdown">5:00</span>
+    </div>
+
+    <h1>Contest Progress Report - STEW-PERRY</h1>
+
+    <div class="filter-controls">
+        <select>
+            <option>Continent: EU</option>
+            <!-- Add other filter options here -->
+        </select>
+        <select>
+            <option>Show All</option>
+            <option>±5 Positions</option>
+        </select>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>Callsign</th>
+                    <th>Cat</th>
+                    <th>Score</th>
+                    <th>160m</th>
+                    <th>80m</th>
+                    <th>40m</th>
+                    <th>20m</th>
+                    <th>15m</th>
+                    <th>10m</th>
+                    <th>Total</th>
+                    <th>Last Update</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Table rows would be dynamically inserted here -->
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        Live Contest Scoring by S53ZO | Data from Contest Score Distribution Network
+    </div>
+
+    <script>
+        // JavaScript for dynamic updates would go here
+    </script>
+</body>
+</html>
