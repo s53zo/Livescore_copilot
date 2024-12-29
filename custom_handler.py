@@ -82,10 +82,12 @@ class CustomHandler(BaseHTTPRequestHandler):
             self.debug_print(f"Content Length: {content_length}")
 
             post_data = self.rfile.read(content_length).decode('utf-8')
+            #ZO
             #self.debug_print("Received POST data:", post_data)
 
             decoded_data = urllib.parse.unquote_plus(post_data)
-            self.debug_print("Decoded POST data:", decoded_data)
+            #ZO
+            #self.debug_print("Decoded POST data:", decoded_data)
 
             if not self.validate_xml_data(decoded_data):
                 self.debug_print("Invalid XML data received")
