@@ -208,10 +208,8 @@ def perform_maintenance(db_path, dry_run):
                         
                         # Delete related records
                         if contest_ids:
-                            cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({','.join('?' * len(contest_ids))})", 
-                                         contest_ids)
-                            cursor.execute(f"DELETE FROM qth_info WHERE contest_score_id IN ({','.join('?' * len(contest_ids))})", 
-                                         contest_ids)
+                            delete_in_batches(cursor, "band_breakdown", "contest_score_id", contest_ids)
+                            delete_in_batches(cursor, "qth_info", "contest_score_id", contest_ids)
                             
                         # Delete main records
                         cursor.execute("DELETE FROM contest_scores WHERE contest = ?", (contest,))
@@ -223,24 +221,29 @@ def perform_maintenance(db_path, dry_run):
                     old_ids = [row[0] for row in cursor.fetchall()]
                     
                     if old_ids:
-                        placeholders = ','.join('?' * len(old_ids))
-                                             
-                        # New code (uses batch deletion):
+                        # Delete old records in batches
                         delete_in_batches(cursor, "band_breakdown", "contest_score_id", old_ids)
-                        
-                        # Delete old qth_info records
                         delete_in_batches(cursor, "qth_info", "contest_score_id", old_ids)
-                        
-                        # Delete old contest_scores records
                         delete_in_batches(cursor, "contest_scores", "id", old_ids)
-                        
-                        #cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({placeholders})", old_ids)
-                        #cursor.execute(f"DELETE FROM qth_info WHERE contest_score_id IN ({placeholders})", old_ids)
-                        #cursor.execute(f"DELETE FROM contest_scores WHERE id IN ({placeholders})", old_ids)
                         logger.info(f"Deleted {len(old_ids)} old contest records and related data")
 
+                    # File System Maintenance
+                    backup_dir = "./backups"
+                    reports_dir = "./reports"
+                    archive_dir = "./archive"
+
+                    for directory in [backup_dir, reports_dir, archive_dir]:
+                        os.makedirs(directory, exist_ok=True)
+
+                    cleanup_old_files(backup_dir, 30, dry_run, "backup")
+                    cleanup_old_files(reports_dir, 3, dry_run, "report")
+
+                    # Archive old records
+                    archive_old_records(cursor, archive_dir, conn)
+
+                    # Commit the transaction
                     cursor.execute("COMMIT")
-                    logger.info("Database cleanup completed successfully")
+                    logger.info("Database cleanup and file system maintenance completed successfully")
 
                 except Exception as e:
                     cursor.execute("ROLLBACK")
@@ -255,21 +258,7 @@ def perform_maintenance(db_path, dry_run):
                 except Exception as e:
                     logger.error(f"Optimization error (non-fatal): {e}")
 
-            # 4. File System Maintenance
-            backup_dir = "./backups"
-            reports_dir = "./reports"
-            archive_dir = "./archive"
-
-            for directory in [backup_dir, reports_dir, archive_dir]:
-                os.makedirs(directory, exist_ok=True)
-
-            cleanup_old_files(backup_dir, 30, dry_run, "backup")
-            cleanup_old_files(reports_dir, 3, dry_run, "report")
-
-            if not dry_run:
-                archive_old_records(cursor, archive_dir, conn)
-
-            # 5. Final Statistics
+            # 4. Final Statistics
             cursor.execute("SELECT COUNT(*) FROM contest_scores")
             total_scores = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(DISTINCT contest) FROM contest_scores")
