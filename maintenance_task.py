@@ -224,14 +224,19 @@ def perform_maintenance(db_path, dry_run):
                     
                     if old_ids:
                         placeholders = ','.join('?' * len(old_ids))
-                        # Old code (causes the error):
-                        # cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({placeholders})", old_ids)
-                        
+                                             
                         # New code (uses batch deletion):
                         delete_in_batches(cursor, "band_breakdown", "contest_score_id", old_ids)
+                        
+                        # Delete old qth_info records
+                        delete_in_batches(cursor, "qth_info", "contest_score_id", old_ids)
+                        
+                        # Delete old contest_scores records
+                        delete_in_batches(cursor, "contest_scores", "id", old_ids)
+                        
                         #cursor.execute(f"DELETE FROM band_breakdown WHERE contest_score_id IN ({placeholders})", old_ids)
-                        cursor.execute(f"DELETE FROM qth_info WHERE contest_score_id IN ({placeholders})", old_ids)
-                        cursor.execute(f"DELETE FROM contest_scores WHERE id IN ({placeholders})", old_ids)
+                        #cursor.execute(f"DELETE FROM qth_info WHERE contest_score_id IN ({placeholders})", old_ids)
+                        #cursor.execute(f"DELETE FROM contest_scores WHERE id IN ({placeholders})", old_ids)
                         logger.info(f"Deleted {len(old_ids)} old contest records and related data")
 
                     cursor.execute("COMMIT")
