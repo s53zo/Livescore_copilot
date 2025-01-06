@@ -1,4 +1,4 @@
-from manticoresearch import Client as ManticoreClient
+from manticoresearch.client.clients import SearchClient
 import sqlite3
 import logging
 import traceback
@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 
 class ManticoreHandler:
     def __init__(self, manticore_url: str, sqlite_db: str):
-        self.manticore = ManticoreClient(manticore_url)
+        self.manticore = SearchClient(manticore_url)
         self.sqlite_db = sqlite_db
         self.logger = logging.getLogger('ManticoreHandler')
         self._setup_indexes()
