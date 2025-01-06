@@ -187,34 +187,124 @@ class ManticoreHandler:
 
     def get_rankings(self, contest: str, filter_type: Optional[str] = None, 
                     filter_value: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get contest rankings using Manticore"""
-        try:
-            query = {
-                'index': 'rt_contest_scores',
-                'query': {
-                    'bool': {
-                        'must': [
-                            {'equals': {'contest': contest}}
-                        ]
-                    }
-                },
-                'sort': [{'score': {'order': 'desc'}}]
-            }
+    """Get contest rankings using Manticore"""
+    try:
+        # Base query using proper escaping
+        base_query = f'SELECT callsign, score, qsos, multipliers, power, assisted, timestamp ' \
+                    f'FROM rt_contest_scores WHERE contest = "{contest}"'
 
-            if filter_type and filter_value:
-                if filter_type == 'Continent':
-                    query['query']['bool']['must'].append({
-                        'equals': {'continent': filter_value}
-                    })
-                elif filter_type == 'CQ Zone':
-                    query['query']['bool']['must'].append({
-                        'equals': {'cq_zone': int(filter_value)}
-                    })
+        # Add filters if specified
+        if filter_type and filter_value:
+            if filter_type == 'Continent':
+                base_query += f' AND continent = "{filter_value}"'
+            elif filter_type == 'CQ Zone':
+                base_query += f' AND cq_zone = {filter_value}'
+            elif filter_type == 'DXCC':
+                base_query += f' AND dxcc_country = "{filter_value}"'
 
-            response = self.search_api.search(query)
-            return response.hits.hits if response and hasattr(response, 'hits') else []
-            
-        except Exception as e:
-            self.logger.error(f"Error getting rankings: {e}")
-            self.logger.error(traceback.format_exc())
+        # Add ordering
+        base_query += ' ORDER BY score DESC'
+
+        # Execute query through SQL API
+        response = self.utils_api.sql(base_query)
+        if not response or not hasattr(response, 'hits'):
             return []
+
+        return [
+            {
+                'callsign': hit['_source']['callsign'],
+                'score': hit['_source']['score'],
+                'qsos': hit['_source'].get('qsos', 0),
+                'multipliers': hit['_source'].get('multipliers', 0),
+                'power': hit['_source'].get('power', ''),
+                'assisted': hit['_source'].get('assisted', ''),
+                'timestamp': hit['_source'].get('timestamp', '')
+            }
+            for hit in response.hits.hits
+        ]
+
+    except Exception as e:
+        self.logger.error(f"Error getting rankings: {e}")
+        self.logger.error(traceback.format_exc())
+        return []
+
+def get_band_activity(self, contest: str, band: str) -> List[Dict[str, Any]]:
+    """Get band activity data using Manticore"""
+    try:
+        query = f'SELECT callsign, qsos, points, multipliers ' \
+                f'FROM rt_band_breakdown ' \
+                f'WHERE contest = "{contest}" AND band = "{band}" ' \
+                f'ORDER BY qsos DESC'
+
+        response = self.utils_api.sql(query)
+        if not response or not hasattr(response, 'hits'):
+            return []
+
+        return [
+            {
+                'callsign': hit['_source']['callsign'],
+                'qsos': hit['_source'].get('qsos', 0),
+                'points': hit['_source'].get('points', 0),
+                'multipliers': hit['_source'].get('multipliers', 0)
+            }
+            for hit in response.hits.hits
+        ]
+
+    except Exception as e:
+        self.logger.error(f"Error getting band activity: {e}")
+        self.logger.error(traceback.format_exc())
+        return []
+
+def get_contest_summary(self, contest: str) -> Dict[str, Any]:
+    """Get summary statistics for a contest"""
+    try:
+        query = f'SELECT COUNT(*) as participants, ' \
+                f'MAX(score) as top_score, ' \
+                f'SUM(qsos) as total_qsos, ' \
+                f'AVG(score) as avg_score ' \
+                f'FROM rt_contest_scores ' \
+                f'WHERE contest = "{contest}"'
+
+        response = self.utils_api.sql(query)
+        if not response or not hasattr(response, 'hits') or not response.hits.hits:
+            return {}
+
+        stats = response.hits.hits[0]['_source']
+        return {
+            'participants': stats.get('participants', 0),
+            'top_score': stats.get('top_score', 0),
+            'total_qsos': stats.get('total_qsos', 0),
+            'avg_score': int(stats.get('avg_score', 0))
+        }
+
+    except Exception as e:
+        self.logger.error(f"Error getting contest summary: {e}")
+        self.logger.error(traceback.format_exc())
+        return {}
+
+def get_callsign_history(self, callsign: str) -> List[Dict[str, Any]]:
+    """Get contest history for a specific callsign"""
+    try:
+        query = f'SELECT contest, score, qsos, timestamp ' \
+                f'FROM rt_contest_scores ' \
+                f'WHERE callsign = "{callsign}" ' \
+                f'ORDER BY timestamp DESC'
+
+        response = self.utils_api.sql(query)
+        if not response or not hasattr(response, 'hits'):
+            return []
+
+        return [
+            {
+                'contest': hit['_source']['contest'],
+                'score': hit['_source']['score'],
+                'qsos': hit['_source'].get('qsos', 0),
+                'timestamp': hit['_source'].get('timestamp', '')
+            }
+            for hit in response.hits.hits
+        ]
+
+    except Exception as e:
+        self.logger.error(f"Error getting callsign history: {e}")
+        self.logger.error(traceback.format_exc())
+        return []
