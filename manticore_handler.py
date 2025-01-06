@@ -16,57 +16,64 @@ class ManticoreHandler:
         self.config = Configuration(host=manticore_url)
         self.api_client = ApiClient(self.config)
         self.search_api = SearchApi(self.api_client)
-        self.index_api = IndexApi(self.api_client)  # Initialize IndexApi
+        self.index_api = IndexApi(self.api_client)
         self.utils_api = UtilsApi(self.api_client)
         
         self._setup_indexes()
 
     def _setup_indexes(self):
-        """Create required Manticore indexes if they don't exist"""
+        """Create required Manticore RT indexes if they don't exist"""
         try:
-            # Create indexes using SQL syntax through utils API
+            # Create RT indexes using Manticore syntax
             create_statements = [
                 """
                 CREATE TABLE IF NOT EXISTS rt_contest_scores(
-                    id BIGINT,
-                    callsign STRING,
-                    contest STRING,
-                    score BIGINT,
-                    power STRING,
-                    assisted STRING,
-                    qsos INT,
-                    multipliers INT,
-                    timestamp TIMESTAMP
-                ) rt_mem
+                    id bigint,
+                    callsign text,
+                    contest text,
+                    score bigint,
+                    power text,
+                    assisted text,
+                    qsos integer,
+                    multipliers integer,
+                    timestamp timestamp
+                ) type='rt'
                 """,
                 """
                 CREATE TABLE IF NOT EXISTS rt_band_breakdown(
-                    id BIGINT,
-                    contest_score_id BIGINT,
-                    band STRING,
-                    mode STRING,
-                    qsos INT,
-                    points INT,
-                    multipliers INT
-                ) rt_mem
+                    id bigint,
+                    contest_score_id bigint,
+                    band text,
+                    mode text,
+                    qsos integer,
+                    points integer,
+                    multipliers integer
+                ) type='rt'
                 """,
                 """
                 CREATE TABLE IF NOT EXISTS rt_qth_info(
-                    id BIGINT,
-                    contest_score_id BIGINT,
-                    dxcc_country STRING,
-                    continent STRING,
-                    cq_zone INT,
-                    iaru_zone INT,
-                    grid6 STRING,
-                    latitude FLOAT,
-                    longitude FLOAT
-                ) rt_mem
+                    id bigint,
+                    contest_score_id bigint,
+                    dxcc_country text,
+                    continent text,
+                    cq_zone integer,
+                    iaru_zone integer,
+                    grid6 text,
+                    latitude float,
+                    longitude float
+                ) type='rt'
                 """
             ]
             
+            # Execute each create statement
             for statement in create_statements:
-                self.utils_api.sql(statement)
+                try:
+                    self.utils_api.sql(statement)
+                    self.logger.debug(f"Successfully created index with statement: {statement}")
+                except Exception as e:
+                    # Log the error but continue - the index might already exist
+                    self.logger.warning(f"Error creating index (might already exist): {e}")
+                    continue
 
         except Exception as e:
             self.logger.error(f"Error setting up Manticore indexes: {e}")
@@ -91,6 +98,9 @@ class ManticoreHandler:
                 if not score_data:
                     return False
 
+                # Convert timestamp to Unix timestamp
+                timestamp = int(datetime.strptime(score_data[8], '%Y-%m-%d %H:%M:%S').timestamp())
+
                 # Prepare document for insertion
                 doc = {
                     'index': 'rt_contest_scores',
@@ -103,13 +113,12 @@ class ManticoreHandler:
                         'assisted': score_data[5],
                         'qsos': score_data[6],
                         'multipliers': score_data[7],
-                        'timestamp': int(datetime.strptime(score_data[8], 
-                                                         '%Y-%m-%d %H:%M:%S').timestamp())
+                        'timestamp': timestamp
                     }
                 }
                 
                 # Insert/update in Manticore
-                self.index_api.index(**doc)  # Use index_api instead of insert_api
+                self.index_api.replace(**doc)
                 
                 # Sync band breakdown
                 self._sync_band_breakdown(record_id)
@@ -147,7 +156,7 @@ class ManticoreHandler:
                         'multipliers': row[5]
                     }
                 }
-                self.index_api.index(**doc)  # Use index_api instead of insert_api
+                self.index_api.replace(**doc)
 
     def _sync_qth_info(self, contest_score_id: int):
         """Sync QTH info for a contest score"""
@@ -174,7 +183,7 @@ class ManticoreHandler:
                         'grid6': row[5]
                     }
                 }
-                self.index_api.index(**doc)  # Use index_api instead of insert_api
+                self.index_api.replace(**doc)
 
     def get_rankings(self, contest: str, filter_type: Optional[str] = None, 
                     filter_value: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -207,29 +216,5 @@ class ManticoreHandler:
             
         except Exception as e:
             self.logger.error(f"Error getting rankings: {e}")
-            self.logger.error(traceback.format_exc())
-            return []
-
-    def get_band_activity(self, contest: str, band: str) -> List[Dict[str, Any]]:
-        """Get band activity data using Manticore"""
-        try:
-            query = {
-                'index': 'rt_band_breakdown',
-                'query': {
-                    'bool': {
-                        'must': [
-                            {'equals': {'contest': contest}},
-                            {'equals': {'band': band}}
-                        ]
-                    }
-                },
-                'sort': [{'qsos': {'order': 'desc'}}]
-            }
-            
-            response = self.search_api.search(query)
-            return response.hits.hits if response and hasattr(response, 'hits') else []
-            
-        except Exception as e:
-            self.logger.error(f"Error getting band activity: {e}")
             self.logger.error(traceback.format_exc())
             return []
