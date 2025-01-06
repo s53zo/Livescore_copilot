@@ -143,19 +143,33 @@ def live_report():
                     error=f"No data found for {callsign} in {contest}")
 
         try:
-            # Get station data with filters
-            stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
-            
-            if not stations:
-                logger.error(f"No station data found for {callsign} in {contest}")
-                return render_template('error.html', error="No data found for the selected criteria")
+            # Get station data with filters and validate
+            try:
+                logger.debug(f"Fetching station details for {callsign} in {contest}")
+                stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+                
+                if not stations:
+                    logger.error(f"No station data found for {callsign} in {contest}")
+                    return render_template('error.html', error="No data found for the selected criteria")
 
-            # Generate HTML content directly
-            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-            with open(template_path, 'r') as f:
-                template = f.read()
+                # Validate JSON structure
+                try:
+                    json.dumps(stations)  # Test if data is JSON serializable
+                except TypeError as e:
+                    logger.error(f"Invalid JSON structure in station data: {str(e)}")
+                    logger.debug(f"Problematic data: {stations}")
+                    return render_template('error.html', error="Invalid data format received from database")
 
-            html_content = reporter.generate_html_content(template, callsign, contest, stations)
+                # Generate HTML content directly
+                template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+                with open(template_path, 'r') as f:
+                    template = f.read()
+
+                html_content = reporter.generate_html_content(template, callsign, contest, stations)
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {str(e)}")
+                return render_template('error.html', error="Invalid JSON data received from database")
             
             # Return response with appropriate headers
             response = make_response(html_content)
