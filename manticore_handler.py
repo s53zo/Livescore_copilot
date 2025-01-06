@@ -102,15 +102,15 @@ class ManticoreHandler:
                 timestamp = int(datetime.strptime(score_data[8], '%Y-%m-%d %H:%M:%S').timestamp())
 
                 # Prepare document for insertion
-                doc = {
+                insert_document = {
                     'index': 'rt_contest_scores',
                     'id': score_data[0],
                     'doc': {
                         'callsign': score_data[1],
                         'contest': score_data[2],
                         'score': score_data[3],
-                        'power': score_data[4],
-                        'assisted': score_data[5],
+                        'power': score_data[4] or '',
+                        'assisted': score_data[5] or '',
                         'qsos': score_data[6],
                         'multipliers': score_data[7],
                         'timestamp': timestamp
@@ -118,7 +118,7 @@ class ManticoreHandler:
                 }
                 
                 # Insert/update in Manticore
-                self.index_api.replace(**doc)
+                self.index_api.replace(insert_document_request=insert_document)
                 
                 # Sync band breakdown
                 self._sync_band_breakdown(record_id)
@@ -144,19 +144,19 @@ class ManticoreHandler:
             """, (contest_score_id,))
             
             for row in cursor.fetchall():
-                doc = {
+                insert_document = {
                     'index': 'rt_band_breakdown',
                     'id': row[0],
                     'doc': {
                         'contest_score_id': contest_score_id,
-                        'band': row[1],
-                        'mode': row[2],
+                        'band': row[1] or '',
+                        'mode': row[2] or '',
                         'qsos': row[3],
                         'points': row[4],
                         'multipliers': row[5]
                     }
                 }
-                self.index_api.replace(**doc)
+                self.index_api.replace(insert_document_request=insert_document)
 
     def _sync_qth_info(self, contest_score_id: int):
         """Sync QTH info for a contest score"""
@@ -171,19 +171,19 @@ class ManticoreHandler:
             
             row = cursor.fetchone()
             if row:
-                doc = {
+                insert_document = {
                     'index': 'rt_qth_info',
                     'id': row[0],
                     'doc': {
                         'contest_score_id': contest_score_id,
-                        'dxcc_country': row[1],
-                        'continent': row[2],
-                        'cq_zone': row[3],
-                        'iaru_zone': row[4],
-                        'grid6': row[5]
+                        'dxcc_country': row[1] or '',
+                        'continent': row[2] or '',
+                        'cq_zone': row[3] or 0,
+                        'iaru_zone': row[4] or 0,
+                        'grid6': row[5] or ''
                     }
                 }
-                self.index_api.replace(**doc)
+                self.index_api.replace(insert_document_request=insert_document)
 
     def get_rankings(self, contest: str, filter_type: Optional[str] = None, 
                     filter_value: Optional[str] = None) -> List[Dict[str, Any]]:
