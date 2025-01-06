@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
+from flask_socketio import SocketIO
 import sqlite3
 import os
 import logging
@@ -30,7 +31,8 @@ logger.info("Starting web interface application")
 try:
     # Create Flask app
     app = Flask(__name__)
-    logger.info("Flask app created successfully")
+    socketio = SocketIO(app, cors_allowed_origins="*")
+    logger.info("Flask app with SocketIO created successfully")
 
 except Exception as e:
     logger.error(f"Failed to create Flask app")
@@ -278,9 +280,36 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+# WebSocket event handlers
+@socketio.on('subscribe')
+def handle_subscribe(data):
+    """Handle client subscription to score updates"""
+    contest = data.get('contest')
+    callsign = data.get('callsign')
+    if contest and callsign:
+        join_room(f"{contest}:{callsign}")
+        logger.info(f"Client subscribed to {contest}:{callsign}")
+
+def broadcast_update(contest, callsign, data):
+    """Broadcast score updates to subscribed clients"""
+    socketio.emit('update', data, room=f"{contest}:{callsign}")
+    logger.debug(f"Broadcast update for {contest}:{callsign}")
+
+def get_score_updates(contest, callsign, last_update):
+    """Get incremental score updates"""
+    with get_db() as db:
+        cursor = db.cursor()
+        cursor.execute("""
+            SELECT score, qsos, multipliers, timestamp
+            FROM contest_scores
+            WHERE contest = ? AND callsign = ? AND timestamp > ?
+            ORDER BY timestamp DESC
+        """, (contest, callsign, last_update))
+        return cursor.fetchall()
+
 if __name__ == '__main__':
-    logger.info("Starting development server")
-    app.run(host='127.0.0.1', port=8089)
+    logger.info("Starting development server with WebSocket support")
+    socketio.run(app, host='127.0.0.1', port=8089)
 else:
     # When running under gunicorn
-    logger.info("Starting under gunicorn")
+    logger.info("Starting under gunicorn with WebSocket support")
