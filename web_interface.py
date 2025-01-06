@@ -7,12 +7,18 @@ import sys
 import traceback
 from score_reporter import ScoreReporter
 from datetime import datetime
+from manticore_handler import ManticoreHandler
 
-# Define Config class first
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
-    MANTICORE_URL = 'http://localhost:9308'  # Add Manticore configuration
+    MANTICORE_URL = 'http://localhost:9308'
+
+def get_manticore():
+    """Get Manticore handler instance"""
+    if not hasattr(g, 'manticore'):
+        g.manticore = ManticoreHandler(Config.MANTICORE_URL, Config.DB_PATH)
+    return g.manticore
 
 # Set up detailed logging
 logging.basicConfig(
@@ -232,51 +238,110 @@ def get_callsigns():
         logger.error(f"Error fetching callsigns: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/livescore-pilot/api/scores')
+def get_scores():
+    try:
+        contest = request.args.get('contest')
+        callsign = request.args.get('callsign')
+        filter_type = request.args.get('filter_type', 'none')
+        filter_value = request.args.get('filter_value', 'none')
+        
+        if not contest or not callsign:
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        manticore = get_manticore()
+        
+        # Get stations data from Manticore
+        stations = manticore.get_rankings(contest, filter_type, filter_value)
+        
+        # Get contest summary
+        summary = manticore.get_contest_summary(contest)
+        
+        response = {
+            "contest": contest,
+            "callsign": callsign,
+            "timestamp": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+            "stations": stations,
+            "summary": summary
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Error getting scores: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/livescore-pilot/api/callsigns')
+def get_callsigns():
+    try:
+        contest = request.args.get('contest')
+        if not contest:
+            return jsonify({"error": "Contest parameter required"}), 400
+
+        manticore = get_manticore()
+        query = f'SELECT callsign, qsos as qso_count FROM rt_contest_scores ' \
+                f'WHERE contest = "{contest}" ' \
+                f'ORDER BY callsign ASC'
+                
+        response = manticore.utils_api.sql(query)
+        if not response or not hasattr(response, 'hits'):
+            return jsonify([])
+            
+        callsigns = [
+            {
+                "name": hit['_source']['callsign'],
+                "qso_count": hit['_source'].get('qso_count', 0)
+            }
+            for hit in response.hits.hits
+        ]
+        
+        return jsonify(callsigns)
+        
+    except Exception as e:
+        logger.error(f"Error fetching callsigns: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/livescore-pilot/api/filters')
 def get_filters():
-    contest = request.args.get('contest')
-    callsign = request.args.get('callsign')
-    
-    if not contest or not callsign:
-        return jsonify({"error": "Contest and callsign parameters required"}), 400
-
     try:
-        with get_db() as db:
-            cursor = db.cursor()
-            cursor.execute("""
-                SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                       qi.arrl_section, qi.state_province, qi.continent
-                FROM contest_scores cs
-                JOIN qth_info qi ON qi.contest_score_id = cs.id
-                WHERE cs.contest = ? AND cs.callsign = ?
-                ORDER BY cs.timestamp DESC
-                LIMIT 1
-            """, (contest, callsign))
+        contest = request.args.get('contest')
+        callsign = request.args.get('callsign')
+        
+        if not contest or not callsign:
+            return jsonify({"error": "Contest and callsign parameters required"}), 400
+
+        manticore = get_manticore()
+        query = f'SELECT dxcc_country, cq_zone, iaru_zone, continent ' \
+                f'FROM rt_qth_info ' \
+                f'WHERE callsign = "{callsign}" AND contest = "{contest}" ' \
+                f'LIMIT 1'
+                
+        response = manticore.utils_api.sql(query)
+        if not response or not hasattr(response, 'hits') or not response.hits.hits:
+            return jsonify([])
             
-            row = cursor.fetchone()
-            if not row:
-                return jsonify([])
+        qth_info = response.hits.hits[0]['_source']
+        filters = []
+        
+        filter_map = {
+            'DXCC': qth_info.get('dxcc_country'),
+            'CQ Zone': qth_info.get('cq_zone'),
+            'IARU Zone': qth_info.get('iaru_zone'),
+            'Continent': qth_info.get('continent')
+        }
 
-            filters = []
-            filter_map = {
-                'DXCC': row[0],
-                'CQ Zone': row[1],
-                'IARU Zone': row[2],
-                'ARRL Section': row[3],
-                'State/Province': row[4],
-                'Continent': row[5]
-            }
+        for filter_type, value in filter_map.items():
+            if value:  # Only include non-empty values
+                filters.append({
+                    "type": filter_type,
+                    "value": value
+                })
 
-            for filter_type, value in filter_map.items():
-                if value:  # Only include non-empty values
-                    filters.append({
-                        "type": filter_type,
-                        "value": value
-                    })
-
-            return jsonify(filters)
+        return jsonify(filters)
+        
     except Exception as e:
-        logger.error(f"Error fetching filters: {str(e)}")
+        logger.error(f"Error fetching filters: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
