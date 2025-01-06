@@ -205,39 +205,6 @@ def get_contests():
         logger.error(f"Error fetching contests: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/livescore-pilot/api/callsigns')
-def get_callsigns():
-    contest = request.args.get('contest')
-    if not contest:
-        return jsonify({"error": "Contest parameter required"}), 400
-
-    try:
-        with get_db() as db:
-            cursor = db.cursor()
-            cursor.execute("""
-                WITH latest_scores AS (
-                    SELECT cs.callsign, cs.qsos, cs.timestamp
-                    FROM contest_scores cs
-                    INNER JOIN (
-                        SELECT callsign, MAX(timestamp) as max_ts
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    ) latest ON cs.callsign = latest.callsign 
-                        AND cs.timestamp = latest.max_ts
-                    WHERE cs.contest = ?
-                    AND cs.qsos > 0
-                )
-                SELECT DISTINCT callsign, qsos as qso_count
-                FROM latest_scores
-                ORDER BY callsign
-            """, (contest, contest))
-            callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
-            return jsonify(callsigns)
-    except Exception as e:
-        logger.error(f"Error fetching callsigns: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/livescore-pilot/api/scores')
 def get_scores():
     try:
