@@ -11,6 +11,7 @@ const LiveScoreTable = () => {
     });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [nextUpdate, setNextUpdate] = useState(120); // Countdown in seconds
     // Get URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const contest = urlParams.get('contest');
@@ -80,7 +81,8 @@ const LiveScoreTable = () => {
                     Contest Progress Report - {data.contest}
                 </h1>
                 <div className="text-sm text-gray-600">
-                    Last Updated: {new Date(data.timestamp).toLocaleString()}
+                    Last Updated: {new Date(data.timestamp).toLocaleString()} | 
+                    Next Update: {Math.floor(nextUpdate / 60)}:{String(nextUpdate % 60).padStart(2, '0')}
                 </div>
             </div>
 
