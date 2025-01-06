@@ -255,6 +255,12 @@ class ContestDatabaseHandler:
                     self._store_band_breakdown(cursor, contest_score_id, data.get('band_breakdown', []))
                     
                     conn.commit()
+
+                    # Sync to Manticore if enabled
+                    if self.manticore_handler:
+                        self.manticore_handler.sync_record(contest_score_id)
+                    
+                    conn.commit()
                     
                 except Exception as e:
                     self.logger.error(f"Error storing data for {data['callsign']}: {e}")
