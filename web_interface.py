@@ -12,6 +12,7 @@ from datetime import datetime
 class Config:
     DB_PATH = '/opt/livescore/contest_data.db'
     OUTPUT_DIR = '/opt/livescore/reports'
+    MANTICORE_URL = 'http://localhost:9308'  # Add Manticore configuration
 
 # Set up detailed logging
 logging.basicConfig(
