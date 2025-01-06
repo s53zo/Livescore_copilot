@@ -211,90 +211,95 @@ class ScoreReporter:
             print(f"Error setting up logging: {e}", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)
             raise
-        
+
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # Get base query results
-                base_query = """
-                WITH ranked_stations AS (
-                    SELECT 
-                        cs.id,
-                        cs.callsign,
-                        cs.score,
-                        cs.power,
-                        cs.assisted,
-                        cs.timestamp,
-                        cs.qsos,
-                        cs.multipliers,
-                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
-                    FROM contest_scores cs
-                    JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.contest = ?
-                    AND cs.id IN (
-                        SELECT MAX(id)
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    )
-                """
-                
-                params = [contest, contest]
-                
-                # Add QTH filter if specified
-                if filter_type and filter_value and filter_type.lower() != 'none':
-                    filter_map = {
-                        'DXCC': 'dxcc_country',
-                        'CQ Zone': 'cq_zone',
-                        'IARU Zone': 'iaru_zone',
-                        'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province',
-                        'Continent': 'continent'
-                    }
+    """Get station details using Manticore for faster filtering"""
+    if self.manticore_handler:
+        return self.manticore_handler.get_rankings(contest, filter_type, filter_value)
+    else:
+        def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
                     
-                    if field := filter_map.get(filter_type):
-                        base_query += f" AND qi.{field} = ?"
-                        params.append(filter_value)
-    
-                base_query += ")"
-    
-                # Handle position filter
-                position_filter = request.args.get('position_filter', 'all')
-                if position_filter == 'range':
-                    query = base_query + """
-                    SELECT rs.*, 
-                           CASE WHEN rs.callsign = ? THEN 'current'
-                                WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-                                THEN 'above' ELSE 'below' END as rel_pos
-                    FROM ranked_stations rs
-                    WHERE EXISTS (
-                        SELECT 1 FROM ranked_stations ref 
-                        WHERE ref.callsign = ? 
-                        AND ABS(rs.position - ref.position) <= 5
-                    )
-                    ORDER BY rs.score DESC
+                    # Get base query results
+                    base_query = """
+                    WITH ranked_stations AS (
+                        SELECT 
+                            cs.id,
+                            cs.callsign,
+                            cs.score,
+                            cs.power,
+                            cs.assisted,
+                            cs.timestamp,
+                            cs.qsos,
+                            cs.multipliers,
+                            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
+                        FROM contest_scores cs
+                        JOIN qth_info qi ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        AND cs.id IN (
+                            SELECT MAX(id)
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        )
                     """
-                    params.extend([callsign, callsign, callsign])
-                else:
-                    query = base_query + """
-                    SELECT *, 
-                           CASE WHEN callsign = ? THEN 'current'
-                                WHEN score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-                                THEN 'above' ELSE 'below' END as rel_pos
-                    FROM ranked_stations
-                    ORDER BY score DESC
-                    """
-                    params.extend([callsign, callsign])
-    
-                cursor.execute(query, params)
-                return cursor.fetchall()
-    
-        except Exception as e:
-            self.logger.error(f"Error in get_station_details: {e}")
-            self.logger.error(traceback.format_exc())
-            return None
+                    
+                    params = [contest, contest]
+                    
+                    # Add QTH filter if specified
+                    if filter_type and filter_value and filter_type.lower() != 'none':
+                        filter_map = {
+                            'DXCC': 'dxcc_country',
+                            'CQ Zone': 'cq_zone',
+                            'IARU Zone': 'iaru_zone',
+                            'ARRL Section': 'arrl_section',
+                            'State/Province': 'state_province',
+                            'Continent': 'continent'
+                        }
+                        
+                        if field := filter_map.get(filter_type):
+                            base_query += f" AND qi.{field} = ?"
+                            params.append(filter_value)
+        
+                    base_query += ")"
+        
+                    # Handle position filter
+                    position_filter = request.args.get('position_filter', 'all')
+                    if position_filter == 'range':
+                        query = base_query + """
+                        SELECT rs.*, 
+                               CASE WHEN rs.callsign = ? THEN 'current'
+                                    WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                    THEN 'above' ELSE 'below' END as rel_pos
+                        FROM ranked_stations rs
+                        WHERE EXISTS (
+                            SELECT 1 FROM ranked_stations ref 
+                            WHERE ref.callsign = ? 
+                            AND ABS(rs.position - ref.position) <= 5
+                        )
+                        ORDER BY rs.score DESC
+                        """
+                        params.extend([callsign, callsign, callsign])
+                    else:
+                        query = base_query + """
+                        SELECT *, 
+                               CASE WHEN callsign = ? THEN 'current'
+                                    WHEN score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                    THEN 'above' ELSE 'below' END as rel_pos
+                        FROM ranked_stations
+                        ORDER BY score DESC
+                        """
+                        params.extend([callsign, callsign])
+        
+                    cursor.execute(query, params)
+                    return cursor.fetchall()
+        
+            except Exception as e:
+                self.logger.error(f"Error in get_station_details: {e}")
+                self.logger.error(traceback.format_exc())
+                return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
         """Get band breakdown with both 60-minute and 15-minute rates"""
