@@ -51,7 +51,10 @@ class LiveScoreBoard extends React.Component {
             <div className="score-board">
                 <h1>Contest Progress: {initialParams.contest}</h1>
                 <h2>Callsign: {initialParams.callsign}</h2>
-                <p>Last update: {lastUpdate || 'No updates yet'}</p>
+                <div className="update-status">
+                    <p>Last update: {lastUpdate || 'No updates yet'}</p>
+                    <p>Updates are now real-time</p>
+                </div>
                 
                 <div className="scores-container">
                     {scores.map((score, index) => (
