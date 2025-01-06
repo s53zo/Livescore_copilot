@@ -3,105 +3,77 @@
 <head>
     <title>Contest Progress Report - {contest}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script>
-        // Initialize WebSocket connection
-        const socket = io();
-        
-        // Handle WebSocket connection
-        socket.on('connect', () => {
-            console.log('Connected to WebSocket server');
+        function refreshPage() {{
             const params = new URLSearchParams(window.location.search);
-            socket.emit('subscribe', {
-                contest: params.get('contest'),
-                callsign: params.get('callsign')
-            });
-        });
+            window.location.href = '/reports/live.html?' + params.toString();
+        }}
+        
+        setInterval(refreshPage, 120000);
 
-        // Handle score updates
-        socket.on('update', (data) => {
-            console.log('Score update received:', data);
-            // Implement your update logic here
-            window.location.reload();
-        });
+        function updateCountdown() {{
+            const countdownElement = document.getElementById('countdown');
+            let minutes = 1;
+            let seconds = 59;
 
-        // Handle errors
-        socket.on('error', (error) => {
-            console.error('WebSocket error:', error);
-        });
+            function pad(num) {{
+                return num.toString().padStart(2, '0');
+            }}
+
+            function updateRelativeTimes() {{
+                document.querySelectorAll('.relative-time').forEach(el => {{
+                    const timestamp = new Date(el.dataset.timestamp + 'Z');
+                    const now = new Date();
+                    const diff = Math.floor((now - timestamp) / 1000 / 60);
+                    
+                    if (diff < 60) {{
+                        el.textContent = `${{diff}}m ago`;
+                    }} else if (diff < 1440) {{
+                        el.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
+                    }} else {{
+                        el.textContent = Math.floor(diff/1440) + 'd ago';
+                    }}
+                }});
+            }}
+
+            const timer = setInterval(() => {{
+                if (minutes === 0 && seconds === 0) {{
+                    clearInterval(timer);
+                    return;
+                }}
+
+                if (seconds === 0) {{
+                    minutes--;
+                    seconds = 59;
+                }} else {{
+                    seconds--;
+                }}
+
+                countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
+                updateRelativeTimes();
+            }}, 1000);
+
+            updateRelativeTimes();
+        }}
+
+        document.addEventListener('DOMContentLoaded', updateCountdown);
     </script>
     <style>
         /* Base styles */
-        body { 
+        body {{ 
             font-family: Arial, sans-serif; 
             margin: 0; 
             padding: 10px; 
             color: #333; 
             padding-bottom: 60px; 
-        }
+        }}
         
-        h1 { 
+        h1 {{ 
             color: #2c3e50; 
             margin-bottom: 10px; 
             font-size: 1.5rem; 
             word-break: break-word; 
-        }
-        
-        /* Station info styles */
-        .station-info { 
-            background-color: #f8f9fa; 
-            padding: 15px; 
-            border-radius: 4px; 
-            margin-bottom: 20px; 
-            line-height: 1.5;
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Contest Progress Report - {contest}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script>
-        // Initialize WebSocket connection
-        const socket = io();
-        
-        // Handle WebSocket connection
-        socket.on('connect', () => {
-            console.log('Connected to WebSocket server');
-            const params = new URLSearchParams(window.location.search);
-            socket.emit('subscribe', {
-                contest: params.get('contest'),
-                callsign: params.get('callsign')
-            });
-        });
-
-        // Handle score updates
-        socket.on('update', (data) => {
-            console.log('Score update received:', data);
-            // Implement your update logic here
-            window.location.reload();
-        });
-
-        // Handle errors
-        socket.on('error', (error) => {
-            console.error('WebSocket error:', error);
-        });
-    </script>
-    <style>
-        /* Base styles */
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 0; 
-            padding: 10px; 
-            color: #333; 
-            padding-bottom: 60px; 
-        }
-        
-        h1 { 
-            color: #2c3e50; 
-            margin-bottom: 10px; 
-            font-size: 1.5rem; 
-            word-break: break-word; 
-        }
+        }}
         
         /* Station info styles */
         .station-info {{ 
@@ -318,6 +290,10 @@
     {additional_css}
 </head>
 <body>
+    <div class="refresh-info">
+        Next update in <span id="countdown">5:00</span>
+    </div>
+
     <h1>Contest Progress Report - {contest}</h1>
     
     <div class="station-info">
