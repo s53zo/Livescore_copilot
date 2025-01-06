@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
-from flask_socketio import SocketIO
 import sqlite3
 import os
 import logging
 import sys
 import traceback
-import json
 from score_reporter import ScoreReporter
 from datetime import datetime
 
@@ -32,8 +30,7 @@ logger.info("Starting web interface application")
 try:
     # Create Flask app
     app = Flask(__name__)
-    socketio = SocketIO(app, cors_allowed_origins="*")
-    logger.info("Flask app with SocketIO created successfully")
+    logger.info("Flask app created successfully")
 
 except Exception as e:
     logger.error(f"Failed to create Flask app")
@@ -55,6 +52,8 @@ def get_db():
         logger.error(f"Database connection failed: {str(e)}")
         logger.error(traceback.format_exc())
         raise
+
+
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -142,34 +141,16 @@ def live_report():
                 return render_template('error.html', 
                     error=f"No data found for {callsign} in {contest}")
 
-        try:
-            # Get station data with filters and validate
-            try:
-                logger.debug(f"Fetching station details for {callsign} in {contest}")
-                stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
-                
-                if not stations:
-                    logger.error(f"No station data found for {callsign} in {contest}")
-                    return render_template('error.html', error="No data found for the selected criteria")
+        # Get station data with filters
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
-                # Validate JSON structure
-                try:
-                    json.dumps(stations)  # Test if data is JSON serializable
-                except TypeError as e:
-                    logger.error(f"Invalid JSON structure in station data: {str(e)}")
-                    logger.debug(f"Problematic data: {stations}")
-                    return render_template('error.html', error="Invalid data format received from database")
+        if stations:
+            # Generate HTML content directly
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
+            with open(template_path, 'r') as f:
+                template = f.read()
 
-                # Generate HTML content directly
-                template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
-                with open(template_path, 'r') as f:
-                    template = f.read()
-
-                html_content = reporter.generate_html_content(template, callsign, contest, stations)
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {str(e)}")
-                return render_template('error.html', error="Invalid JSON data received from database")
+            html_content = reporter.generate_html_content(template, callsign, contest, stations)
             
             # Return response with appropriate headers
             response = make_response(html_content)
@@ -180,14 +161,9 @@ def live_report():
             
             logger.info(f"Successfully generated report for {callsign} in {contest}")
             return response
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {str(e)}")
-            return render_template('error.html', error="Invalid data format received from database")
-        except Exception as e:
-            logger.error(f"Error generating report: {str(e)}")
-            logger.error(traceback.format_exc())
-            return render_template('error.html', error=f"Error generating report: {str(e)}")
+        else:
+            logger.error(f"No station data found for {callsign} in {contest}")
+            return render_template('error.html', error="No data found for the selected criteria")
 
     except Exception as e:
         logger.error("Exception in live_report:")
@@ -302,36 +278,9 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# WebSocket event handlers
-@socketio.on('subscribe')
-def handle_subscribe(data):
-    """Handle client subscription to score updates"""
-    contest = data.get('contest')
-    callsign = data.get('callsign')
-    if contest and callsign:
-        join_room(f"{contest}:{callsign}")
-        logger.info(f"Client subscribed to {contest}:{callsign}")
-
-def broadcast_update(contest, callsign, data):
-    """Broadcast score updates to subscribed clients"""
-    socketio.emit('update', data, room=f"{contest}:{callsign}")
-    logger.debug(f"Broadcast update for {contest}:{callsign}")
-
-def get_score_updates(contest, callsign, last_update):
-    """Get incremental score updates"""
-    with get_db() as db:
-        cursor = db.cursor()
-        cursor.execute("""
-            SELECT score, qsos, multipliers, timestamp
-            FROM contest_scores
-            WHERE contest = ? AND callsign = ? AND timestamp > ?
-            ORDER BY timestamp DESC
-        """, (contest, callsign, last_update))
-        return cursor.fetchall()
-
 if __name__ == '__main__':
-    logger.info("Starting development server with WebSocket support")
-    socketio.run(app, host='127.0.0.1', port=8089)
+    logger.info("Starting development server")
+    app.run(host='127.0.0.1', port=8089)
 else:
     # When running under gunicorn
-    logger.info("Starting under gunicorn with WebSocket support")
+    logger.info("Starting under gunicorn")
