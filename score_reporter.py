@@ -213,34 +213,29 @@ class ScoreReporter:
 
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
         """Get station details using Manticore for faster filtering"""
-        if self.manticore_handler:
-            return self.manticore_handler.get_rankings(contest, filter_type, filter_value)
-        else:
-            def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
-            """Get station details using Manticore for faster filtering"""
-            try:
-                # Get station rankings
-                stations = self.manticore.get_rankings(contest, filter_type, filter_value)
-                
-                # Add relative position info
-                reference_score = next(
-                    (station['score'] for station in stations 
-                     if station['callsign'] == callsign), 
-                    0
-                )
-                
-                for station in stations:
-                    if station['callsign'] == callsign:
-                        station['position'] = 'current'
-                    else:
-                        station['position'] = 'above' if station['score'] > reference_score else 'below'
-                
-                return stations
-                
-            except Exception as e:
-                self.logger.error(f"Error getting station details: {e}")
-                self.logger.error(traceback.format_exc())
-                return None
+        try:
+            # Get station rankings
+            stations = self.manticore.get_rankings(contest, filter_type, filter_value)
+            
+            # Add relative position info
+            reference_score = next(
+                (station['score'] for station in stations 
+                 if station['callsign'] == callsign), 
+                0
+            )
+            
+            for station in stations:
+                if station['callsign'] == callsign:
+                    station['position'] = 'current'
+                else:
+                    station['position'] = 'above' if station['score'] > reference_score else 'below'
+            
+            return stations
+            
+        except Exception as e:
+            self.logger.error(f"Error getting station details: {e}")
+            self.logger.error(traceback.format_exc())
+            return None
 
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
