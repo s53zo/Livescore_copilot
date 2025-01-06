@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from manticoresearch import ApiClient, Configuration
-from manticoresearch.api import SearchApi, InsertApi, UtilsApi
+from manticoresearch.api import SearchApi, IndexApi, UtilsApi
 import sqlite3
 import logging
 import traceback
