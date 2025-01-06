@@ -187,48 +187,48 @@ class ManticoreHandler:
 
     def get_rankings(self, contest: str, filter_type: Optional[str] = None, 
                     filter_value: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Get contest rankings using Manticore"""
-    try:
-        # Base query using proper escaping
-        base_query = f'SELECT callsign, score, qsos, multipliers, power, assisted, timestamp ' \
-                    f'FROM rt_contest_scores WHERE contest = "{contest}"'
+        """Get contest rankings using Manticore"""
+        try:
+            # Base query using proper escaping
+            base_query = f'SELECT callsign, score, qsos, multipliers, power, assisted, timestamp ' \
+                        f'FROM rt_contest_scores WHERE contest = "{contest}"'
 
-        # Add filters if specified
-        if filter_type and filter_value:
-            if filter_type == 'Continent':
-                base_query += f' AND continent = "{filter_value}"'
-            elif filter_type == 'CQ Zone':
-                base_query += f' AND cq_zone = {filter_value}'
-            elif filter_type == 'DXCC':
-                base_query += f' AND dxcc_country = "{filter_value}"'
+            # Add filters if specified
+            if filter_type and filter_value:
+                if filter_type == 'Continent':
+                    base_query += f' AND continent = "{filter_value}"'
+                elif filter_type == 'CQ Zone':
+                    base_query += f' AND cq_zone = {filter_value}'
+                elif filter_type == 'DXCC':
+                    base_query += f' AND dxcc_country = "{filter_value}"'
 
-        # Add ordering
-        base_query += ' ORDER BY score DESC'
+            # Add ordering
+            base_query += ' ORDER BY score DESC'
 
-        # Execute query through SQL API
-        response = self.utils_api.sql(base_query)
-        if not response or not hasattr(response, 'hits'):
+            # Execute query through SQL API
+            response = self.utils_api.sql(base_query)
+            if not response or not hasattr(response, 'hits'):
+                return []
+
+            return [
+                {
+                    'callsign': hit['_source']['callsign'],
+                    'score': hit['_source']['score'],
+                    'qsos': hit['_source'].get('qsos', 0),
+                    'multipliers': hit['_source'].get('multipliers', 0),
+                    'power': hit['_source'].get('power', ''),
+                    'assisted': hit['_source'].get('assisted', ''),
+                    'timestamp': hit['_source'].get('timestamp', '')
+                }
+                for hit in response.hits.hits
+            ]
+
+        except Exception as e:
+            self.logger.error(f"Error getting rankings: {e}")
+            self.logger.error(traceback.format_exc())
             return []
 
-        return [
-            {
-                'callsign': hit['_source']['callsign'],
-                'score': hit['_source']['score'],
-                'qsos': hit['_source'].get('qsos', 0),
-                'multipliers': hit['_source'].get('multipliers', 0),
-                'power': hit['_source'].get('power', ''),
-                'assisted': hit['_source'].get('assisted', ''),
-                'timestamp': hit['_source'].get('timestamp', '')
-            }
-            for hit in response.hits.hits
-        ]
-
-    except Exception as e:
-        self.logger.error(f"Error getting rankings: {e}")
-        self.logger.error(traceback.format_exc())
-        return []
-
-def get_band_activity(self, contest: str, band: str) -> List[Dict[str, Any]]:
+    def get_band_activity(self, contest: str, band: str) -> List[Dict[str, Any]]:
     """Get band activity data using Manticore"""
     try:
         query = f'SELECT callsign, qsos, points, multipliers ' \
