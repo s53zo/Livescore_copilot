@@ -247,26 +247,41 @@ def get_callsigns():
             return jsonify({"error": "Contest parameter required"}), 400
 
         manticore = get_manticore()
-        query = f'SELECT callsign, qsos as qso_count FROM rt_contest_scores ' \
-                f'WHERE contest = "{contest}" ' \
-                f'ORDER BY callsign ASC'
-                
-        response = manticore.utils_api.sql(query)
-        if not response or not hasattr(response, 'hits'):
+        
+        # Use Manticore's JSON search API instead of SQL
+        search_params = {
+            "index": "rt_contest_scores",
+            "query": {
+                "match": {
+                    "contest": contest
+                }
+            },
+            "sort": [
+                {"callsign": "asc"}
+            ],
+            "_source": ["callsign", "qsos"]
+        }
+        
+        response = manticore.search_api.search(search_params)
+        
+        if not response or not hasattr(response, 'hits') or not response.hits.hits:
+            logger.info(f"No callsigns found for contest: {contest}")
             return jsonify([])
             
         callsigns = [
             {
                 "name": hit['_source']['callsign'],
-                "qso_count": hit['_source'].get('qso_count', 0)
+                "qso_count": hit['_source'].get('qsos', 0)
             }
             for hit in response.hits.hits
         ]
         
+        logger.info(f"Found {len(callsigns)} callsigns for contest: {contest}")
         return jsonify(callsigns)
         
     except Exception as e:
         logger.error(f"Error fetching callsigns: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 @app.route('/livescore-pilot/api/filters')
