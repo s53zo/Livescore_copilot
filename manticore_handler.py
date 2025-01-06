@@ -16,7 +16,7 @@ class ManticoreHandler:
         self.config = Configuration(host=manticore_url)
         self.api_client = ApiClient(self.config)
         self.search_api = SearchApi(self.api_client)
-        self.insert_api = InsertApi(self.api_client)
+        self.index_api = IndexApi(self.api_client)  # Initialize IndexApi
         self.utils_api = UtilsApi(self.api_client)
         
         self._setup_indexes()
@@ -109,7 +109,7 @@ class ManticoreHandler:
                 }
                 
                 # Insert/update in Manticore
-                self.insert_api.insert(doc)
+                self.index_api.index(**doc)  # Use index_api instead of insert_api
                 
                 # Sync band breakdown
                 self._sync_band_breakdown(record_id)
@@ -147,7 +147,7 @@ class ManticoreHandler:
                         'multipliers': row[5]
                     }
                 }
-                self.insert_api.insert(doc)
+                self.index_api.index(**doc)  # Use index_api instead of insert_api
 
     def _sync_qth_info(self, contest_score_id: int):
         """Sync QTH info for a contest score"""
@@ -174,7 +174,7 @@ class ManticoreHandler:
                         'grid6': row[5]
                     }
                 }
-                self.insert_api.insert(doc)
+                self.index_api.index(**doc)  # Use index_api instead of insert_api
 
     def get_rankings(self, contest: str, filter_type: Optional[str] = None, 
                     filter_value: Optional[str] = None) -> List[Dict[str, Any]]:
