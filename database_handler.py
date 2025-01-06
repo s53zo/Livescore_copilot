@@ -9,14 +9,17 @@ from callsign_utils import CallsignLookup
 from batch_processor import BatchProcessor
 
 class ContestDatabaseHandler:
-    def __init__(self, db_path='contest_data.db'):
+    def __init__(self, db_path='contest_data.db', manticore_url=None):
         self.db_path = db_path
+        self.manticore_handler = None
+        if manticore_url:
+            self.manticore_handler = ManticoreHandler(manticore_url, db_path)
         self.callsign_lookup = CallsignLookup()
         self.logger = logging.getLogger('ContestDatabaseHandler')
         self.setup_database()
         self.batch_processor = BatchProcessor(self)
         self.batch_processor.start()
-
+    
     def process_submission(self, xml_data):
         """Add submission to batch instead of processing immediately"""
         self.batch_processor.add_to_batch(xml_data)
