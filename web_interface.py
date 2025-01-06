@@ -6,6 +6,7 @@ import os
 import logging
 import sys
 import traceback
+import json
 from score_reporter import ScoreReporter
 from datetime import datetime
 
@@ -54,8 +55,6 @@ def get_db():
         logger.error(f"Database connection failed: {str(e)}")
         logger.error(traceback.format_exc())
         raise
-
-
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -143,10 +142,14 @@ def live_report():
                 return render_template('error.html', 
                     error=f"No data found for {callsign} in {contest}")
 
-        # Get station data with filters
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+        try:
+            # Get station data with filters
+            stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+            
+            if not stations:
+                logger.error(f"No station data found for {callsign} in {contest}")
+                return render_template('error.html', error="No data found for the selected criteria")
 
-        if stations:
             # Generate HTML content directly
             template_path = os.path.join(os.path.dirname(__file__), 'templates', 'score_template.html')
             with open(template_path, 'r') as f:
@@ -163,9 +166,14 @@ def live_report():
             
             logger.info(f"Successfully generated report for {callsign} in {contest}")
             return response
-        else:
-            logger.error(f"No station data found for {callsign} in {contest}")
-            return render_template('error.html', error="No data found for the selected criteria")
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {str(e)}")
+            return render_template('error.html', error="Invalid data format received from database")
+        except Exception as e:
+            logger.error(f"Error generating report: {str(e)}")
+            logger.error(traceback.format_exc())
+            return render_template('error.html', error=f"Error generating report: {str(e)}")
 
     except Exception as e:
         logger.error("Exception in live_report:")
