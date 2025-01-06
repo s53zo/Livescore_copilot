@@ -1,4 +1,4 @@
-from manticoresearch.client import Client as ManticoreClient
+from manticoresearch import Client as ManticoreClient
 import sqlite3
 import logging
 import traceback
