@@ -229,82 +229,82 @@ class ManticoreHandler:
             return []
 
     def get_band_activity(self, contest: str, band: str) -> List[Dict[str, Any]]:
-    """Get band activity data using Manticore"""
-    try:
-        query = f'SELECT callsign, qsos, points, multipliers ' \
-                f'FROM rt_band_breakdown ' \
-                f'WHERE contest = "{contest}" AND band = "{band}" ' \
-                f'ORDER BY qsos DESC'
+        """Get band activity data using Manticore"""
+        try:
+            query = f'SELECT callsign, qsos, points, multipliers ' \
+                    f'FROM rt_band_breakdown ' \
+                    f'WHERE contest = "{contest}" AND band = "{band}" ' \
+                    f'ORDER BY qsos DESC'
 
-        response = self.utils_api.sql(query)
-        if not response or not hasattr(response, 'hits'):
+            response = self.utils_api.sql(query)
+            if not response or not hasattr(response, 'hits'):
+                return []
+
+            return [
+                {
+                    'callsign': hit['_source']['callsign'],
+                    'qsos': hit['_source'].get('qsos', 0),
+                    'points': hit['_source'].get('points', 0),
+                    'multipliers': hit['_source'].get('multipliers', 0)
+                }
+                for hit in response.hits.hits
+            ]
+
+        except Exception as e:
+            self.logger.error(f"Error getting band activity: {e}")
+            self.logger.error(traceback.format_exc())
             return []
 
-        return [
-            {
-                'callsign': hit['_source']['callsign'],
-                'qsos': hit['_source'].get('qsos', 0),
-                'points': hit['_source'].get('points', 0),
-                'multipliers': hit['_source'].get('multipliers', 0)
+    def get_contest_summary(self, contest: str) -> Dict[str, Any]:
+        """Get summary statistics for a contest"""
+        try:
+            query = f'SELECT COUNT(*) as participants, ' \
+                    f'MAX(score) as top_score, ' \
+                    f'SUM(qsos) as total_qsos, ' \
+                    f'AVG(score) as avg_score ' \
+                    f'FROM rt_contest_scores ' \
+                    f'WHERE contest = "{contest}"'
+
+            response = self.utils_api.sql(query)
+            if not response or not hasattr(response, 'hits') or not response.hits.hits:
+                return {}
+
+            stats = response.hits.hits[0]['_source']
+            return {
+                'participants': stats.get('participants', 0),
+                'top_score': stats.get('top_score', 0),
+                'total_qsos': stats.get('total_qsos', 0),
+                'avg_score': int(stats.get('avg_score', 0))
             }
-            for hit in response.hits.hits
-        ]
 
-    except Exception as e:
-        self.logger.error(f"Error getting band activity: {e}")
-        self.logger.error(traceback.format_exc())
-        return []
-
-def get_contest_summary(self, contest: str) -> Dict[str, Any]:
-    """Get summary statistics for a contest"""
-    try:
-        query = f'SELECT COUNT(*) as participants, ' \
-                f'MAX(score) as top_score, ' \
-                f'SUM(qsos) as total_qsos, ' \
-                f'AVG(score) as avg_score ' \
-                f'FROM rt_contest_scores ' \
-                f'WHERE contest = "{contest}"'
-
-        response = self.utils_api.sql(query)
-        if not response or not hasattr(response, 'hits') or not response.hits.hits:
+        except Exception as e:
+            self.logger.error(f"Error getting contest summary: {e}")
+            self.logger.error(traceback.format_exc())
             return {}
 
-        stats = response.hits.hits[0]['_source']
-        return {
-            'participants': stats.get('participants', 0),
-            'top_score': stats.get('top_score', 0),
-            'total_qsos': stats.get('total_qsos', 0),
-            'avg_score': int(stats.get('avg_score', 0))
-        }
+    def get_callsign_history(self, callsign: str) -> List[Dict[str, Any]]:
+        """Get contest history for a specific callsign"""
+        try:
+            query = f'SELECT contest, score, qsos, timestamp ' \
+                    f'FROM rt_contest_scores ' \
+                    f'WHERE callsign = "{callsign}" ' \
+                    f'ORDER BY timestamp DESC'
 
-    except Exception as e:
-        self.logger.error(f"Error getting contest summary: {e}")
-        self.logger.error(traceback.format_exc())
-        return {}
+            response = self.utils_api.sql(query)
+            if not response or not hasattr(response, 'hits'):
+                return []
 
-def get_callsign_history(self, callsign: str) -> List[Dict[str, Any]]:
-    """Get contest history for a specific callsign"""
-    try:
-        query = f'SELECT contest, score, qsos, timestamp ' \
-                f'FROM rt_contest_scores ' \
-                f'WHERE callsign = "{callsign}" ' \
-                f'ORDER BY timestamp DESC'
+            return [
+                {
+                    'contest': hit['_source']['contest'],
+                    'score': hit['_source']['score'],
+                    'qsos': hit['_source'].get('qsos', 0),
+                    'timestamp': hit['_source'].get('timestamp', '')
+                }
+                for hit in response.hits.hits
+            ]
 
-        response = self.utils_api.sql(query)
-        if not response or not hasattr(response, 'hits'):
+        except Exception as e:
+            self.logger.error(f"Error getting callsign history: {e}")
+            self.logger.error(traceback.format_exc())
             return []
-
-        return [
-            {
-                'contest': hit['_source']['contest'],
-                'score': hit['_source']['score'],
-                'qsos': hit['_source'].get('qsos', 0),
-                'timestamp': hit['_source'].get('timestamp', '')
-            }
-            for hit in response.hits.hits
-        ]
-
-    except Exception as e:
-        self.logger.error(f"Error getting callsign history: {e}")
-        self.logger.error(traceback.format_exc())
-        return []
