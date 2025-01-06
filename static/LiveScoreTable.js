@@ -11,7 +11,8 @@ const LiveScoreTable = () => {
     });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [nextUpdate, setNextUpdate] = useState(120); // Countdown in seconds
+    const [countdown, setCountdown] = useState(120);
+
     // Get URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const contest = urlParams.get('contest');
@@ -29,7 +30,7 @@ const LiveScoreTable = () => {
             const jsonData = await response.json();
             setData(jsonData);
             setLoading(false);
-            // Data updated successfully
+            setCountdown(120); // Reset countdown
         } catch (err) {
             setError(err.message);
             setLoading(false);
@@ -43,8 +44,14 @@ const LiveScoreTable = () => {
         // Set up auto-refresh
         const intervalId = setInterval(fetchData, 120000); // 2 minutes
         
+        // Countdown timer
+        const countdownId = setInterval(() => {
+            setCountdown(prev => prev > 0 ? prev - 1 : 120);
+        }, 1000);
+
         return () => {
             clearInterval(intervalId);
+            clearInterval(countdownId);
         };
     }, [contest, callsign, filterType, filterValue]);
 
@@ -81,9 +88,13 @@ const LiveScoreTable = () => {
                     Contest Progress Report - {data.contest}
                 </h1>
                 <div className="text-sm text-gray-600">
-                    Last Updated: {new Date(data.timestamp).toLocaleString()} | 
-                    Next Update: {Math.floor(nextUpdate / 60)}:{String(nextUpdate % 60).padStart(2, '0')}
+                    Last Updated: {new Date(data.timestamp).toLocaleString()}
                 </div>
+            </div>
+
+            {/* Countdown Timer */}
+            <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md">
+                Next update in {Math.floor(countdown/60)}:{(countdown%60).toString().padStart(2, '0')}
             </div>
 
             {/* Score Table */}
