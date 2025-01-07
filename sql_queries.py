@@ -254,6 +254,101 @@ INSERT_CONTEST_DATA = """
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
+# Data consistency queries
+CHECK_QSO_CONSISTENCY = """
+    SELECT cs.id, cs.callsign, cs.qsos, SUM(bb.qsos) as total_band_qsos
+    FROM contest_scores cs
+    LEFT JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+    GROUP BY cs.id
+    HAVING cs.qsos != total_band_qsos
+    AND total_band_qsos IS NOT NULL
+"""
+
+COUNT_ORPHANED_BAND_BREAKDOWN = """
+    SELECT COUNT(*) 
+    FROM band_breakdown bb
+    LEFT JOIN contest_scores cs ON cs.id = bb.contest_score_id
+    WHERE cs.id IS NULL
+"""
+
+COUNT_ORPHANED_QTH_INFO = """
+    SELECT COUNT(*) 
+    FROM qth_info qi
+    LEFT JOIN contest_scores cs ON cs.id = qi.contest_score_id
+    WHERE cs.id IS NULL
+"""
+
+ANALYZE_ORPHANED_BAND_BREAKDOWN = """
+    SELECT 
+        bb.contest_score_id,
+        COUNT(*) as record_count,
+        SUM(bb.qsos) as total_qsos,
+        GROUP_CONCAT(DISTINCT bb.band) as bands,
+        MIN(bb.qsos) as min_qsos,
+        MAX(bb.qsos) as max_qsos
+    FROM band_breakdown bb
+    LEFT JOIN contest_scores cs ON cs.id = bb.contest_score_id
+    WHERE cs.id IS NULL
+    GROUP BY bb.contest_score_id
+    ORDER BY record_count DESC
+    LIMIT 10
+"""
+
+ANALYZE_ORPHANED_QTH_INFO = """
+    SELECT 
+        qi.contest_score_id,
+        qi.dxcc_country,
+        qi.cq_zone,
+        qi.iaru_zone,
+        qi.arrl_section,
+        qi.state_province
+    FROM qth_info qi
+    LEFT JOIN contest_scores cs ON cs.id = qi.contest_score_id
+    WHERE cs.id IS NULL
+    ORDER BY qi.contest_score_id DESC
+    LIMIT 10
+"""
+
+DELETE_ORPHANED_BAND_BREAKDOWN = """
+    DELETE FROM band_breakdown
+    WHERE contest_score_id IN (
+        SELECT bb.contest_score_id
+        FROM band_breakdown bb
+        LEFT JOIN contest_scores cs ON cs.id = bb.contest_score_id
+        WHERE cs.id IS NULL
+    )
+"""
+
+DELETE_ORPHANED_QTH_INFO = """
+    DELETE FROM qth_info
+    WHERE contest_score_id IN (
+        SELECT qi.contest_score_id
+        FROM qth_info qi
+        LEFT JOIN contest_scores cs ON cs.id = qi.contest_score_id
+        WHERE cs.id IS NULL
+    )
+"""
+
+FIND_SMALL_CONTESTS = """
+    SELECT contest, COUNT(DISTINCT callsign) as num_callsigns
+    FROM contest_scores
+    GROUP BY contest
+    HAVING num_callsigns < 5
+"""
+
+GET_OLD_RECORDS = """
+    SELECT id
+    FROM contest_scores
+    WHERE timestamp < ?
+"""
+
+GET_ARCHIVE_RECORDS = """
+    SELECT id, contest, timestamp
+    FROM contest_scores
+    WHERE timestamp < ?
+    ORDER BY timestamp DESC
+"""
+
 # Data deletion queries
 DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID = """
     DELETE FROM band_breakdown
