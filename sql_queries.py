@@ -27,6 +27,14 @@ GET_CALLSIGNS = """
     ORDER BY callsign
 """
 
+API_GET_CALLSIGNS = """
+    SELECT DISTINCT callsign
+    FROM contest_scores
+    WHERE contest = ?
+    AND qsos > 0
+    ORDER BY callsign
+"""
+
 GET_FILTERS = """
     SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
            qi.arrl_section, qi.state_province, qi.continent
