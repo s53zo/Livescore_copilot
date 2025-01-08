@@ -197,11 +197,11 @@ class ScoreReporter:
                 base_query += ")"  # Close the CTE
                 
                 # Handle position filtering
-                position_filter = request.args.get('position_filter', 'all')
+                position_filter = position_filter or 'all'  # Default to 'all' if None
                 if position_filter == 'range':
                     query = base_query + """
                         SELECT rs.*, 
-                               CASE WHEN rs.callsign = ? THEN 'current'
+                            CASE WHEN rs.callsign = ? THEN 'current'
                                     WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
                                     THEN 'above' ELSE 'below' END as rel_pos
                         FROM ranked_stations rs
@@ -212,21 +212,21 @@ class ScoreReporter:
                         )
                         ORDER BY rs.score DESC
                     """
+                    params.extend([callsign, callsign, callsign])
                 else:
                     query = base_query + """
                         SELECT rs.*, 
-                               CASE WHEN rs.callsign = ? THEN 'current'
+                            CASE WHEN rs.callsign = ? THEN 'current'
                                     WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
                                     THEN 'above' ELSE 'below' END as rel_pos
                         FROM ranked_stations rs
                         ORDER BY rs.score DESC
                     """
-                
-                params.extend([callsign, callsign, callsign])
+                    params.extend([callsign, callsign])  # Only need two parameters here
 
                 cursor.execute(query, params)
                 return cursor.fetchall()
-    
+
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
@@ -338,4 +338,73 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return "<h1>Error generating report</h1>"
 
-    # ... (rest of the ScoreReporter class remains unchanged)
+    def format_band_data(self, band_data, reference_rates=None, band=None):
+        """Format band data as QSO/Mults (60h/15h) with rate comparison"""
+        if band_data:
+            qsos, mults, long_rate, short_rate = band_data
+            if qsos > 0:
+                # Get reference rates for this band
+                ref_short_rate = 0
+                if reference_rates and band in reference_rates:
+                    _, _, _, ref_short_rate = reference_rates[band]
+                
+                # Determine if 15-minute rate is better
+                better_rate = short_rate > ref_short_rate
+                
+                # Format rates
+                long_rate_str = f"{long_rate:+d}" if long_rate != 0 else "0"
+                short_rate_str = f"{short_rate:+d}" if short_rate != 0 else "0"
+                
+                # Apply CSS class based on 15-minute rate comparison
+                rate_class = "better-rate" if better_rate else "worse-rate"
+                
+                return f'{qsos}/{mults} (<span style="color: gray;">{long_rate_str}</span>/<span class="{rate_class}">{short_rate_str}</span>)'
+        return "-/- (0/0)"
+    
+    def format_total_data(self, qsos, mults, long_rate, short_rate):
+        """Format total QSO/Mults with both rates"""
+        long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
+        short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
+        return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+
+    @staticmethod
+    def get_operator_category(operator, transmitter, assisted):
+        """Map operation categories based on defined rules"""
+        # Handle empty/NULL assisted value - default to NON-ASSISTED
+        assisted = assisted if assisted else 'NON-ASSISTED'
+        
+        category_map = {
+            ('SINGLE-OP', 'ONE', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'ONE', 'NON-ASSISTED'): 'SO',
+            ('SINGLE-OP', 'TWO', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'TWO', 'NON-ASSISTED'): 'SO',
+            ('SINGLE-OP', 'UNLIMITED', 'ASSISTED'): 'SOA',
+            ('SINGLE-OP', 'UNLIMITED', 'NON-ASSISTED'): 'SO',
+            ('CHECKLOG', 'ONE', 'NON-ASSISTED'): 'SO',
+            ('CHECKLOG', 'ONE', 'ASSISTED'): 'SOA',
+            ('MULTI-OP', 'ONE', 'ASSISTED'): 'M/S',
+            ('MULTI-OP', 'ONE', 'NON-ASSISTED'): 'M/S',
+            ('MULTI-OP', 'TWO', 'ASSISTED'): 'M/S',
+            ('MULTI-OP', 'TWO', 'NON-ASSISTED'): 'M/S',
+            ('MULTI-OP', 'UNLIMITED', 'ASSISTED'): 'M/M',
+            ('MULTI-OP', 'UNLIMITED', 'NON-ASSISTED'): 'M/M'
+        }
+        return category_map.get((operator, transmitter, assisted), 'Unknown')
+
+    def get_band_rates_from_table(self, cursor, callsign, contest, timestamp):
+        """Calculate average of top 10 rates for a band"""
+        # Get all non-zero 15-minute rates
+        rates = []
+        for band_data in self.get_band_breakdown_with_rates(None, callsign, contest, timestamp).values():
+            if band_data[3] > 0:  # If there is a non-zero 15-minute rate
+                rates.append(band_data[3])
+        
+        # Sort and take top 10
+        top_rates = sorted(rates, reverse=True)[:10]
+        return round(sum(top_rates) / len(top_rates)) if top_rates else 0
+
+    def format_band_rates(self, rate):
+        """Format average rate for display in header"""
+        if rate > 0:
+            return f'<div class="band-rates">Top 10 avg: {rate}/h</div>'
+        return ""
