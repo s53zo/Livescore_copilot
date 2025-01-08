@@ -20,38 +20,38 @@
                 return num.toString().padStart(2, '0');
             }}
 
-            function updateRelativeTimes() {{
-                document.querySelectorAll('.relative-time').forEach(el => {{
+            function updateRelativeTimes() {
+                document.querySelectorAll('.relative-time').forEach(function(el) {
                     const timestamp = new Date(el.dataset.timestamp + 'Z');
                     const now = new Date();
                     const diff = Math.floor((now - timestamp) / 1000 / 60);
                     
-                    if (diff < 60) {{
-                        el.textContent = `${{diff}}m ago`;
-                    }} else if (diff < 1440) {{
-                        el.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
-                    }} else {{
+                    if (diff < 60) {
+                        el.textContent = diff + 'm ago';
+                    } else if (diff < 1440) {
+                        el.textContent = Math.floor(diff/60) + 'h ' + (diff%60) + 'm ago';
+                    } else {
                         el.textContent = Math.floor(diff/1440) + 'd ago';
-                    }}
-                }});
-            }}
+                    }
+                });
+            }
 
-            const timer = setInterval(() => {{
-                if (minutes === 0 && seconds === 0) {{
+            const timer = setInterval(function() {
+                if (minutes === 0 && seconds === 0) {
                     clearInterval(timer);
                     return;
-                }}
+                }
 
-                if (seconds === 0) {{
+                if (seconds === 0) {
                     minutes--;
                     seconds = 59;
-                }} else {{
+                } else {
                     seconds--;
-                }}
+                }
 
-                countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
+                countdownElement.textContent = minutes + ':' + pad(seconds);
                 updateRelativeTimes();
-            }}, 1000);
+            }, 1000);
 
             updateRelativeTimes();
         }}
@@ -60,138 +60,138 @@
     </script>
     <style>
         /* Base styles */
-        body {{ 
-            font-family: Arial, sans-serif; 
-            margin: 0; 
-            padding: 10px; 
-            color: #333; 
-            padding-bottom: 60px; 
-        }}
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 10px;
+            color: #333;
+            padding-bottom: 60px;
+        }
         
-        h1 {{ 
-            color: #2c3e50; 
-            margin-bottom: 10px; 
-            font-size: 1.5rem; 
-            word-break: break-word; 
-        }}
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1.5rem;
+            word-break: break-word;
+        }
         
         /* Station info styles */
-        .station-info {{ 
-            background-color: #f8f9fa; 
-            padding: 15px; 
-            border-radius: 4px; 
-            margin-bottom: 20px; 
+        .station-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
             line-height: 1.5;
             font-size: 0.9rem;
-        }}
+        }
         
-        .category-tag {{ 
-            display: inline-block; 
-            padding: 2px 8px; 
-            background-color: #e7f3ff; 
-            border: 1px solid #cce5ff; 
-            border-radius: 3px; 
-            color: #0066cc; 
+        .category-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            background-color: #e7f3ff;
+            border: 1px solid #cce5ff;
+            border-radius: 3px;
+            color: #0066cc;
             margin: 2px;
             font-size: 0.85rem;
-        }}
+        }
         
         /* Table styles */
-        .table-container {{
+        .table-container {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             margin-bottom: 20px;
-            background: linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)), 
+            background: linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)),
                         linear-gradient(to left, white 30%, rgba(255, 255, 255, 0)) 100% 0;
             background-size: 50px 100%;
             background-repeat: no-repeat;
             background-attachment: local, local;
-        }}
+        }
         
-        table {{ 
-            border-collapse: collapse; 
+        table {
+            border-collapse: collapse;
             width: 100%;
             min-width: 800px;
-            margin-bottom: 20px; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
-        }}
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
         
-        th, td {{ 
-            border: 1px solid #dee2e6; 
-            padding: 6px 4px; 
-            text-align: center; 
-            font-size: 0.85rem; 
+        th, td {
+            border: 1px solid #dee2e6;
+            padding: 6px 4px;
+            text-align: center;
+            font-size: 0.85rem;
             white-space: nowrap;
-        }}
+        }
         
-        th {{ 
-            background-color: #f8f9fa; 
-            font-weight: bold; 
-            color: #2c3e50; 
-            position: sticky; 
-            top: 0; 
-            z-index: 1; 
-        }}
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #2c3e50;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
         
-        tr:nth-child(even) {{ 
-            background-color: #f8f9fa; 
-        }}
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
         
-        .highlight {{ 
-            background-color: #e8f5e9 !important; 
-            font-weight: bold; 
-        }}
+        .highlight {
+            background-color: #e8f5e9 !important;
+            font-weight: bold;
+        }
         
-        .highlight td {{ 
-            border-top: 2px solid #4caf50; 
-            border-bottom: 2px solid #4caf50; 
-        }}
+        .highlight td {
+            border-top: 2px solid #4caf50;
+            border-bottom: 2px solid #4caf50;
+        }
         
         /* Fixed elements */
-        .refresh-info {{ 
-            position: fixed; 
-            top: 10px; 
-            right: 10px; 
-            background-color: #4caf50; 
-            color: white; 
-            padding: 8px 12px; 
-            border-radius: 4px; 
-            font-size: 0.85rem; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-            z-index: 1000; 
-        }}
-        
-        .footer {{ 
-            position: fixed; 
-            bottom: 0; 
-            left: 0; 
-            right: 0; 
-            background-color: #f8f9fa; 
-            padding: 10px; 
-            text-align: center; 
-            font-size: 0.75rem; 
-            color: #666; 
-            border-top: 1px solid #dee2e6; 
+        .refresh-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #4caf50;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 1000;
-        }}
+        }
+        
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #f8f9fa;
+            padding: 10px;
+            text-align: center;
+            font-size: 0.75rem;
+            color: #666;
+            border-top: 1px solid #dee2e6;
+            z-index: 1000;
+        }
         
         /* Rate display */
-        .band-data {{ 
-            font-family: monospace; 
-            white-space: nowrap; 
+        .band-data {
+            font-family: monospace;
+            white-space: nowrap;
             font-size: 0.8rem;
-        }}
+        }
         
-        .better-rate {{ 
-            color: #c71212; 
-            font-weight: bold; 
-        }}
+        .better-rate {
+            color: #c71212;
+            font-weight: bold;
+        }
         
-        .worse-rate {{ 
-            color: #666; 
-        }}
+        .worse-rate {
+            color: #666;
+        }
         
-        .legend {{
+        .legend {
             display: none;
             position: fixed;
             bottom: 40px;
@@ -202,10 +202,10 @@
             border: 1px solid #dee2e6;
             font-size: 0.75rem;
             z-index: 1000;
-        }}
+        }
         
         /* Filter styles */
-        .filter-info {{
+        .filter-info {
             margin-top: 10px;
             padding: 8px;
             background-color: #f8f9fa;
@@ -213,81 +213,80 @@
             font-size: 0.85rem;
             overflow-x: auto;
             white-space: nowrap;
-        }}
+        }
         
-        .filter-label {{
+        .filter-label {
             font-weight: bold;
             color: #666;
-        }}
+        }
         
-        .filter-link {{
+        .filter-link {
             color: #0066cc;
             text-decoration: none;
             padding: 2px 6px;
             border-radius: 3px;
             display: inline-block;
             margin: 2px;
-        }}
+        }
         
-        .active-filter {{
+        .active-filter {
             background-color: #4CAF50;
             color: white;
             padding: 2px 6px;
             border-radius: 3px;
             font-weight: bold;
-        }}
+        }
         
         /* Responsive adjustments */
-        @media (max-width: 768px) {{
-            body {{
+        @media (max-width: 768px) {
+            body {
                 padding: 5px;
                 padding-bottom: 60px;
-            }}
+            }
             
-            h1 {{
+            h1 {
                 font-size: 1.2rem;
-            }}
+            }
             
-            .station-info {{
+            .station-info {
                 padding: 10px;
                 font-size: 0.8rem;
-            }}
+            }
             
-            .refresh-info {{
+            .refresh-info {
                 font-size: 0.75rem;
                 padding: 6px 10px;
-            }}
+            }
             
-            .footer {{
+            .footer {
                 padding: 8px;
                 font-size: 0.7rem;
-            }}
+            }
             
-            .category-tag {{
+            .category-tag {
                 font-size: 0.75rem;
                 margin: 1px;
                 padding: 1px 6px;
-            }}
-        }}
+            }
+        }
         
         /* Print styles */
-        @media print {{ 
-            .refresh-info, .footer, .legend {{ 
-                display: none; 
-            }} 
-            body {{ 
-                padding-bottom: 0; 
-            }}
-            .table-container {{
+        @media print {
+            .refresh-info, .footer, .legend {
+                display: none;
+            }
+            body {
+                padding-bottom: 0;
+            }
+            .table-container {
                 overflow-x: visible;
                 background: none;
-            }}
-            table {{
+            }
+            table {
                 min-width: auto;
-            }}
-        }}
+            }
+        }
     </style>
-    {additional_css}
 </head>
 <body>
     <div class="refresh-info">

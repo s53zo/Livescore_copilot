@@ -5,6 +5,21 @@ import logging
 from datetime import datetime, timedelta
 import os
 import shutil
+from sql_queries import (
+    CHECK_QSO_CONSISTENCY,
+    COUNT_ORPHANED_BAND_BREAKDOWN,
+    COUNT_ORPHANED_QTH_INFO,
+    ANALYZE_ORPHANED_BAND_BREAKDOWN,
+    ANALYZE_ORPHANED_QTH_INFO,
+    DELETE_ORPHANED_BAND_BREAKDOWN,
+    DELETE_ORPHANED_QTH_INFO,
+    FIND_SMALL_CONTESTS,
+    GET_OLD_RECORDS,
+    DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID,
+    DELETE_QTH_INFO_BY_CONTEST_SCORE_ID,
+    DELETE_CONTEST_SCORES_BY_CONTEST,
+    GET_ARCHIVE_RECORDS
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,38 +30,10 @@ def check_qso_consistency(cursor):
     Check QSO count consistency while accounting for stations that only report totals.
     Returns a tuple of (true_inconsistencies, total_without_breakdown)
     """
-    cursor.execute("""
-        WITH score_analysis AS (
-            SELECT 
-                cs.id,
-                cs.callsign,
-                cs.contest,
-                cs.qsos as total_qsos,
-                COUNT(bb.contest_score_id) as has_band_data,
-                SUM(bb.qsos) as band_total
-            FROM contest_scores cs
-            LEFT JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-            GROUP BY cs.id, cs.callsign, cs.contest, cs.qsos
-        )
-        SELECT 
-            id, callsign, contest, total_qsos, band_total
-        FROM score_analysis
-        WHERE has_band_data > 0
-        AND total_qsos != COALESCE(band_total, 0)
-        AND total_qsos > 0
-    """)
+    cursor.execute(CHECK_QSO_CONSISTENCY)
     true_inconsistencies = cursor.fetchall()
 
-    cursor.execute("""
-        SELECT COUNT(*) 
-        FROM contest_scores cs
-        WHERE NOT EXISTS (
-            SELECT 1 
-            FROM band_breakdown bb 
-            WHERE bb.contest_score_id = cs.id
-        )
-        AND cs.qsos > 0
-    """)
+    cursor.execute(COUNT_ORPHANED_BAND_BREAKDOWN)
     total_without_breakdown = cursor.fetchone()[0]
 
     return true_inconsistencies, total_without_breakdown
@@ -55,38 +42,11 @@ def analyze_orphaned_records(cursor):
     """Analyze orphaned records to provide detailed information"""
     try:
         # Analyze orphaned band breakdown records
-        cursor.execute("""
-            SELECT bb.contest_score_id, 
-                   COUNT(*) as record_count,
-                   SUM(bb.qsos) as total_qsos,
-                   GROUP_CONCAT(bb.band) as bands,
-                   MIN(bb.qsos) as min_qsos,
-                   MAX(bb.qsos) as max_qsos
-            FROM band_breakdown bb 
-            WHERE NOT EXISTS (
-                SELECT 1 FROM contest_scores cs 
-                WHERE cs.id = bb.contest_score_id
-            )
-            GROUP BY bb.contest_score_id
-            ORDER BY total_qsos DESC
-            LIMIT 10
-        """)
+        cursor.execute(ANALYZE_ORPHANED_BAND_BREAKDOWN)
         bb_analysis = cursor.fetchall()
 
         # Analyze orphaned QTH info records
-        cursor.execute("""
-            SELECT qi.contest_score_id,
-                   qi.dxcc_country,
-                   qi.continent,
-                   qi.cq_zone,
-                   qi.iaru_zone
-            FROM qth_info qi 
-            WHERE NOT EXISTS (
-                SELECT 1 FROM contest_scores cs 
-                WHERE cs.id = qi.contest_score_id
-            )
-            LIMIT 10
-        """)
+        cursor.execute(ANALYZE_ORPHANED_QTH_INFO)
         qth_analysis = cursor.fetchall()
 
         return {'band_breakdown': bb_analysis, 'qth_info': qth_analysis}
@@ -100,10 +60,10 @@ def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
     Handle orphaned records with safeguards
     """
     # Get counts
-    cursor.execute("SELECT COUNT(*) FROM band_breakdown bb WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = bb.contest_score_id)")
+    cursor.execute(COUNT_ORPHANED_BAND_BREAKDOWN)
     orphaned_bb = cursor.fetchone()[0]
     
-    cursor.execute("SELECT COUNT(*) FROM qth_info qi WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = qi.contest_score_id)")
+    cursor.execute(COUNT_ORPHANED_QTH_INFO)
     orphaned_qth = cursor.fetchone()[0]
 
     if orphaned_bb > 0 or orphaned_qth > 0:
@@ -112,17 +72,20 @@ def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
         logger.warning(f"  QTH info: {orphaned_qth:,}")
 
         # Get sample analysis
-        bb_analysis, qth_analysis = analyze_orphaned_records(cursor)
+        analysis = analyze_orphaned_records(cursor)
+        if analysis:
+            bb_analysis = analysis['band_breakdown']
+            qth_analysis = analysis['qth_info']
 
-        logger.info("\nAnalysis of orphaned band breakdown records (top 10):")
-        for record in bb_analysis:
-            logger.info(f"Contest Score ID {record[0]}: {record[1]} records, {record[2]} QSOs")
-            logger.info(f"  Bands: {record[3]}")
-            logger.info(f"  QSO range: {record[4]} - {record[5]}")
+            logger.info("\nAnalysis of orphaned band breakdown records (top 10):")
+            for record in bb_analysis:
+                logger.info(f"Contest Score ID {record[0]}: {record[1]} records, {record[2]} QSOs")
+                logger.info(f"  Bands: {record[3]}")
+                logger.info(f"  QSO range: {record[4]} - {record[5]}")
 
-        logger.info("\nAnalysis of orphaned QTH info records (top 10):")
-        for record in qth_analysis:
-            logger.info(f"Contest Score ID {record[0]}: {record[1]}, {record[2]}, CQ:{record[3]}, IARU:{record[4]}")
+            logger.info("\nAnalysis of orphaned QTH info records (top 10):")
+            for record in qth_analysis:
+                logger.info(f"Contest Score ID {record[0]}: {record[1]}, {record[2]}, CQ:{record[3]}, IARU:{record[4]}")
 
         # Safety check - if too many orphaned records, require manual confirmation
         if orphaned_bb > threshold or orphaned_qth > threshold:
@@ -137,10 +100,10 @@ def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
             cursor.execute("BEGIN TRANSACTION")
             try:
                 # Delete orphaned records
-                cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                cursor.execute(DELETE_ORPHANED_BAND_BREAKDOWN)
                 bb_deleted = cursor.rowcount
                 
-                cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                cursor.execute(DELETE_ORPHANED_QTH_INFO)
                 qth_deleted = cursor.rowcount
                 
                 cursor.execute("COMMIT")
@@ -185,45 +148,40 @@ def perform_maintenance(db_path, dry_run):
                 cursor.execute("BEGIN IMMEDIATE")  # Get exclusive lock
                 try:
                     # Handle orphaned records cleanup
-                    cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                    cursor.execute(DELETE_ORPHANED_BAND_BREAKDOWN)
                     bb_deleted = cursor.rowcount
-                    cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                    cursor.execute(DELETE_ORPHANED_QTH_INFO)
                     qth_deleted = cursor.rowcount
                     logger.info(f"Removed {bb_deleted} orphaned band records and {qth_deleted} orphaned QTH records")
 
                     # Clean up small contests
-                    cursor.execute("""
-                        SELECT contest, COUNT(DISTINCT callsign) as num_callsigns
-                        FROM contest_scores
-                        GROUP BY contest
-                        HAVING num_callsigns < 5
-                    """)
+                    cursor.execute(FIND_SMALL_CONTESTS)
                     contests_to_delete = cursor.fetchall()
 
                     for contest, num_callsigns in contests_to_delete:
                         logger.info(f"Removing contest: {contest} ({num_callsigns} callsigns)")
                         # Get IDs first
-                        cursor.execute("SELECT id FROM contest_scores WHERE contest = ?", (contest,))
+                        cursor.execute(GET_OLD_RECORDS, (contest,))
                         contest_ids = [row[0] for row in cursor.fetchall()]
                         
                         # Delete related records
                         if contest_ids:
-                            delete_in_batches(cursor, "band_breakdown", "contest_score_id", contest_ids)
-                            delete_in_batches(cursor, "qth_info", "contest_score_id", contest_ids)
+                            delete_in_batches(cursor, DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID, contest_ids)
+                            delete_in_batches(cursor, DELETE_QTH_INFO_BY_CONTEST_SCORE_ID, contest_ids)
                             
                         # Delete main records
-                        cursor.execute("DELETE FROM contest_scores WHERE contest = ?", (contest,))
+                        cursor.execute(DELETE_CONTEST_SCORES_BY_CONTEST, (contest,))
                         logger.info(f"Deleted contest '{contest}' and all related records")
 
                     # Delete old records
                     threshold_date = datetime.now() - timedelta(days=3)
-                    cursor.execute("SELECT id FROM contest_scores WHERE timestamp < ?", (threshold_date,))
+                    cursor.execute(GET_OLD_RECORDS, (threshold_date,))
                     old_ids = [row[0] for row in cursor.fetchall()]
                     
                     if old_ids:
                         # Delete old records in batches
-                        delete_in_batches(cursor, "band_breakdown", "contest_score_id", old_ids)
-                        delete_in_batches(cursor, "qth_info", "contest_score_id", old_ids)
+                        delete_in_batches(cursor, DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID, old_ids)
+                        delete_in_batches(cursor, DELETE_QTH_INFO_BY_CONTEST_SCORE_ID, old_ids)
                         delete_in_batches(cursor, "contest_scores", "id", old_ids)
                         logger.info(f"Deleted {len(old_ids)} old contest records and related data")
 
@@ -267,9 +225,9 @@ def perform_maintenance(db_path, dry_run):
             total_stations = cursor.fetchone()[0]
 
             # Get orphaned records count
-            cursor.execute("SELECT COUNT(*) FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+            cursor.execute(COUNT_ORPHANED_BAND_BREAKDOWN)
             orphaned_bb = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+            cursor.execute(COUNT_ORPHANED_QTH_INFO)
             orphaned_qth = cursor.fetchone()[0]
 
             logger.info("\nMaintenance Summary:")
@@ -303,12 +261,10 @@ def cleanup_old_files(directory, days, dry_run, file_type):
                     os.remove(file_path)
                     logger.info(f"Deleted old {file_type} file: {file_path}")
 
-def delete_in_batches(cursor, table, column, ids, batch_size=999):
+def delete_in_batches(cursor, query, ids, batch_size=999):
     for i in range(0, len(ids), batch_size):
         batch = ids[i:i + batch_size]
-        placeholders = ','.join('?' * len(batch))
-        query = f"DELETE FROM {table} WHERE {column} IN ({placeholders})"
-        cursor.execute(query, batch)
+        cursor.execute(query, (','.join(map(str, batch)),))
 
 def optimize_database(db_path):
     """Perform database optimization with retry logic"""
@@ -344,11 +300,7 @@ def optimize_database(db_path):
 def archive_old_records(cursor, archive_dir, conn):
     """Helper function to archive old records"""
     logger.info("Archiving old contest records...")
-    cursor.execute("""
-        SELECT id, contest, timestamp
-        FROM contest_scores
-        WHERE timestamp < ?
-    """, (datetime.now() - timedelta(days=365),))
+    cursor.execute(GET_ARCHIVE_RECORDS, (datetime.now() - timedelta(days=365),))
     old_records = cursor.fetchall()
 
     if old_records:
@@ -356,9 +308,9 @@ def archive_old_records(cursor, archive_dir, conn):
             archive_file = os.path.join(archive_dir, f"{contest}_{record_id}.txt")
             with open(archive_file, 'w') as f:
                 f.write(f"Archived Record ID: {record_id}\nContest: {contest}\nTimestamp: {timestamp}\n")
+            cursor.execute(DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID, (record_id,))
+            cursor.execute(DELETE_QTH_INFO_BY_CONTEST_SCORE_ID, (record_id,))
             cursor.execute("DELETE FROM contest_scores WHERE id = ?", (record_id,))
-            cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id = ?", (record_id,))
-            cursor.execute("DELETE FROM qth_info WHERE contest_score_id = ?", (record_id,))
             logger.info(f"Archived and deleted record {record_id} for contest '{contest}'")
         conn.commit()
         logger.info("Archiving completed")

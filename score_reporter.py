@@ -6,6 +6,10 @@ import traceback
 from datetime import datetime, timedelta
 from flask import request
 import sys
+from sql_queries import (CALCULATE_RATES, CALCULATE_BAND_RATES,
+                        GET_BAND_BREAKDOWN, GET_BAND_BREAKDOWN_WITH_RATES,
+                        GET_FILTERS, INSERT_CONTEST_DATA, INSERT_BAND_BREAKDOWN,
+                        INSERT_QTH_INFO)
 
 class RateCalculator:
     def __init__(self, db_path, debug=False):
@@ -26,49 +30,25 @@ class RateCalculator:
             self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
 
     def calculate_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
-        """Calculate QSO rates considering current time and actual QSO increases"""
+        """Calculate QSO rates using centralized SQL query"""
         try:
             current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
             
-            query = """
-            WITH now AS (
-                SELECT datetime('now') as current_utc
-            ),
-            total_qsos AS (
-                SELECT cs.timestamp, SUM(bb.qsos) as total
-                FROM contest_scores cs
-                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                CROSS JOIN now n 
-                WHERE cs.callsign = ? 
-                AND cs.contest = ?
-                AND cs.timestamp >= ?
-                AND cs.timestamp <= ?
-                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
-                GROUP BY cs.timestamp
-                ORDER BY cs.timestamp DESC
-            )
-            SELECT 
-                MAX(total) - MIN(total) as qso_diff,
-                COUNT(*) as samples,
-                MAX(timestamp) as latest,
-                MIN(timestamp) as earliest
-            FROM total_qsos
-            WHERE timestamp >= ?
-            """
-            
+            # Calculate long window rate
             long_window_start = current_ts - timedelta(minutes=long_window)
-            cursor.execute(query, (callsign, contest, 
-                                 long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
-                                 current_ts.strftime('%Y-%m-%d %H:%M:%S'),
-                                 long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
+            cursor.execute(CALCULATE_RATES, (callsign, contest, 
+                           long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
+                           current_ts.strftime('%Y-%m-%d %H:%M:%S'),
+                           long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             row = cursor.fetchone()
             long_rate = int(round(row[0] * 60 / long_window)) if row and row[0] else 0
     
+            # Calculate short window rate
             short_window_start = current_ts - timedelta(minutes=short_window) 
-            cursor.execute(query, (callsign, contest,
-                                 short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
-                                 current_ts.strftime('%Y-%m-%d %H:%M:%S'),
-                                 short_window_start.strftime('%Y-%m-%d %H:%M:%S')))
+            cursor.execute(CALCULATE_RATES, (callsign, contest,
+                           short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
+                           current_ts.strftime('%Y-%m-%d %H:%M:%S'),
+                           short_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             row = cursor.fetchone()
             short_rate = int(round(row[0] * 60 / short_window)) if row and row[0] else 0
     
@@ -80,59 +60,20 @@ class RateCalculator:
             return 0, 0
     
     def calculate_band_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
-        """Calculate per-band QSO rates considering current time and actual QSO increases"""
+        """Calculate per-band QSO rates using centralized SQL query"""
         try:
             current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
             
             # Get current band data
-            query = """
-                SELECT bb.band, bb.qsos, bb.multipliers
-                FROM contest_scores cs
-                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                WHERE cs.callsign = ?
-                AND cs.contest = ?
-                AND cs.timestamp = ?
-                AND bb.qsos > 0
-                ORDER BY bb.band
-            """
-            cursor.execute(query, (callsign, contest, timestamp))
+            cursor.execute(GET_BAND_BREAKDOWN, (callsign, contest, timestamp))
             band_data = {row[0]: [row[1], row[2], 0, 0] for row in cursor.fetchall()}
     
-            # Calculate rates per band using UTC time check
-            query = """
-            WITH now AS (
-                SELECT datetime('now') as current_utc
-            ),
-            band_qsos AS (
-                SELECT cs.timestamp, bb.band, bb.qsos
-                FROM contest_scores cs
-                JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                CROSS JOIN now n
-                WHERE cs.callsign = ? 
-                AND cs.contest = ?
-                AND cs.timestamp >= ?
-                AND cs.timestamp <= ?
-                AND (julianday(n.current_utc) - julianday(cs.timestamp)) * 24 * 60 <= 75
-                ORDER BY cs.timestamp DESC
-            )
-            SELECT 
-                band,
-                MAX(qsos) - MIN(qsos) as qso_diff,
-                COUNT(*) as samples,
-                MAX(timestamp) as latest,
-                MIN(timestamp) as earliest
-            FROM band_qsos
-            WHERE timestamp >= ?
-            GROUP BY band
-            HAVING qso_diff > 0
-            """
-            
             # Calculate long window rates
             long_window_start = current_ts - timedelta(minutes=long_window)
-            cursor.execute(query, (callsign, contest, 
-                                 long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
-                                 current_ts.strftime('%Y-%m-%d %H:%M:%S'),
-                                 long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
+            cursor.execute(CALCULATE_BAND_RATES, (callsign, contest, 
+                           long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
+                           current_ts.strftime('%Y-%m-%d %H:%M:%S'),
+                           long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             for row in cursor.fetchall():
                 band = row[0]
                 if band in band_data:
@@ -140,10 +81,10 @@ class RateCalculator:
             
             # Calculate short window rates
             short_window_start = current_ts - timedelta(minutes=short_window)
-            cursor.execute(query, (callsign, contest,
-                                 short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
-                                 current_ts.strftime('%Y-%m-%d %H:%M:%S'),
-                                 short_window_start.strftime('%Y-%m-%d %H:%M:%S')))
+            cursor.execute(CALCULATE_BAND_RATES, (callsign, contest,
+                           short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
+                           current_ts.strftime('%Y-%m-%d %H:%M:%S'),
+                           short_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             for row in cursor.fetchall():
                 band = row[0]
                 if band in band_data:
@@ -163,7 +104,6 @@ class ScoreReporter:
         self.template_path = template_path or 'templates/score_template.html'
         self.rate_calculator = RateCalculator(self.db_path)
         self.setup_logging()
-        #self.logger.debug(f"Initialized with DB: {self.db_path}, Template: {self.template_path}")
 
     def setup_logging(self):
         """Setup logging configuration with both file and console handlers"""
@@ -203,42 +143,38 @@ class ScoreReporter:
             self.logger.addHandler(file_handler)
             self.logger.addHandler(console_handler)
             
-            # Log startup message
-            #self.logger.info("Score Reporter logging initialized")
-            #self.logger.debug(f"Debug log file: {debug_log}")
-            
         except Exception as e:
             print(f"Error setting up logging: {e}", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)
             raise
         
-    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
+    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None, position_filter=None):
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Get base query results
+                # Start building query
                 base_query = """
-                WITH ranked_stations AS (
-                    SELECT 
-                        cs.id,
-                        cs.callsign,
-                        cs.score,
-                        cs.power,
-                        cs.assisted,
-                        cs.timestamp,
-                        cs.qsos,
-                        cs.multipliers,
-                        ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
-                    FROM contest_scores cs
-                    JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.contest = ?
-                    AND cs.id IN (
-                        SELECT MAX(id)
-                        FROM contest_scores
-                        WHERE contest = ?
-                        GROUP BY callsign
-                    )
+                    WITH ranked_stations AS (
+                        SELECT 
+                            cs.id,
+                            cs.callsign,
+                            cs.score,
+                            cs.power,
+                            cs.assisted,
+                            cs.timestamp,
+                            cs.qsos,
+                            cs.multipliers,
+                            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
+                        FROM contest_scores cs
+                        JOIN qth_info qi ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        AND cs.id IN (
+                            SELECT MAX(id)
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        )
                 """
                 
                 params = [contest, contest]
@@ -246,51 +182,51 @@ class ScoreReporter:
                 # Add QTH filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
-                        'DXCC': 'dxcc_country',
-                        'CQ Zone': 'cq_zone',
-                        'IARU Zone': 'iaru_zone',
-                        'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province',
-                        'Continent': 'continent'
+                        'DXCC': 'qi.dxcc_country',
+                        'CQ Zone': 'qi.cq_zone',
+                        'IARU Zone': 'qi.iaru_zone',
+                        'ARRL Section': 'qi.arrl_section',
+                        'State/Province': 'qi.state_province',
+                        'Continent': 'qi.continent'
                     }
                     
                     if field := filter_map.get(filter_type):
-                        base_query += f" AND qi.{field} = ?"
+                        base_query += f" AND {field} = ?"
                         params.append(filter_value)
-    
-                base_query += ")"
-    
-                # Handle position filter
-                position_filter = request.args.get('position_filter', 'all')
+                
+                base_query += ")"  # Close the CTE
+                
+                # Handle position filtering
+                position_filter = position_filter or 'all'  # Default to 'all' if None
                 if position_filter == 'range':
                     query = base_query + """
-                    SELECT rs.*, 
-                           CASE WHEN rs.callsign = ? THEN 'current'
-                                WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-                                THEN 'above' ELSE 'below' END as rel_pos
-                    FROM ranked_stations rs
-                    WHERE EXISTS (
-                        SELECT 1 FROM ranked_stations ref 
-                        WHERE ref.callsign = ? 
-                        AND ABS(rs.position - ref.position) <= 5
-                    )
-                    ORDER BY rs.score DESC
+                        SELECT rs.*, 
+                            CASE WHEN rs.callsign = ? THEN 'current'
+                                    WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                    THEN 'above' ELSE 'below' END as rel_pos
+                        FROM ranked_stations rs
+                        WHERE EXISTS (
+                            SELECT 1 FROM ranked_stations ref 
+                            WHERE ref.callsign = ? 
+                            AND ABS(rs.position - ref.position) <= 5
+                        )
+                        ORDER BY rs.score DESC
                     """
                     params.extend([callsign, callsign, callsign])
                 else:
                     query = base_query + """
-                    SELECT *, 
-                           CASE WHEN callsign = ? THEN 'current'
-                                WHEN score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-                                THEN 'above' ELSE 'below' END as rel_pos
-                    FROM ranked_stations
-                    ORDER BY score DESC
+                        SELECT rs.*, 
+                            CASE WHEN rs.callsign = ? THEN 'current'
+                                    WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                    THEN 'above' ELSE 'below' END as rel_pos
+                        FROM ranked_stations rs
+                        ORDER BY rs.score DESC
                     """
-                    params.extend([callsign, callsign])
-    
+                    params.extend([callsign, callsign])  # Only need two parameters here
+
                 cursor.execute(query, params)
                 return cursor.fetchall()
-    
+
         except Exception as e:
             self.logger.error(f"Error in get_station_details: {e}")
             self.logger.error(traceback.format_exc())
@@ -301,59 +237,13 @@ class ScoreReporter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                query = """
-                    WITH current_score AS (
-                        SELECT cs.id, cs.timestamp, bb.band, bb.qsos, bb.multipliers
-                        FROM contest_scores cs
-                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                        WHERE cs.callsign = ? 
-                        AND cs.contest = ?
-                        AND cs.timestamp = ?
-                    ),
-                    long_window_score AS (
-                        SELECT bb.band, bb.qsos
-                        FROM contest_scores cs
-                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                        WHERE cs.callsign = ?
-                        AND cs.contest = ?
-                        AND cs.timestamp <= datetime(?, '-60 minutes')
-                        AND cs.timestamp >= datetime(?, '-65 minutes')
-                        ORDER BY cs.timestamp DESC
-                    ),
-                    short_window_score AS (
-                        SELECT bb.band, bb.qsos
-                        FROM contest_scores cs
-                        JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-                        WHERE cs.callsign = ?
-                        AND cs.contest = ?
-                        AND cs.timestamp <= datetime(?, '-15 minutes')
-                        AND cs.timestamp >= datetime(?, '-20 minutes')
-                        ORDER BY cs.timestamp DESC
-                    )
-                    SELECT 
-                        cs.band,
-                        cs.qsos as current_qsos,
-                        cs.multipliers,
-                        lws.qsos as long_window_qsos,
-                        sws.qsos as short_window_qsos
-                    FROM current_score cs
-                    LEFT JOIN long_window_score lws ON cs.band = lws.band
-                    LEFT JOIN short_window_score sws ON cs.band = sws.band
-                    WHERE cs.qsos > 0
-                    ORDER BY cs.band
-                """
-    
                 params = (
                     callsign, contest, timestamp,                  # current_score parameters (3)
                     callsign, contest, timestamp, timestamp,       # long_window_score parameters (4)
                     callsign, contest, timestamp, timestamp        # short_window_score parameters (4)
                 )
-    
-                # Log query details when debugging
-                #self.logger.debug(f"Running band breakdown query with {len(params)} parameters")
-                #self.logger.debug(f"Parameters: {params}")
                 
-                cursor.execute(query, params)
+                cursor.execute(GET_BAND_BREAKDOWN_WITH_RATES, params)
                 results = cursor.fetchall()
                 band_data = {}
                 
@@ -396,6 +286,219 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return 0, 0
 
+    def generate_html_content(self, template, callsign, contest, stations, filter_type=None, filter_value=None, position_filter=None):
+        """Generate HTML content from template and data"""
+        try:
+            from html import escape
+            import re
+            
+            # Initialize filter_info_div with a default value
+            filter_info_div = '<div class="filter-info">No filters applied</div>'
+            
+            # Escape data values for safety
+            safe_callsign = escape(callsign)
+            safe_contest = escape(contest)
+            
+            # Get QTH info and build filter info div
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                        qi.arrl_section, qi.state_province, qi.continent
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.callsign = ? AND cs.contest = ?
+                    ORDER BY cs.timestamp DESC
+                    LIMIT 1
+                """, (callsign, contest))
+                qth_info = cursor.fetchone()
+                
+                if qth_info:
+                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
+                                "State/Province", "Continent"]
+                    filter_parts = []
+                    
+                    for label, value in zip(filter_labels, qth_info):
+                        if value:
+                            if filter_type == label and filter_value == value:
+                                filter_parts.append(
+                                    f'<span class="active-filter">{label}: {value}</span>'
+                                )
+                            else:
+                                filter_parts.append(
+                                    f'<a href="/reports/live.html?contest={contest}'
+                                    f'&callsign={callsign}&filter_type={label}'
+                                    f'&filter_value={value}&position_filter={position_filter}" '
+                                    f'class="filter-link">{label}: {value}</a>'
+                                )
+
+                    if filter_parts:
+                        if filter_type != 'none':
+                            filter_parts.append(
+                                f'<a href="/reports/live.html?contest={contest}'
+                                f'&callsign={callsign}&filter_type=none'
+                                f'&filter_value=none&position_filter={position_filter}" '
+                                f'class="filter-link clear-filter">Show All</a>'
+                            )
+
+                        position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={filter_type}&filter_value={filter_value}"
+                        position_toggle = f"""
+                        <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
+                        class="filter-link {' active-filter' if position_filter == 'range' else ''}">
+                        Only ±5 Positions
+                        </a>
+                        """
+
+                        filter_info_div = f"""
+                        <div class="filter-info">
+                            <span class="filter-label">Filters:</span> 
+                            {' | '.join(filter_parts)} | {position_toggle}
+                        </div>
+                        """
+
+            # Calculate active operators per band
+            active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
+            for station in stations:
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rel_pos = station
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                for band, data in band_breakdown.items():
+                    if data[3] > 0:  # Check 15-minute rate
+                        active_ops[band] += 1
+
+            # Process each station for the table
+            table_rows = []
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+
+            for i, station in enumerate(stations, 1):
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rel_pos = station
+
+                # Get operator category
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT ops, transmitter
+                        FROM contest_scores
+                        WHERE id = ?
+                    """, (station_id,))
+                    result = cursor.fetchone()
+                    ops = result[0] if result else None
+                    transmitter = result[1] if result else None
+
+                op_category = self.get_operator_category(ops or 'SINGLE-OP', 
+                                                    transmitter or 'ONE', 
+                                                    assisted or 'NON-ASSISTED')
+
+                # Format power display
+                power_class = power.upper() if power else 'Unknown'
+                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
+                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
+
+                # Build category HTML
+                category_html = f"""
+                    <div class="category-group">
+                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
+                        {power_tag}
+                    </div>
+                """
+
+                # Get band breakdown and rates
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+
+                if reference_station:
+                    reference_breakdown = self.get_band_breakdown_with_rates(
+                        reference_station[0], callsign, contest, reference_station[5]
+                    )
+                else:
+                    reference_breakdown = {}
+
+                # Calculate total rates
+                total_long_rate, total_short_rate = self.get_total_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+
+                # Format timestamp
+                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+
+                # Build row HTML
+                highlight = ' class="highlight"' if callsign_val == callsign else ''
+                callsign_cell = f"""<td><a href="/reports/live.html?contest={contest.strip()}&callsign={callsign_val.strip()}&filter_type={filter_type or 'none'}&filter_value={filter_value or 'none'}&position_filter={position_filter}" style="color: inherit; text-decoration: none;">{callsign_val}</a></td>"""
+
+                row = f"""
+                <tr{highlight}>
+                    <td>{i}</td>
+                    {callsign_cell}
+                    <td>{category_html}</td>
+                    <td>{score:,}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                </tr>"""
+                table_rows.append(row)
+
+            # Calculate average rates for bands
+            band_avg_rates = {}
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                for band in ['160', '80', '40', '20', '15', '10']:
+                    rates = []
+                    for station in stations:
+                        station_id = station[0]
+                        station_timestamp = station[5]
+                        breakdown = self.get_band_breakdown_with_rates(
+                            station_id, station[1], contest, station_timestamp
+                        )
+                        if band in breakdown and breakdown[band][3] > 0:  # 15-minute rate
+                            rates.append(breakdown[band][3])
+
+                    if rates:
+                        top_rates = sorted(rates, reverse=True)[:10]
+                        avg_rate = round(sum(top_rates) / len(top_rates))
+                        band_avg_rates[band] = self.format_band_rates(avg_rate)
+
+            # Replace band headers in template
+            html_content = template
+            for band in ['160', '80', '40', '20', '15', '10']:
+                count = active_ops[band]
+                rates_html = band_avg_rates.get(band, "")
+                html_content = html_content.replace(
+                    f'>{band}m</th>',
+                    f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
+                )
+
+            # Final template variables
+            template_vars = {
+                'contest': safe_contest,
+                'callsign': safe_callsign,
+                'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                'power': stations[0][3] if stations else 'Unknown',
+                'assisted': stations[0][4] if stations else 'Unknown',
+                'filter_info_div': filter_info_div,
+                'table_rows': '\n'.join(table_rows),
+                'additional_css': ''
+            }
+
+            # Perform template substitution
+            def replace_var(match):
+                var_name = match.group(1)
+                return str(template_vars.get(var_name, ''))
+
+            html_content = re.sub(r'\{(\w+)\}', replace_var, html_content)
+            
+            return html_content
+
+        except Exception as e:
+            self.logger.error(f"Error generating HTML content: {e}")
+            self.logger.error(traceback.format_exc())
+            raise
 
     def format_band_data(self, band_data, reference_rates=None, band=None):
         """Format band data as QSO/Mults (60h/15h) with rate comparison"""
@@ -421,10 +524,10 @@ class ScoreReporter:
         return "-/- (0/0)"
     
     def format_total_data(self, qsos, mults, long_rate, short_rate):
-            """Format total QSO/Mults with both rates"""
-            long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
-            short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
-            return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
+        """Format total QSO/Mults with both rates"""
+        long_rate_str = f"+{long_rate}" if long_rate > 0 else "0"
+        short_rate_str = f"+{short_rate}" if short_rate > 0 else "0"
+        return f"{qsos}/{mults} ({long_rate_str}/{short_rate_str})"
 
     @staticmethod
     def get_operator_category(operator, transmitter, assisted):
@@ -454,7 +557,7 @@ class ScoreReporter:
         """Calculate average of top 10 rates for a band"""
         # Get all non-zero 15-minute rates
         rates = []
-        for band_data in self.get_band_breakdown_with_rates(station_id, callsign, contest, timestamp).values():
+        for band_data in self.get_band_breakdown_with_rates(None, callsign, contest, timestamp).values():
             if band_data[3] > 0:  # If there is a non-zero 15-minute rate
                 rates.append(band_data[3])
         
@@ -467,245 +570,3 @@ class ScoreReporter:
         if rate > 0:
             return f'<div class="band-rates">Top 10 avg: {rate}/h</div>'
         return ""
-    
-    def generate_html_content(self, template, callsign, contest, stations):
-        try:
-            # Get filter information for the header if available
-            filter_info_div = ""
-            current_filter_type = request.args.get('filter_type', 'none')
-            current_filter_value = request.args.get('filter_value', 'none')
-            position_filter = request.args.get('position_filter', 'all')
-    
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
-                           qi.arrl_section, qi.state_province, qi.continent
-                    FROM contest_scores cs
-                    JOIN qth_info qi ON qi.contest_score_id = cs.id
-                    WHERE cs.callsign = ? AND cs.contest = ?
-                    ORDER BY cs.timestamp DESC
-                    LIMIT 1
-                """, (callsign, contest))
-                qth_info = cursor.fetchone()
-                
-                if qth_info:
-                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
-                                   "State/Province", "Continent"]
-                    filter_parts = []
-                    
-                    for label, value in zip(filter_labels, qth_info):
-                        if value:
-                            if current_filter_type == label and current_filter_value == value:
-                                filter_parts.append(
-                                    f'<span class="active-filter">{label}: {value}</span>'
-                                )
-                            else:
-                                filter_parts.append(
-                                    f'<a href="/reports/live.html?contest={contest}'
-                                    f'&callsign={callsign}&filter_type={label}'
-                                    f'&filter_value={value}&position_filter={position_filter}" '
-                                    f'class="filter-link">{label}: {value}</a>'
-                                )
-    
-                    if filter_parts:
-                        if current_filter_type != 'none':
-                            filter_parts.append(
-                                f'<a href="/reports/live.html?contest={contest}'
-                                f'&callsign={callsign}&filter_type=none'
-                                f'&filter_value=none&position_filter={position_filter}" '
-                                f'class="filter-link clear-filter">Show All</a>'
-                            )
-    
-                        position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={current_filter_type}&filter_value={current_filter_value}"
-                        position_toggle = f"""
-                        <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
-                           class="filter-link {' active-filter' if position_filter == 'range' else ''}">
-                           Only ±5 Positions
-                        </a>
-                        """
-    
-                        filter_info_div = f"""
-                        <div class="filter-info">
-                            <span class="filter-label">Filters:</span> 
-                            {' | '.join(filter_parts)} | {position_toggle}
-                        </div>
-                        """
-    
-            # Calculate active operators per band
-            active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
-            for station in stations:
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                band_breakdown = self.get_band_breakdown_with_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                for band, data in band_breakdown.items():
-                    if data[3] > 0:  # Check 15-minute rate
-                        active_ops[band] += 1
-    
-            # Add CSS for rate display
-            additional_css = """
-                    <style>
-                        .category-group {
-                            display: inline-flex;
-                            gap: 4px;
-                            font-size: 0.75rem;
-                            line-height: 1;
-                            align-items: center;
-                        }
-                        
-                        .category-tag {
-                            display: inline-block;
-                            padding: 3px 6px;
-                            border-radius: 3px;
-                            white-space: nowrap;
-                            font-family: monospace;
-                        }
-                        
-                        /* Category colors */
-                        .cat-power-high { background: #ffebee; color: #c62828; }
-                        .cat-power-low { background: #e8f5e9; color: #2e7d32; }
-                        .cat-power-qrp { background: #fff3e0; color: #ef6c00; }
-                        
-                        .cat-soa { background: #e3f2fd; color: #1565c0; }
-                        .cat-so { background: #f3e5f5; color: #6a1b9a; }
-                        .cat-ms { background: #fff8e1; color: #ff8f00; }
-                        .cat-mm { background: #f1f8e9; color: #558b2f; }
-                    </style>
-                """
-    
-            additional_css += """
-                    <style>
-                        .band-rates {
-                            font-size: 0.75rem;
-                            color: #666;
-                            margin-top: 2px;
-                        }
-                        
-                        .top-rate {
-                            color: #c71212;
-                            font-weight: bold;
-                        }
-                        
-                        th.band-header {
-                            min-width: 120px;
-                        }
-                    </style>
-                """
-    
-            table_rows = []
-            for i, station in enumerate(stations, 1):
-                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rn = station
-                
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT ops, transmitter
-                        FROM contest_scores
-                        WHERE id = ?
-                    """, (station_id,))
-                    result = cursor.fetchone()
-                    ops = result[0] if result else None
-                    transmitter = result[1] if result else None
-    
-                op_category = self.get_operator_category(ops or 'SINGLE-OP', 
-                                                       transmitter or 'ONE', 
-                                                       assisted or 'NON-ASSISTED')
-                
-                power_class = power.upper() if power else 'Unknown'
-                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
-                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>' 
-                
-                category_html = f"""
-                    <div class="category-group">
-                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
-                        {power_tag}
-                    </div>
-                """
-    
-                band_breakdown = self.get_band_breakdown_with_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                
-                reference_station = next((s for s in stations if s[1] == callsign), None)
-                if reference_station:
-                    reference_breakdown = self.get_band_breakdown_with_rates(
-                        reference_station[0], callsign, contest, reference_station[5]
-                    )
-                else:
-                    reference_breakdown = {}
-    
-                total_long_rate, total_short_rate = self.get_total_rates(
-                    station_id, callsign_val, contest, timestamp
-                )
-                
-                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                
-                highlight = ' class="highlight"' if callsign_val == callsign else ''
-    
-                callsign_cell = f"""<td><a href="/reports/live.html?contest={contest.strip()}&callsign={callsign_val.strip()}&filter_type={current_filter_type.strip()}&filter_value={current_filter_value.strip()}&position_filter={position_filter}" style="color: inherit; text-decoration: none;">{callsign_val}</a></td>"""
-                
-                row = f"""
-                <tr{highlight}>
-                    <td>{i}</td>
-                    {callsign_cell}
-                    <td>{category_html}</td>
-                    <td>{score:,}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
-                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
-                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
-                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
-                </tr>"""
-                table_rows.append(row)
-    
-            # Get average rates from stations data
-            band_avg_rates = {}
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                for band in ['160', '80', '40', '20', '15', '10']:
-                    rates = []
-                    for station in stations:
-                        station_id = station[0]
-                        station_timestamp = station[5]
-                        breakdown = self.get_band_breakdown_with_rates(
-                            station_id, station[1], contest, station_timestamp
-                        )
-                        for band_name, band_data in breakdown.items():
-                            if band_name == band and band_data[3] > 0:  # 15-minute rate
-                                rates.append(band_data[3])
-                    
-                    if rates:
-                        top_rates = sorted(rates, reverse=True)[:10]
-                        avg_rate = round(sum(top_rates) / len(top_rates))
-                        band_avg_rates[band] = self.format_band_rates(avg_rate)
-    
-            html_content = template
-            for band in ['160', '80', '40', '20', '15', '10']:
-                count = active_ops[band]
-                rates_html = band_avg_rates.get(band, "")
-                html_content = html_content.replace(
-                    f'>{band}m</th>',
-                    f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
-                )
-    
-            html_content = html_content.format(
-                contest=contest,
-                callsign=callsign,
-                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                power=stations[0][3],
-                assisted=stations[0][4],
-                filter_info_div=filter_info_div,
-                table_rows='\n'.join(table_rows),
-                additional_css=additional_css
-            )
-            
-            return html_content
-    
-        except Exception as e:
-            self.logger.error(f"Error generating HTML content: {e}")
-            self.logger.error(traceback.format_exc())
-            raise

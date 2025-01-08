@@ -7,6 +7,14 @@ import traceback
 from datetime import datetime
 from callsign_utils import CallsignLookup
 from batch_processor import BatchProcessor
+from sql_queries import (
+    CREATE_CONTEST_SCORES_TABLE,
+    CREATE_BAND_BREAKDOWN_TABLE,
+    CREATE_QTH_INFO_TABLE,
+    INSERT_QTH_INFO,
+    INSERT_BAND_BREAKDOWN,
+    INSERT_CONTEST_DATA
+)
 
 class ContestDatabaseHandler:
     def __init__(self, db_path='contest_data.db'):
@@ -28,54 +36,9 @@ class ContestDatabaseHandler:
     def setup_database(self):
         """Create the database tables if they don't exist."""
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS contest_scores (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME,
-                    contest TEXT,
-                    callsign TEXT,
-                    power TEXT,
-                    assisted TEXT,
-                    transmitter TEXT,
-                    ops TEXT,
-                    bands TEXT,
-                    mode TEXT,
-                    overlay TEXT,
-                    club TEXT,
-                    section TEXT,
-                    score INTEGER,
-                    qsos INTEGER,
-                    multipliers INTEGER,
-                    points INTEGER
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS band_breakdown (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    contest_score_id INTEGER,
-                    band TEXT,
-                    mode TEXT,
-                    qsos INTEGER,
-                    points INTEGER,
-                    multipliers INTEGER,
-                    FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
-                )
-            ''')
-    
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS qth_info (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    contest_score_id INTEGER,
-                    dxcc_country TEXT,
-                    cq_zone TEXT,
-                    iaru_zone TEXT,
-                    arrl_section TEXT,
-                    state_province TEXT,
-                    grid6 TEXT,
-                    FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
-                )
-            ''')
+            conn.execute(CREATE_CONTEST_SCORES_TABLE)
+            conn.execute(CREATE_BAND_BREAKDOWN_TABLE)
+            conn.execute(CREATE_QTH_INFO_TABLE)
 
     def parse_xml_data(self, xml_data):
         """Parse XML data and return structured contest data."""
@@ -203,12 +166,7 @@ class ContestDatabaseHandler:
     
     def _store_qth_info(self, cursor, contest_score_id, qth_data):
         """Store QTH information in database."""
-        cursor.execute('''
-            INSERT INTO qth_info (
-                contest_score_id, dxcc_country, continent, cq_zone, 
-                iaru_zone, arrl_section, state_province, grid6
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
+        cursor.execute(INSERT_QTH_INFO, (
             contest_score_id,
             qth_data.get('dxcc_country', ''),
             qth_data.get('continent', ''),  # Fixed typo in variable name
@@ -227,13 +185,7 @@ class ContestDatabaseHandler:
             for data in contest_data:
                 try:
                     # Insert main contest data
-                    cursor.execute('''
-                        INSERT INTO contest_scores (
-                            timestamp, contest, callsign, power, assisted, transmitter,
-                            ops, bands, mode, overlay, club, section, score, qsos,
-                            multipliers, points
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
+                    cursor.execute(INSERT_CONTEST_DATA, (
                         data['timestamp'], data['contest'], data['callsign'],
                         data.get('power', ''), data.get('assisted', ''),
                         data.get('transmitter', ''), data.get('ops', ''),
@@ -262,11 +214,7 @@ class ContestDatabaseHandler:
     def _store_band_breakdown(self, cursor, contest_score_id, band_breakdown):
         """Store band breakdown information in database."""
         for band_data in band_breakdown:
-            cursor.execute('''
-                INSERT INTO band_breakdown (
-                    contest_score_id, band, mode, qsos, points, multipliers
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
+            cursor.execute(INSERT_BAND_BREAKDOWN, (
                 contest_score_id,
                 band_data['band'],
                 band_data['mode'],
