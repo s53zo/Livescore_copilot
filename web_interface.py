@@ -177,7 +177,7 @@ def get_callsigns():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            cursor.execute(sql_queries.API_GET_CALLSIGNS, (contest, contest))
+            cursor.execute(sql_queries.API_GET_CALLSIGNS, (contest,))
             callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
             return jsonify(callsigns)
     except Exception as e:

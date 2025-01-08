@@ -35,6 +35,13 @@ API_GET_CALLSIGNS = """
     ORDER BY callsign
 """
 
+VERIFY_STATION = """
+    SELECT COUNT(*) 
+    FROM contest_scores
+    WHERE contest = ?
+    AND callsign = ?
+"""
+
 GET_FILTERS = """
     SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
            qi.arrl_section, qi.state_province, qi.continent
