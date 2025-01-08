@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# Create or empty the output file
+> output.txt
+
+# Find all files (-type f) modified within the last 10 minutes (-mmin -10)
+# Then loop through them, printing filename headers and contents
+for file in $(find . -type f -mmin -10); do
+  echo "===== $file =====" >> output.txt
+  cat "$file" >> output.txt
+  echo "" >> output.txt  # Blank line for readability
+done

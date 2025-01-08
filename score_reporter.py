@@ -148,7 +148,7 @@ class ScoreReporter:
             print(traceback.format_exc(), file=sys.stderr)
             raise
         
-    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None):
+    def get_station_details(self, callsign, contest, filter_type=None, filter_value=None, position_filter=None):
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -286,7 +286,7 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return 0, 0
 
-    def generate_html_content(self, template, callsign, contest, stations):
+    def generate_html_content(self, template, callsign, contest, stations, filter_type=None, filter_value=None, position_filter=None):
         """Generate HTML content from template and data"""
         try:
             from html import escape
