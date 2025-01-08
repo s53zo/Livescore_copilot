@@ -363,7 +363,6 @@ class ScoreReporter:
                 </tr>"""
                 table_rows.append(row)
             
-            # Create template variables
             template_vars = {
                 'callsign': safe_callsign,
                 'contest': safe_contest,
@@ -371,9 +370,9 @@ class ScoreReporter:
                 'power': reference_station[3] if reference_station else 'Unknown',
                 'assisted': reference_station[4] if reference_station else 'Unknown',
                 'table_rows': '\n'.join(table_rows),
-                'filter_info_div': '<div class="filter-info">No filters applied</div>',
-                'additional_css': ''
-            }
+                'filter_info_div': filter_info_div,
+                'additional_css': additional_css  # Make sure this is included
+            }       
             
             # Update JavaScript countdown numbers
             template = template.replace("${diff}", "${diff}")  # Fix JavaScript template literals
@@ -381,11 +380,15 @@ class ScoreReporter:
             template = template.replace("${{diff%60}}", "${diff%60}")
             template = template.replace("${{pad(seconds)}}", "${pad(seconds)}")
             
-            # Perform template substitution
             def replace_var(match):
                 var_name = match.group(1)
                 return str(template_vars.get(var_name, ''))
-            
+
+            template = template.replace('${diff}', '${diff}')  # Fix JavaScript template literals
+            template = template.replace('${Math.floor(diff/60)}', '${Math.floor(diff/60)}')
+            template = template.replace('${diff%60}', '${diff%60}')
+            template = template.replace('${pad(seconds)}', '${pad(seconds)}')
+
             html_content = re.sub(r'\{(\w+)\}', replace_var, template)
             
             return html_content

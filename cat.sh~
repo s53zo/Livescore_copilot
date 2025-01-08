@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
-# Create or empty the output file
+# Overwrite or create an empty output file
 > output.txt
 
-# Find all files (-type f) modified within the last 10 minutes (-mmin -10)
-# Then loop through them, printing filename headers and contents
-for file in $(find . -type f -mmin -10); do
+# Find .py files modified in the last 10 minutes
+# and loop through them, printing filename + contents.
+find . -type f -mmin -10 -name "*.py" | while read -r file; do
   echo "===== $file =====" >> output.txt
   cat "$file" >> output.txt
-  echo "" >> output.txt  # Blank line for readability
+  echo "" >> output.txt  # blank line for readability
 done
