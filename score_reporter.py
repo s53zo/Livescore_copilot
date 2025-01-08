@@ -180,8 +180,8 @@ class ScoreReporter:
                 if position_filter == 'range':
                     params.extend([callsign, callsign, callsign])
                 else:
-                    params.extend([callsign, callsign])
-    
+                    params.extend([callsign, callsign, callsign])  # Add third callsign param for consistency
+
                 cursor.execute(base_query, params)
                 return cursor.fetchall()
     
