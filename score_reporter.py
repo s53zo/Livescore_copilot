@@ -244,4 +244,43 @@ class ScoreReporter:
             self.logger.error(traceback.format_exc())
             return 0, 0
 
+    def generate_html_content(self, template, callsign, contest, stations):
+        """Generate HTML content from template and data"""
+        try:
+            from html import escape
+            import re
+            
+            # Escape all data values
+            safe_callsign = escape(callsign)
+            safe_contest = escape(contest)
+            
+            # Prepare station data
+            station_rows = []
+            for station in stations:
+                safe_station = [escape(str(x)) if x is not None else '' for x in station]
+                station_rows.append(safe_station)
+            
+            # Create template variables
+            template_vars = {
+                'callsign': safe_callsign,
+                'contest': safe_contest,
+                'stations': station_rows,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            # Perform template substitution
+            def replace_var(match):
+                var_name = match.group(1)
+                return str(template_vars.get(var_name, ''))
+            
+            # Replace {{variable}} patterns in template
+            html_content = re.sub(r'\{\{(\w+)\}\}', replace_var, template)
+            
+            return html_content
+            
+        except Exception as e:
+            self.logger.error(f"Error generating HTML content: {e}")
+            self.logger.error(traceback.format_exc())
+            return "<h1>Error generating report</h1>"
+
     # ... (rest of the ScoreReporter class remains unchanged)
