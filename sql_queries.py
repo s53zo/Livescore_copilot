@@ -28,10 +28,21 @@ GET_CALLSIGNS = """
 """
 
 API_GET_CALLSIGNS = """
-    SELECT DISTINCT callsign
-    FROM contest_scores
-    WHERE contest = ?
-    AND qsos > 0
+    WITH latest_scores AS (
+        SELECT cs.callsign, cs.qsos, cs.timestamp
+        FROM contest_scores cs
+        INNER JOIN (
+            SELECT callsign, MAX(timestamp) as max_ts
+            FROM contest_scores
+            WHERE contest = ?
+            GROUP BY callsign
+        ) latest ON cs.callsign = latest.callsign 
+            AND cs.timestamp = latest.max_ts
+        WHERE cs.contest = ?
+        AND cs.qsos > 0
+    )
+    SELECT DISTINCT callsign, qsos as qso_count
+    FROM latest_scores
     ORDER BY callsign
 """
 
