@@ -6,7 +6,7 @@ import traceback
 from datetime import datetime, timedelta
 from flask import request
 import sys
-from sql_queries import (CALCULATE_RATES, CALCULATE_BAND_RATES, GET_STATION_DETAILS,
+from sql_queries import (CALCULATE_RATES, CALCULATE_BAND_RATES,
                         GET_BAND_BREAKDOWN, GET_BAND_BREAKDOWN_WITH_RATES,
                         GET_FILTERS, INSERT_CONTEST_DATA, INSERT_BAND_BREAKDOWN,
                         INSERT_QTH_INFO)
@@ -153,36 +153,78 @@ class ScoreReporter:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Get base query results
-                base_query = GET_STATION_DETAILS
+                # Start building query
+                base_query = """
+                    WITH ranked_stations AS (
+                        SELECT 
+                            cs.id,
+                            cs.callsign,
+                            cs.score,
+                            cs.power,
+                            cs.assisted,
+                            cs.timestamp,
+                            cs.qsos,
+                            cs.multipliers,
+                            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
+                        FROM contest_scores cs
+                        JOIN qth_info qi ON qi.contest_score_id = cs.id
+                        WHERE cs.contest = ?
+                        AND cs.id IN (
+                            SELECT MAX(id)
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        )
+                """
+                
                 params = [contest, contest]
                 
                 # Add QTH filter if specified
                 if filter_type and filter_value and filter_type.lower() != 'none':
                     filter_map = {
-                        'DXCC': 'dxcc_country',
-                        'CQ Zone': 'cq_zone',
-                        'IARU Zone': 'iaru_zone',
-                        'ARRL Section': 'arrl_section',
-                        'State/Province': 'state_province',
-                        'Continent': 'continent'
+                        'DXCC': 'qi.dxcc_country',
+                        'CQ Zone': 'qi.cq_zone',
+                        'IARU Zone': 'qi.iaru_zone',
+                        'ARRL Section': 'qi.arrl_section',
+                        'State/Province': 'qi.state_province',
+                        'Continent': 'qi.continent'
                     }
                     
                     if field := filter_map.get(filter_type):
-                        base_query = base_query.replace(
-                            "WHERE cs.contest = ?",
-                            f"WHERE cs.contest = ? AND qi.{field} = ?"
-                        )
+                        base_query += f" AND {field} = ?"
                         params.append(filter_value)
-    
-                # Handle position filter
+                
+                base_query += ")"  # Close the CTE
+                
+                # Handle position filtering
                 position_filter = request.args.get('position_filter', 'all')
                 if position_filter == 'range':
-                    params.extend([callsign, callsign, callsign])
+                    query = base_query + """
+                        SELECT rs.*, 
+                               CASE WHEN rs.callsign = ? THEN 'current'
+                                    WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                    THEN 'above' ELSE 'below' END as rel_pos
+                        FROM ranked_stations rs
+                        WHERE EXISTS (
+                            SELECT 1 FROM ranked_stations ref 
+                            WHERE ref.callsign = ? 
+                            AND ABS(rs.position - ref.position) <= 5
+                        )
+                        ORDER BY rs.score DESC
+                    """
                 else:
-                    params.extend([callsign, callsign, callsign])  # Add third callsign param for consistency
+                    query = base_query + """
+                        SELECT rs.*, 
+                               CASE WHEN rs.callsign = ? THEN 'current'
+                                    WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+                                    THEN 'above' ELSE 'below' END as rel_pos
+                        FROM ranked_stations rs
+                        ORDER BY rs.score DESC
+                    """
+                
+                params.extend([callsign, callsign, callsign])
 
-                cursor.execute(base_query, params)
+                cursor.execute(query, params)
                 return cursor.fetchall()
     
         except Exception as e:

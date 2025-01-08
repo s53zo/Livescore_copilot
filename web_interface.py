@@ -117,7 +117,14 @@ def live_report():
                     error=f"No data found for {callsign} in {contest}")
 
         # Get station data with filters
-        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
+        position_filter = request.args.get('position_filter', 'all')
+        stations = reporter.get_station_details(
+            callsign, 
+            contest, 
+            filter_type, 
+            filter_value,
+            position_filter
+        )
 
         if stations:
             # Generate HTML content directly
@@ -125,7 +132,15 @@ def live_report():
             with open(template_path, 'r') as f:
                 template = f.read()
 
-            html_content = reporter.generate_html_content(template, callsign, contest, stations)
+            html_content = reporter.generate_html_content(
+                template, 
+                callsign, 
+                contest, 
+                stations,
+                filter_type,
+                filter_value,
+                position_filter
+            )
             
             # Return response with appropriate headers
             response = make_response(html_content)

@@ -108,40 +108,8 @@ CALCULATE_BAND_RATES = """
 """
 
 # Station details query
-GET_STATION_DETAILS = """
-    WITH ranked_stations AS (
-        SELECT 
-            cs.id,
-            cs.callsign,
-            cs.score,
-            cs.power,
-            cs.assisted,
-            cs.timestamp,
-            cs.qsos,
-            cs.multipliers,
-            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
-        FROM contest_scores cs
-        JOIN qth_info qi ON qi.contest_score_id = cs.id
-        WHERE cs.contest = ?
-        AND cs.id IN (
-            SELECT MAX(id)
-            FROM contest_scores
-            WHERE contest = ?
-            GROUP BY callsign
-        )
-    )
-    SELECT rs.*, 
-           CASE WHEN rs.callsign = ? THEN 'current'
-                WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-                THEN 'above' ELSE 'below' END as rel_pos
-    FROM ranked_stations rs
-    WHERE EXISTS (
-        SELECT 1 FROM ranked_stations ref 
-        WHERE ref.callsign = ? 
-        AND ABS(rs.position - ref.position) <= 5
-    )
-    ORDER BY rs.score DESC
-"""
+# GET_STATION_DETAILS query has been moved to score_reporter.py
+# where it is now dynamically built based on filter parameters
 
 # Band breakdown queries
 GET_BAND_BREAKDOWN = """
