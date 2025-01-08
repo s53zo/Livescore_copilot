@@ -903,108 +903,213 @@ class ScoreReporter:
             from html import escape
             import re
             
-            # Escape all data values
+            # Initialize filter_info_div with a default value
+            filter_info_div = '<div class="filter-info">No filters applied</div>'
+            
+            # Escape data values for safety
             safe_callsign = escape(callsign)
             safe_contest = escape(contest)
             
-            # Build table rows with proper formatting
+            # Get QTH info and build filter info div
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                        qi.arrl_section, qi.state_province, qi.continent
+                    FROM contest_scores cs
+                    JOIN qth_info qi ON qi.contest_score_id = cs.id
+                    WHERE cs.callsign = ? AND cs.contest = ?
+                    ORDER BY cs.timestamp DESC
+                    LIMIT 1
+                """, (callsign, contest))
+                qth_info = cursor.fetchone()
+                
+                if qth_info:
+                    filter_labels = ["DXCC", "CQ Zone", "IARU Zone", "ARRL Section", 
+                                "State/Province", "Continent"]
+                    filter_parts = []
+                    
+                    for label, value in zip(filter_labels, qth_info):
+                        if value:
+                            if filter_type == label and filter_value == value:
+                                filter_parts.append(
+                                    f'<span class="active-filter">{label}: {value}</span>'
+                                )
+                            else:
+                                filter_parts.append(
+                                    f'<a href="/reports/live.html?contest={contest}'
+                                    f'&callsign={callsign}&filter_type={label}'
+                                    f'&filter_value={value}&position_filter={position_filter}" '
+                                    f'class="filter-link">{label}: {value}</a>'
+                                )
+
+                    if filter_parts:
+                        if filter_type != 'none':
+                            filter_parts.append(
+                                f'<a href="/reports/live.html?contest={contest}'
+                                f'&callsign={callsign}&filter_type=none'
+                                f'&filter_value=none&position_filter={position_filter}" '
+                                f'class="filter-link clear-filter">Show All</a>'
+                            )
+
+                        position_toggle_url = f"/reports/live.html?contest={contest}&callsign={callsign}&filter_type={filter_type}&filter_value={filter_value}"
+                        position_toggle = f"""
+                        <a href="{position_toggle_url}&position_filter={'range' if position_filter == 'all' else 'all'}" 
+                        class="filter-link {' active-filter' if position_filter == 'range' else ''}">
+                        Only ±5 Positions
+                        </a>
+                        """
+
+                        filter_info_div = f"""
+                        <div class="filter-info">
+                            <span class="filter-label">Filters:</span> 
+                            {' | '.join(filter_parts)} | {position_toggle}
+                        </div>
+                        """
+
+            # Calculate active operators per band
+            active_ops = {'160': 0, '80': 0, '40': 0, '20': 0, '15': 0, '10': 0}
+            for station in stations:
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rel_pos = station
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+                for band, data in band_breakdown.items():
+                    if data[3] > 0:  # Check 15-minute rate
+                        active_ops[band] += 1
+
+            # Process each station for the table
             table_rows = []
             reference_station = next((s for s in stations if s[1] == callsign), None)
-            reference_timestamp = reference_station[5] if reference_station else None
-            
-            if reference_station:
-                reference_band_data = self.get_band_breakdown_with_rates(
-                    reference_station[0], callsign, contest, reference_station[5]
-                )
 
             for i, station in enumerate(stations, 1):
-                station_id, station_callsign, score, power, assisted, timestamp, qsos, mults, position, rel_pos = station
-                
-                # Get band breakdown for this station
-                band_data = self.get_band_breakdown_with_rates(
-                    station_id, station_callsign, contest, timestamp
-                )
-                
+                station_id, callsign_val, score, power, assisted, timestamp, qsos, mults, position, rel_pos = station
+
                 # Get operator category
-                operator_category = self.get_operator_category(
-                    'SINGLE-OP' if assisted != 'MULTI-OP' else 'MULTI-OP',
-                    'ONE',  # Default to ONE if not available
-                    assisted
-                )
-                
-                # Format each cell
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT ops, transmitter
+                        FROM contest_scores
+                        WHERE id = ?
+                    """, (station_id,))
+                    result = cursor.fetchone()
+                    ops = result[0] if result else None
+                    transmitter = result[1] if result else None
+
+                op_category = self.get_operator_category(ops or 'SINGLE-OP', 
+                                                    transmitter or 'ONE', 
+                                                    assisted or 'NON-ASSISTED')
+
+                # Format power display
+                power_class = power.upper() if power else 'Unknown'
+                display_power = 'H' if power_class == 'HIGH' else 'L' if power_class == 'LOW' else 'Q' if power_class == 'QRP' else 'U'
+                power_tag = f'<span class="category-tag cat-power-{power_class.lower()}">{display_power}</span>'
+
+                # Build category HTML
                 category_html = f"""
                     <div class="category-group">
-                        <span class="category-tag cat-{operator_category.lower().replace('/', '')}">{operator_category}</span>
-                        <span class="category-tag cat-power-{power.lower()}">{power[0]}</span>
+                        <span class="category-tag cat-{op_category.lower().replace('/', '')}">{op_category}</span>
+                        {power_tag}
                     </div>
                 """
-                
-                # Format bands data
-                bands = ['160', '80', '40', '20', '15', '10']
-                band_cells = []
-                for band in bands:
-                    if band in band_data:
-                        band_cells.append(self.format_band_data(band_data[band], reference_band_data if reference_station else None, band))
-                    else:
-                        band_cells.append("-/- (0/0)")
-                
-                # Get total rates
-                long_rate, short_rate = self.get_total_rates(station_id, station_callsign, contest, timestamp)
-                
+
+                # Get band breakdown and rates
+                band_breakdown = self.get_band_breakdown_with_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+
+                if reference_station:
+                    reference_breakdown = self.get_band_breakdown_with_rates(
+                        reference_station[0], callsign, contest, reference_station[5]
+                    )
+                else:
+                    reference_breakdown = {}
+
+                # Calculate total rates
+                total_long_rate, total_short_rate = self.get_total_rates(
+                    station_id, callsign_val, contest, timestamp
+                )
+
                 # Format timestamp
                 ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                
-                # Build the row
-                highlight = ' class="highlight"' if station_callsign == callsign else ''
+
+                # Build row HTML
+                highlight = ' class="highlight"' if callsign_val == callsign else ''
+                callsign_cell = f"""<td><a href="/reports/live.html?contest={contest.strip()}&callsign={callsign_val.strip()}&filter_type={filter_type or 'none'}&filter_value={filter_value or 'none'}&position_filter={position_filter}" style="color: inherit; text-decoration: none;">{callsign_val}</a></td>"""
+
                 row = f"""
                 <tr{highlight}>
                     <td>{i}</td>
-                    <td><a href="/reports/live.html?contest={contest}&callsign={station_callsign}&filter_type={filter_type or 'none'}&filter_value={filter_value or 'none'}" style="color: inherit; text-decoration: none;">{station_callsign}</a></td>
+                    {callsign_cell}
                     <td>{category_html}</td>
                     <td>{score:,}</td>
-                    <td class="band-data">{band_cells[0]}</td>
-                    <td class="band-data">{band_cells[1]}</td>
-                    <td class="band-data">{band_cells[2]}</td>
-                    <td class="band-data">{band_cells[3]}</td>
-                    <td class="band-data">{band_cells[4]}</td>
-                    <td class="band-data">{band_cells[5]}</td>
-                    <td class="band-data">{self.format_total_data(qsos, mults, long_rate, short_rate)}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('20'), reference_breakdown, '20')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('15'), reference_breakdown, '15')}</td>
+                    <td class="band-data">{self.format_band_data(band_breakdown.get('10'), reference_breakdown, '10')}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, total_long_rate, total_short_rate)}</td>
                     <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
                 </tr>"""
                 table_rows.append(row)
-            
-            # Create template variables
+
+            # Calculate average rates for bands
+            band_avg_rates = {}
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                for band in ['160', '80', '40', '20', '15', '10']:
+                    rates = []
+                    for station in stations:
+                        station_id = station[0]
+                        station_timestamp = station[5]
+                        breakdown = self.get_band_breakdown_with_rates(
+                            station_id, station[1], contest, station_timestamp
+                        )
+                        if band in breakdown and breakdown[band][3] > 0:  # 15-minute rate
+                            rates.append(breakdown[band][3])
+
+                    if rates:
+                        top_rates = sorted(rates, reverse=True)[:10]
+                        avg_rate = round(sum(top_rates) / len(top_rates))
+                        band_avg_rates[band] = self.format_band_rates(avg_rate)
+
+            # Replace band headers in template
+            html_content = template
+            for band in ['160', '80', '40', '20', '15', '10']:
+                count = active_ops[band]
+                rates_html = band_avg_rates.get(band, "")
+                html_content = html_content.replace(
+                    f'>{band}m</th>',
+                    f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
+                )
+
+            # Final template variables
             template_vars = {
-                'callsign': safe_callsign,
                 'contest': safe_contest,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'power': reference_station[3] if reference_station else 'Unknown',
-                'assisted': reference_station[4] if reference_station else 'Unknown',
+                'callsign': safe_callsign,
+                'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                'power': stations[0][3] if stations else 'Unknown',
+                'assisted': stations[0][4] if stations else 'Unknown',
+                'filter_info_div': filter_info_div,
                 'table_rows': '\n'.join(table_rows),
-                'filter_info_div': '<div class="filter-info">No filters applied</div>',
                 'additional_css': ''
             }
-            
-            # Update JavaScript countdown numbers
-            template = template.replace("${diff}", "${diff}")  # Fix JavaScript template literals
-            template = template.replace("${{Math.floor(diff/60)}}", "${Math.floor(diff/60)}")
-            template = template.replace("${{diff%60}}", "${diff%60}")
-            template = template.replace("${{pad(seconds)}}", "${pad(seconds)}")
-            
+
             # Perform template substitution
             def replace_var(match):
                 var_name = match.group(1)
                 return str(template_vars.get(var_name, ''))
-            
-            html_content = re.sub(r'\{(\w+)\}', replace_var, template)
+
+            html_content = re.sub(r'\{(\w+)\}', replace_var, html_content)
             
             return html_content
-            
+
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())
-            return "<h1>Error generating report</h1>"
+            raise
 
     def format_band_data(self, band_data, reference_rates=None, band=None):
         """Format band data as QSO/Mults (60h/15h) with rate comparison"""
