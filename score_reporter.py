@@ -278,10 +278,16 @@ class ScoreReporter:
                 var_name = match.group(1)
                 return str(template_vars.get(var_name, ''))
             
-            # First replace {variable} patterns
+            # First replace {variable} patterns (Python template variables)
             html_content = re.sub(r'\{(\w+)\}', replace_var, template)
-            # Then replace {{variable}} patterns
-            html_content = re.sub(r'\{\{(\w+)\}\}', replace_var, html_content)
+            # Then replace {{variable}} patterns (JavaScript template literals)
+            # Only replace if they're not inside <script> tags
+            def js_replace(match):
+                if match.group(0).startswith('{{') and '</script>' not in match.string[:match.start()]:
+                    return str(template_vars.get(match.group(1), ''))
+                return match.group(0)
+            
+            html_content = re.sub(r'\{\{(\w+)\}\}', js_replace, html_content)
             
             return html_content
             
