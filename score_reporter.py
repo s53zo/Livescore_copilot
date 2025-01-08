@@ -296,40 +296,97 @@ class ScoreReporter:
             safe_callsign = escape(callsign)
             safe_contest = escape(contest)
             
-            # Prepare station data
-            station_rows = []
-            for station in stations:
-                safe_station = [escape(str(x)) if x is not None else '' for x in station]
-                station_rows.append(safe_station)
+            # Build table rows with proper formatting
+            table_rows = []
+            reference_station = next((s for s in stations if s[1] == callsign), None)
+            reference_timestamp = reference_station[5] if reference_station else None
+            
+            if reference_station:
+                reference_band_data = self.get_band_breakdown_with_rates(
+                    reference_station[0], callsign, contest, reference_station[5]
+                )
+
+            for i, station in enumerate(stations, 1):
+                station_id, station_callsign, score, power, assisted, timestamp, qsos, mults, position, rel_pos = station
+                
+                # Get band breakdown for this station
+                band_data = self.get_band_breakdown_with_rates(
+                    station_id, station_callsign, contest, timestamp
+                )
+                
+                # Get operator category
+                operator_category = self.get_operator_category(
+                    'SINGLE-OP' if assisted != 'MULTI-OP' else 'MULTI-OP',
+                    'ONE',  # Default to ONE if not available
+                    assisted
+                )
+                
+                # Format each cell
+                category_html = f"""
+                    <div class="category-group">
+                        <span class="category-tag cat-{operator_category.lower().replace('/', '')}">{operator_category}</span>
+                        <span class="category-tag cat-power-{power.lower()}">{power[0]}</span>
+                    </div>
+                """
+                
+                # Format bands data
+                bands = ['160', '80', '40', '20', '15', '10']
+                band_cells = []
+                for band in bands:
+                    if band in band_data:
+                        band_cells.append(self.format_band_data(band_data[band], reference_band_data if reference_station else None, band))
+                    else:
+                        band_cells.append("-/- (0/0)")
+                
+                # Get total rates
+                long_rate, short_rate = self.get_total_rates(station_id, station_callsign, contest, timestamp)
+                
+                # Format timestamp
+                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                
+                # Build the row
+                highlight = ' class="highlight"' if station_callsign == callsign else ''
+                row = f"""
+                <tr{highlight}>
+                    <td>{i}</td>
+                    <td><a href="/reports/live.html?contest={contest}&callsign={station_callsign}&filter_type={filter_type or 'none'}&filter_value={filter_value or 'none'}" style="color: inherit; text-decoration: none;">{station_callsign}</a></td>
+                    <td>{category_html}</td>
+                    <td>{score:,}</td>
+                    <td class="band-data">{band_cells[0]}</td>
+                    <td class="band-data">{band_cells[1]}</td>
+                    <td class="band-data">{band_cells[2]}</td>
+                    <td class="band-data">{band_cells[3]}</td>
+                    <td class="band-data">{band_cells[4]}</td>
+                    <td class="band-data">{band_cells[5]}</td>
+                    <td class="band-data">{self.format_total_data(qsos, mults, long_rate, short_rate)}</td>
+                    <td><span class="relative-time" data-timestamp="{timestamp}">{ts}</span></td>
+                </tr>"""
+                table_rows.append(row)
             
             # Create template variables
             template_vars = {
                 'callsign': safe_callsign,
                 'contest': safe_contest,
-                'stations': station_rows,
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'table_rows': ''.join(f'<tr>{"".join(f"<td>{cell}</td>" for cell in row)}</tr>' for row in station_rows),
+                'power': reference_station[3] if reference_station else 'Unknown',
+                'assisted': reference_station[4] if reference_station else 'Unknown',
+                'table_rows': '\n'.join(table_rows),
                 'filter_info_div': '<div class="filter-info">No filters applied</div>',
-                'additional_css': '',
-                'power': 'High',
-                'assisted': 'Assisted'
+                'additional_css': ''
             }
             
-            # Perform template substitution for both {var} and {{var}} syntax
+            # Update JavaScript countdown numbers
+            template = template.replace("${diff}", "${diff}")  # Fix JavaScript template literals
+            template = template.replace("${{Math.floor(diff/60)}}", "${Math.floor(diff/60)}")
+            template = template.replace("${{diff%60}}", "${diff%60}")
+            template = template.replace("${{pad(seconds)}}", "${pad(seconds)}")
+            
+            # Perform template substitution
             def replace_var(match):
                 var_name = match.group(1)
                 return str(template_vars.get(var_name, ''))
             
-            # First replace {variable} patterns (Python template variables)
             html_content = re.sub(r'\{(\w+)\}', replace_var, template)
-            # Then replace {{variable}} patterns (JavaScript template literals)
-            # Only replace if they're not inside <script> tags
-            def js_replace(match):
-                if match.group(0).startswith('{{') and '</script>' not in match.string[:match.start()]:
-                    return str(template_vars.get(match.group(1), ''))
-                return match.group(0)
-            
-            html_content = re.sub(r'\{\{(\w+)\}\}', js_replace, html_content)
             
             return html_content
             
