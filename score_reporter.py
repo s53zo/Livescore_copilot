@@ -265,16 +265,23 @@ class ScoreReporter:
                 'callsign': safe_callsign,
                 'contest': safe_contest,
                 'stations': station_rows,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'table_rows': ''.join(f'<tr>{"".join(f"<td>{cell}</td>" for cell in row)}</tr>' for row in station_rows),
+                'filter_info_div': '<div class="filter-info">No filters applied</div>',
+                'additional_css': '',
+                'power': 'High',
+                'assisted': 'Assisted'
             }
             
-            # Perform template substitution
+            # Perform template substitution for both {var} and {{var}} syntax
             def replace_var(match):
                 var_name = match.group(1)
                 return str(template_vars.get(var_name, ''))
             
-            # Replace {{variable}} patterns in template
-            html_content = re.sub(r'\{\{(\w+)\}\}', replace_var, template)
+            # First replace {variable} patterns
+            html_content = re.sub(r'\{(\w+)\}', replace_var, template)
+            # Then replace {{variable}} patterns
+            html_content = re.sub(r'\{\{(\w+)\}\}', replace_var, html_content)
             
             return html_content
             
