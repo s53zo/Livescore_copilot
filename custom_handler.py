@@ -163,11 +163,7 @@ class CustomHandler(BaseHTTPRequestHandler):
 
             while True:
                 try:
-                    # Send keep-alive
-                    self.wfile.write(b":keep-alive\n\n")
-                    self.wfile.flush()
-                    
-                    # Check for new data
+                    # Check for new data first
                     new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
                     new_data_json = json.dumps(new_data)
 
@@ -178,7 +174,12 @@ class CustomHandler(BaseHTTPRequestHandler):
                         self.wfile.flush()
                         last_data_json = new_data_json
 
+                    # Send keep-alive after data check
+                    self.wfile.write(b":keep-alive\n\n")
+                    self.wfile.flush()
+                    
                     self.debug_print("Keep-alive and data check completed")
+                    
                     # Sleep for 30 seconds between updates
                     time.sleep(30)
 
