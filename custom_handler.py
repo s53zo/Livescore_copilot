@@ -159,36 +159,28 @@ class CustomHandler(BaseHTTPRequestHandler):
             self.wfile.write(f"event: init\ndata: {last_data_json}\n\n".encode('utf-8'))
             self.wfile.flush()
 
-            keep_alive_counter = 0
             self.debug_print(f"SSE connection established for {callsign} in {contest}")
 
             while True:
                 try:
-                    # Check for new data and send updates only every 30 seconds
-                    if keep_alive_counter >= 30:
-                        # Send keep-alive
-                        self.wfile.write(b":keep-alive\n\n")
+                    # Send keep-alive
+                    self.wfile.write(b":keep-alive\n\n")
+                    self.wfile.flush()
+                    
+                    # Check for new data
+                    new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
+                    new_data_json = json.dumps(new_data)
+
+                    # Only send update if data has actually changed
+                    if new_data_json != last_data_json:
+                        self.debug_print("Data changed, sending update")
+                        self.wfile.write(f"event: update\ndata: {new_data_json}\n\n".encode('utf-8'))
                         self.wfile.flush()
-                        
-                        # Check for new data
-                        new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
-                        new_data_json = json.dumps(new_data)
+                        last_data_json = new_data_json
 
-                        # Only send update if data has actually changed
-                        if new_data_json != last_data_json:
-                            self.debug_print("Data changed, sending update")
-                            self.wfile.write(f"event: update\ndata: {new_data_json}\n\n".encode('utf-8'))
-                            self.wfile.flush()
-                            last_data_json = new_data_json
-
-                        keep_alive_counter = 0
-                        self.debug_print("Keep-alive and data check completed")
-                        # Sleep for 30 seconds after processing
-                        time.sleep(30)
-                    else:
-                        # Sleep for 1 second between checks
-                        time.sleep(1)
-                        keep_alive_counter += 1
+                    self.debug_print("Keep-alive and data check completed")
+                    # Sleep for 30 seconds between updates
+                    time.sleep(30)
 
                 except (BrokenPipeError, ConnectionResetError) as e:
                     self.debug_print(f"Client disconnected: {str(e)}")
