@@ -127,7 +127,6 @@ class CustomHandler(BaseHTTPRequestHandler):
             self._send_response(404)
 
     def handle_sse(self):
-        """Handle Server-Sent Events connection"""
         try:
             # Parse query parameters
             query = urllib.parse.urlparse(self.path).query
@@ -154,10 +153,21 @@ class CustomHandler(BaseHTTPRequestHandler):
             self.wfile.write(f"event: init\ndata: {json.dumps(last_data)}\n\n".encode('utf-8'))
             self.wfile.flush()
 
-            # Event loop
+            update_interval = 30  # Check for updates every 30 seconds
+            keep_alive_interval = 10  # Send keep-alive every 30 seconds
+            last_keep_alive = time.time()
+
             while True:
                 try:
-                    # Check for new data
+                    current_time = time.time()
+
+                    # Check if we need to send a keep-alive
+                    if current_time - last_keep_alive >= keep_alive_interval:
+                        self.wfile.write(b":keep-alive\n\n")
+                        self.wfile.flush()
+                        last_keep_alive = current_time
+
+                    # Check for data updates
                     current_timestamp = db_handler.get_last_update_timestamp()
                     if current_timestamp > last_timestamp:
                         new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
@@ -166,12 +176,7 @@ class CustomHandler(BaseHTTPRequestHandler):
                         last_timestamp = current_timestamp
                         last_data = new_data
 
-                    # Send keep-alive comment every 30 seconds
-                    self.wfile.write(b":keep-alive\n\n")
-                    self.wfile.flush()
-
-                    # Sleep to prevent busy waiting
-                    time.sleep(1)
+                    time.sleep(1)  # Small sleep to prevent CPU overuse
 
                 except (BrokenPipeError, ConnectionResetError):
                     self.debug_print("Client disconnected from SSE stream")
