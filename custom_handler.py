@@ -127,6 +127,7 @@ class CustomHandler(BaseHTTPRequestHandler):
             self._send_response(404)
 
     def handle_sse(self):
+        """Handle Server-Sent Events connection"""
         try:
             # Parse query parameters
             query = urllib.parse.urlparse(self.path).query
@@ -136,6 +137,11 @@ class CustomHandler(BaseHTTPRequestHandler):
             callsign = params.get('callsign', [''])[0]
             filter_type = params.get('filter_type', [''])[0]
             filter_value = params.get('filter_value', [''])[0]
+
+            if not contest or not callsign:
+                self.debug_print("Missing required parameters")
+                self._send_response(400)
+                return
 
             # Set SSE headers
             self.send_response(200)
@@ -147,47 +153,52 @@ class CustomHandler(BaseHTTPRequestHandler):
             # Get initial data
             db_handler = self.server.db_handler
             last_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
-            last_timestamp = db_handler.get_last_update_timestamp()
+            last_data_json = json.dumps(last_data)  # Cache the JSON string
 
             # Send initial data
-            self.wfile.write(f"event: init\ndata: {json.dumps(last_data)}\n\n".encode('utf-8'))
+            self.wfile.write(f"event: init\ndata: {last_data_json}\n\n".encode('utf-8'))
             self.wfile.flush()
 
-            update_interval = 30  # Check for updates every 30 seconds
-            keep_alive_interval = 10  # Send keep-alive every 30 seconds
-            last_keep_alive = time.time()
+            keep_alive_counter = 0
+            self.debug_print(f"SSE connection established for {callsign} in {contest}")
 
             while True:
                 try:
-                    current_time = time.time()
-
-                    # Check if we need to send a keep-alive
-                    if current_time - last_keep_alive >= keep_alive_interval:
+                    # Send keep-alive every 30 seconds
+                    if keep_alive_counter >= 30:
                         self.wfile.write(b":keep-alive\n\n")
                         self.wfile.flush()
-                        last_keep_alive = current_time
+                        keep_alive_counter = 0
+                        self.debug_print("Keep-alive sent")
 
-                    # Check for data updates
-                    current_timestamp = db_handler.get_last_update_timestamp()
-                    if current_timestamp > last_timestamp:
-                        new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
-                        self.wfile.write(f"event: update\ndata: {json.dumps(new_data)}\n\n".encode('utf-8'))
+                    # Check for new data
+                    new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
+                    new_data_json = json.dumps(new_data)
+
+                    # Only send update if data has actually changed
+                    if new_data_json != last_data_json:
+                        self.debug_print("Data changed, sending update")
+                        self.wfile.write(f"event: update\ndata: {new_data_json}\n\n".encode('utf-8'))
                         self.wfile.flush()
-                        last_timestamp = current_timestamp
-                        last_data = new_data
+                        last_data_json = new_data_json
 
-                    time.sleep(1)  # Small sleep to prevent CPU overuse
+                    time.sleep(1)
+                    keep_alive_counter += 1
 
-                except (BrokenPipeError, ConnectionResetError):
-                    self.debug_print("Client disconnected from SSE stream")
+                except (BrokenPipeError, ConnectionResetError) as e:
+                    self.debug_print(f"Client disconnected: {str(e)}")
                     break
                 except Exception as e:
-                    self.debug_print(f"SSE error: {str(e)}")
+                    self.debug_print(f"Error in SSE loop: {str(e)}")
+                    self.debug_print(traceback.format_exc())
                     break
 
         except Exception as e:
             self.debug_print(f"SSE setup error: {str(e)}")
+            self.debug_print(traceback.format_exc())
             self._send_response(500)
+        finally:
+            self.debug_print(f"SSE connection closed for {callsign} in {contest}")
 
     def check_authorization(self):
         """Check if the request is authorized"""
