@@ -120,7 +120,7 @@ class CustomHandler(BaseHTTPRequestHandler):
         if self.path == '/health':
             self.debug_print("Health check requested")
             self._send_response(200)
-        elif self.path.startswith('/events'):
+        elif self.path.startswith('/livescore-pilot/events'):
             self.handle_sse()
         else:
             self.debug_print(f"Invalid path requested: {self.path}")

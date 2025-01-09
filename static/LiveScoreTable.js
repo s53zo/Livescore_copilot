@@ -27,7 +27,7 @@ const LiveScoreTable = () => {
         let isMounted = true;
 
         const connect = () => {
-            eventSource = new EventSource(`/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`);
+            eventSource = new EventSource(`/livescore-pilot/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`);
 
             // Handle initial data
             eventSource.addEventListener('init', (event) => {
