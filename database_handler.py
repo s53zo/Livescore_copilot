@@ -292,3 +292,31 @@ class ContestDatabaseHandler:
             """)
             result = cursor.fetchone()
             return result[0] if result else datetime.now().isoformat()
+
+    def get_station_details(self, conn, callsign, contest, filter_type=None, filter_value=None):
+        """Get detailed station information for web interface"""
+        scores = self.get_scores(contest, callsign, filter_type, filter_value)
+        
+        stations = []
+        for station in scores['stations']:
+            stations.append({
+                'callsign': station['callsign'],
+                'score': station['score'],
+                'power': station['power'],
+                'assisted': station['assisted'],
+                'category': station['ops'],  # Using ops as category
+                'bandData': {b['band']: f"{b['qsos']}/{b['multipliers']}" 
+                            for b in station['band_breakdown']},
+                'totalQsos': station['qsos'],
+                'multipliers': station['multipliers'],
+                'lastUpdate': station['timestamp'],
+                'position': 0,  # Will be calculated by web interface
+                'relativePosition': 'current' if station['callsign'] == callsign else 'below'
+            })
+            
+        return {
+            'contest': contest,
+            'callsign': callsign,
+            'stations': stations,
+            'timestamp': scores['timestamp']
+        }

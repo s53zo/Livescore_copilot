@@ -7,6 +7,7 @@ import sys
 import traceback
 import sql_queries
 from score_reporter import ScoreReporter
+from database_handler import ContestDatabaseHandler
 from datetime import datetime
 import json
 import time
@@ -207,7 +208,7 @@ def sse_endpoint():
                     record for record in changed_records
                     if record['contest'] == contest and 
                     (record['callsign'] == callsign or 
-                     record['callsign'] in [s['callsign'] for s in get_station_details(get_db(), callsign, contest, filter_type, filter_value)])
+                     record['callsign'] in [s['callsign'] for s in ContestDatabaseHandler(get_db()).get_station_details(callsign, contest, filter_type, filter_value)])
                 ]
                 
                 if relevant_records:
@@ -223,29 +224,38 @@ def sse_endpoint():
             try:
                 # Get initial data
                 with get_db() as conn:
-                    stations = get_station_details(conn, callsign, contest, filter_type, filter_value)
+                    db_handler = ContestDatabaseHandler(conn)
+                    stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
                     initial_data = get_formatted_data(stations)
                     yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
 
+                last_update_time = time.time()
+                
                 while True:
                     try:
                         # Wait for updates with timeout
-                        changed_records = update_queue.get(timeout=30)
+                        changed_records = update_queue.get(timeout=1)
                         
-                        if changed_records:
+                        current_time = time.time()
+                        if changed_records and (current_time - last_update_time) >= 30:
                             # Get current station data
                             with get_db() as conn:
-                                stations = get_station_details(conn, callsign, contest, filter_type, filter_value)
+                                db_handler = ContestDatabaseHandler(conn)
+                                stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
                                 current_data = get_formatted_data(stations)
                             
                             yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
-                        else:
-                            # Send keep-alive
+                            last_update_time = current_time
+                            
+                        # Send keep-alive every 15 seconds
+                        if (current_time - last_update_time) >= 15:
                             yield ":keep-alive\n\n"
                             
                     except queue.Empty:
-                        # Timeout - send keep-alive
-                        yield ":keep-alive\n\n"
+                        current_time = time.time()
+                        # Send keep-alive every 15 seconds
+                        if (current_time - last_update_time) >= 15:
+                            yield ":keep-alive\n\n"
                         
             finally:
                 # Clean up callback when connection closes
