@@ -232,30 +232,34 @@ def sse_endpoint():
                 last_update_time = time.time()
                 
                 while True:
-                    try:
-                        # Wait for updates with timeout
-                        changed_records = update_queue.get(timeout=1)
+                    current_time = time.time()
+                    time_since_last_update = current_time - last_update_time
+                    
+                    # Check if 30 seconds have passed since last update
+                    if time_since_last_update >= 30:
+                        # Check if we have any pending updates
+                        try:
+                            # Get all available updates without blocking
+                            while True:
+                                changed_records = update_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                            
+                        # Get current station data
+                        with get_db() as conn:
+                            db_handler = ContestDatabaseHandler(conn)
+                            stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
+                            current_data = get_formatted_data(stations)
                         
-                        current_time = time.time()
-                        if changed_records and (current_time - last_update_time) >= 30:
-                            # Get current station data
-                            with get_db() as conn:
-                                db_handler = ContestDatabaseHandler(conn)
-                                stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
-                                current_data = get_formatted_data(stations)
-                            
-                            yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
-                            last_update_time = current_time
-                            
-                        # Send keep-alive every 15 seconds
-                        if (current_time - last_update_time) >= 15:
-                            yield ":keep-alive\n\n"
-                            
-                    except queue.Empty:
-                        current_time = time.time()
-                        # Send keep-alive every 15 seconds
-                        if (current_time - last_update_time) >= 15:
-                            yield ":keep-alive\n\n"
+                        yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
+                        last_update_time = current_time
+                    
+                    # Send keep-alive every 15 seconds
+                    if time_since_last_update >= 15:
+                        yield ":keep-alive\n\n"
+                    
+                    # Sleep briefly to prevent busy waiting
+                    time.sleep(1)
                         
             finally:
                 # Clean up callback when connection closes

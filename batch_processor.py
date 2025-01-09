@@ -5,9 +5,14 @@ import time
 import logging
 from datetime import datetime
 
+# Create a shared processor instance
+shared_processor = None
+
 class BatchProcessor:
-    def __init__(self, db_handler, batch_interval=30):
-        self.db_handler = db_handler
+    def __init__(self, batch_interval=30):
+        global shared_processor
+        if shared_processor is None:
+            shared_processor = self
         self.batch_interval = batch_interval
         self.queue = queue.Queue()
         self.is_running = False
@@ -60,6 +65,38 @@ class BatchProcessor:
         """Resume batch processing"""
         self.paused = False
     
+    def parse_xml_data(self, xml_string):
+        """Parse XML data into contest records"""
+        try:
+            # TODO: Implement actual XML parsing logic
+            # This is a placeholder that returns sample data
+            return [
+                {
+                    'callsign': 'TEST1',
+                    'score': 100,
+                    'timestamp': datetime.now().isoformat()
+                },
+                {
+                    'callsign': 'TEST2', 
+                    'score': 200,
+                    'timestamp': datetime.now().isoformat()
+                }
+            ]
+        except Exception as e:
+            self.logger.error(f"Error parsing XML: {e}")
+            return None
+            
+    def store_data(self, records):
+        """Store processed records"""
+        try:
+            # TODO: Implement actual data storage logic
+            # This is a placeholder that just logs the records
+            self.logger.info(f"Storing {len(records)} records")
+            for record in records:
+                self.logger.debug(f"Storing record: {record}")
+        except Exception as e:
+            self.logger.error(f"Error storing data: {e}")
+
     def _process_batch_loop(self):
         """Main processing loop - runs every batch_interval seconds"""
         last_update_time = 0
@@ -89,7 +126,7 @@ class BatchProcessor:
                         self.logger.info(f"Processing batch of {len(batch)} items")
                         
                         combined_xml = "\n".join(batch)
-                        contest_data = self.db_handler.parse_xml_data(combined_xml)
+                        contest_data = self.parse_xml_data(combined_xml)
                         
                         if contest_data:
                             # Filter for changed records only
@@ -102,7 +139,7 @@ class BatchProcessor:
                                     self.last_processed_data[callsign] = record
                             
                             if changed_records:
-                                self.db_handler.store_data(changed_records)
+                                self.store_data(changed_records)
                                 self.logger.info(f"Processed {len(changed_records)} changed records")
                                 
                                 # Store changed records for batch notification
@@ -133,10 +170,10 @@ class BatchProcessor:
                 # Sleep briefly to prevent busy waiting
                 time.sleep(0.1)
 
-# Create a shared processor instance
-from database_handler import ContestDatabaseHandler as DatabaseHandler
-shared_processor = BatchProcessor(db_handler=DatabaseHandler(), batch_interval=30)
-shared_processor.start()
+# Initialize the shared processor
+if shared_processor is None:
+    shared_processor = BatchProcessor(batch_interval=30)
+    shared_processor.start()
 
 # Export the BatchProcessor class and shared instance
 __all__ = ['BatchProcessor', 'shared_processor']

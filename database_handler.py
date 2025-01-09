@@ -6,7 +6,7 @@ import re
 import traceback
 from datetime import datetime
 from callsign_utils import CallsignLookup
-from batch_processor import BatchProcessor
+from shared_processor import shared_processor
 from sql_queries import (
     CREATE_CONTEST_SCORES_TABLE,
     CREATE_BAND_BREAKDOWN_TABLE,
@@ -22,7 +22,8 @@ class ContestDatabaseHandler:
         self.callsign_lookup = CallsignLookup()
         self.logger = logging.getLogger('ContestDatabaseHandler')
         self.setup_database()
-        self.batch_processor = BatchProcessor(self)
+        self.batch_processor = shared_processor
+        self.batch_processor.set_handler(self)
         self.batch_processor.start()
 
     def process_submission(self, xml_data):
