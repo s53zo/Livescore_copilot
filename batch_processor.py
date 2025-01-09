@@ -72,13 +72,16 @@ class BatchProcessor:
                 start_time = time.time()
                 batch = []
                 
-                # Collect all available items
+                # Collect all available items but limit to batch_interval
                 try:
-                    while True:
+                    while not self.queue.empty() and len(batch) < 100:  # Limit batch size
                         batch.append(self.queue.get_nowait())
                         self.batch_size -= 1
                 except queue.Empty:
                     pass
+                
+                # Ensure we wait the full interval even if we processed items
+                last_update_time = current_time
                 
                 if batch:
                     try:
@@ -124,3 +127,6 @@ class BatchProcessor:
             else:
                 # Sleep briefly to prevent busy waiting
                 time.sleep(0.1)
+
+# Export the BatchProcessor class
+__all__ = ['BatchProcessor']
