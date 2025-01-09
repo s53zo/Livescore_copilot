@@ -197,34 +197,78 @@ def sse_endpoint():
         if not (callsign and contest):
             return jsonify({"error": "Missing required parameters"}), 400
 
-        # Create reporter instance
-        reporter = ScoreReporter(Config.DB_PATH)
+        def get_formatted_data(stations_data):
+            formatted_stations = []
+            for station in stations_data:
+                station_id, call, score, power, assisted, timestamp, qsos, mults, pos, rel_pos = station
+                
+                # Get band breakdown data
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT bb.band, bb.qsos, bb.points, bb.multipliers
+                        FROM band_breakdown bb
+                        JOIN contest_scores cs ON bb.contest_score_id = cs.id
+                        WHERE cs.id = ?
+                    """, (station_id,))
+                    
+                    band_data = {}
+                    for band, qsos, points, band_mults in cursor.fetchall():
+                        band_data[band] = f"{qsos}/{band_mults}"
+                
+                # Determine operator category
+                op_category = "SO"  # Default
+                if assisted == "ASSISTED":
+                    op_category = "SOA"
+                elif assisted == "MULTI-SINGLE":
+                    op_category = "M/S"
+                elif assisted == "MULTI-MULTI":
+                    op_category = "M/M"
+
+                formatted_station = {
+                    "callsign": call,
+                    "score": score,
+                    "power": power,
+                    "assisted": assisted,
+                    "category": op_category,
+                    "bandData": band_data,
+                    "totalQsos": qsos,
+                    "multipliers": mults,
+                    "lastUpdate": timestamp,
+                    "position": pos,
+                    "relativePosition": rel_pos
+                }
+                formatted_stations.append(formatted_station)
+
+            return {
+                "contest": contest,
+                "callsign": callsign,
+                "stations": formatted_stations,
+                "timestamp": datetime.now().isoformat()
+            }
 
         def generate():
-            # Initial data
+            # Get initial data
             with get_db() as conn:
                 cursor = conn.cursor()
-                last_data = reporter.get_station_details(
-                    callsign, 
-                    contest, 
-                    filter_type, 
-                    filter_value
+                stations = get_station_details(
+                    conn, callsign, contest, filter_type, filter_value
                 )
-                yield f"event: init\ndata: {json.dumps(last_data)}\n\n"
+                initial_data = get_formatted_data(stations)
+                yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
 
-                last_timestamp = datetime.now()
+                last_timestamp = None
 
                 while True:
-                    current_timestamp = datetime.now()
-                    if (current_timestamp - last_timestamp).total_seconds() > 1:
-                        new_data = reporter.get_station_details(
-                            callsign, 
-                            contest, 
-                            filter_type, 
-                            filter_value
-                        )
-                        yield f"event: update\ndata: {json.dumps(new_data)}\n\n"
-                        last_timestamp = current_timestamp
+                    current_stations = get_station_details(
+                        conn, callsign, contest, filter_type, filter_value
+                    )
+                    current_data = get_formatted_data(current_stations)
+                    
+                    # Only send update if data has changed
+                    if current_data != last_timestamp:
+                        yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
+                        last_timestamp = current_data
                     
                     yield ":keep-alive\n\n"
                     time.sleep(1)
@@ -238,6 +282,72 @@ def sse_endpoint():
         logger.error("Exception in SSE endpoint:")
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+def get_station_details(conn, callsign, contest, filter_type, filter_value):
+    cursor = conn.cursor()
+    query = """
+    WITH ranked_stations AS (
+        SELECT 
+            cs.id,
+            cs.callsign,
+            cs.score,
+            cs.power,
+            cs.assisted,
+            cs.timestamp,
+            cs.qsos,
+            cs.multipliers,
+            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
+        FROM contest_scores cs
+        JOIN qth_info qi ON qi.contest_score_id = cs.id
+        WHERE cs.contest = ?
+        AND cs.id IN (
+            SELECT MAX(id)
+            FROM contest_scores
+            WHERE contest = ?
+            GROUP BY callsign
+        )
+    """
+    
+    params = [contest, contest]
+    
+    if filter_type and filter_value and filter_type.lower() != 'none':
+        filter_map = {
+            'DXCC': 'qi.dxcc_country',
+            'CQ Zone': 'qi.cq_zone',
+            'IARU Zone': 'qi.iaru_zone',
+            'ARRL Section': 'qi.arrl_section',
+            'State/Province': 'qi.state_province',
+            'Continent': 'qi.continent'
+        }
+        
+        if field := filter_map.get(filter_type):
+            query += f" AND {field} = ?"
+            params.append(filter_value)
+    
+    query += """
+    ) SELECT 
+        id, 
+        callsign,
+        score,
+        power,
+        assisted,
+        timestamp,
+        qsos,
+        multipliers,
+        position,
+        CASE 
+            WHEN callsign = ? THEN 'current'
+            WHEN score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+            THEN 'above' 
+            ELSE 'below' 
+        END as relative_pos
+    FROM ranked_stations
+    ORDER BY score DESC
+    """
+    
+    params.extend([callsign, callsign])
+    cursor.execute(query, params)
+    return cursor.fetchall()
 
 @app.route('/livescore-pilot/api/callsigns')
 def get_callsigns():
