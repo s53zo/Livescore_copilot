@@ -10,6 +10,7 @@ from score_reporter import ScoreReporter
 from datetime import datetime
 import json
 import time
+import queue
 
 # Define Config class first
 class Config:
@@ -55,8 +56,6 @@ def get_db():
         logger.error(f"Database connection failed: {str(e)}")
         logger.error(traceback.format_exc())
         raise
-
-
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -197,115 +196,61 @@ def sse_endpoint():
         if not (callsign and contest):
             return jsonify({"error": "Missing required parameters"}), 400
 
-        def get_formatted_data(stations_data):
-            formatted_stations = []
-            for station in stations_data:
-                station_id, call, score, power, assisted, timestamp, qsos, mults, pos, rel_pos = station
-                
-                # Get band breakdown data
-                with get_db() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT bb.band, bb.qsos, bb.points, bb.multipliers
-                        FROM band_breakdown bb
-                        JOIN contest_scores cs ON bb.contest_score_id = cs.id
-                        WHERE cs.id = ?
-                    """, (station_id,))
-                    
-                    band_data = {}
-                    for band, qsos, points, band_mults in cursor.fetchall():
-                        band_data[band] = f"{qsos}/{band_mults}"
-                
-                # Determine operator category
-                op_category = "SO"  # Default
-                if assisted == "ASSISTED":
-                    op_category = "SOA"
-                elif assisted == "MULTI-SINGLE":
-                    op_category = "M/S"
-                elif assisted == "MULTI-MULTI":
-                    op_category = "M/M"
+        # Queue to receive updates from BatchProcessor
+        update_queue = queue.Queue()
 
-                formatted_station = {
-                    "callsign": call,
-                    "score": score,
-                    "power": power,
-                    "assisted": assisted,
-                    "category": op_category,
-                    "bandData": band_data,
-                    "totalQsos": qsos,
-                    "multipliers": mults,
-                    "lastUpdate": timestamp,
-                    "position": pos,
-                    "relativePosition": rel_pos
-                }
-                formatted_stations.append(formatted_station)
+        def batch_processor_callback(changed_records):
+            """Callback to receive updates from BatchProcessor"""
+            try:
+                # Filter records for this specific contest/callsign
+                relevant_records = [
+                    record for record in changed_records
+                    if record['contest'] == contest and 
+                    (record['callsign'] == callsign or 
+                     record['callsign'] in [s['callsign'] for s in get_station_details(get_db(), callsign, contest, filter_type, filter_value)])
+                ]
+                
+                if relevant_records:
+                    update_queue.put(relevant_records)
+            except Exception as e:
+                logger.error(f"Error in batch processor callback: {e}")
 
-            return {
-                "contest": contest,
-                "callsign": callsign,
-                "stations": formatted_stations,
-                "timestamp": datetime.now().isoformat()
-            }
+        # Register callback with BatchProcessor
+        from batch_processor import batch_processor
+        batch_processor.register_callback(batch_processor_callback)
 
         def generate():
-            # Get initial data
-            with get_db() as conn:
-                cursor = conn.cursor()
-                stations = get_station_details(
-                    conn, callsign, contest, filter_type, filter_value
-                )
-                initial_data = get_formatted_data(stations)
-                yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
-
-                last_data = None
+            try:
+                # Get initial data
+                with get_db() as conn:
+                    stations = get_station_details(conn, callsign, contest, filter_type, filter_value)
+                    initial_data = get_formatted_data(stations)
+                    yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
 
                 while True:
-                    current_stations = get_station_details(
-                        conn, callsign, contest, filter_type, filter_value
-                    )
-                    current_data = get_formatted_data(current_stations)
-                    
-                    # Only send update if data has changed
-                    if current_data != last_data:
-                        # Calculate delta between current and last data
-                        if last_data:
-                            delta = {
-                                "contest": current_data["contest"],
-                                "callsign": current_data["callsign"],
-                                "timestamp": current_data["timestamp"],
-                                "changes": []
-                            }
-                            
-                            # Compare each station's data
-                            for i, (current_station, last_station) in enumerate(zip(current_data["stations"], last_data["stations"])):
-                                changes = {}
-                                for key in ["score", "totalQsos", "multipliers", "position", "relativePosition"]:
-                                    if current_station[key] != last_station[key]:
-                                        changes[key] = current_station[key]
-                                
-                                # Check band data changes
-                                band_changes = {}
-                                for band, data in current_station["bandData"].items():
-                                    if band not in last_station["bandData"] or last_station["bandData"][band] != data:
-                                        band_changes[band] = data
-                                
-                                if band_changes:
-                                    changes["bandData"] = band_changes
-                                
-                                if changes:
-                                    changes["callsign"] = current_station["callsign"]
-                                    delta["changes"].append(changes)
-                            
-                            if delta["changes"]:
-                                yield f"event: update\ndata: {json.dumps(delta)}\n\n"
-                        else:
-                            # First update - send full data
-                            yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
+                    try:
+                        # Wait for updates with timeout
+                        changed_records = update_queue.get(timeout=30)
                         
-                        last_data = current_data
-                    
-                    yield ":keep-alive\n\n"
-                    time.sleep(30)
+                        if changed_records:
+                            # Get current station data
+                            with get_db() as conn:
+                                stations = get_station_details(conn, callsign, contest, filter_type, filter_value)
+                                current_data = get_formatted_data(stations)
+                            
+                            yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
+                        else:
+                            # Send keep-alive
+                            yield ":keep-alive\n\n"
+                            
+                    except queue.Empty:
+                        # Timeout - send keep-alive
+                        yield ":keep-alive\n\n"
+                        
+            finally:
+                # Clean up callback when connection closes
+                batch_processor.unregister_callback(batch_processor_callback)
+                logger.info(f"SSE connection closed for {callsign} in {contest}")
 
         response = Response(generate(), mimetype='text/event-stream')
         response.headers['Cache-Control'] = 'no-cache'
@@ -317,71 +262,55 @@ def sse_endpoint():
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-def get_station_details(conn, callsign, contest, filter_type, filter_value):
-    cursor = conn.cursor()
-    query = """
-    WITH ranked_stations AS (
-        SELECT 
-            cs.id,
-            cs.callsign,
-            cs.score,
-            cs.power,
-            cs.assisted,
-            cs.timestamp,
-            cs.qsos,
-            cs.multipliers,
-            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
-        FROM contest_scores cs
-        JOIN qth_info qi ON qi.contest_score_id = cs.id
-        WHERE cs.contest = ?
-        AND cs.id IN (
-            SELECT MAX(id)
-            FROM contest_scores
-            WHERE contest = ?
-            GROUP BY callsign
-        )
-    """
-    
-    params = [contest, contest]
-    
-    if filter_type and filter_value and filter_type.lower() != 'none':
-        filter_map = {
-            'DXCC': 'qi.dxcc_country',
-            'CQ Zone': 'qi.cq_zone',
-            'IARU Zone': 'qi.iaru_zone',
-            'ARRL Section': 'qi.arrl_section',
-            'State/Province': 'qi.state_province',
-            'Continent': 'qi.continent'
-        }
+def get_formatted_data(stations_data):
+    formatted_stations = []
+    for station in stations_data:
+        station_id, call, score, power, assisted, timestamp, qsos, mults, pos, rel_pos = station
         
-        if field := filter_map.get(filter_type):
-            query += f" AND {field} = ?"
-            params.append(filter_value)
-    
-    query += """
-    ) SELECT 
-        id, 
-        callsign,
-        score,
-        power,
-        assisted,
-        timestamp,
-        qsos,
-        multipliers,
-        position,
-        CASE 
-            WHEN callsign = ? THEN 'current'
-            WHEN score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-            THEN 'above' 
-            ELSE 'below' 
-        END as relative_pos
-    FROM ranked_stations
-    ORDER BY score DESC
-    """
-    
-    params.extend([callsign, callsign])
-    cursor.execute(query, params)
-    return cursor.fetchall()
+        # Get band breakdown data
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT bb.band, bb.qsos, bb.points, bb.multipliers
+                FROM band_breakdown bb
+                JOIN contest_scores cs ON bb.contest_score_id = cs.id
+                WHERE cs.id = ?
+            """, (station_id,))
+            
+            band_data = {}
+            for band, qsos, points, band_mults in cursor.fetchall():
+                band_data[band] = f"{qsos}/{band_mults}"
+        
+        # Determine operator category
+        op_category = "SO"  # Default
+        if assisted == "ASSISTED":
+            op_category = "SOA"
+        elif assisted == "MULTI-SINGLE":
+            op_category = "M/S"
+        elif assisted == "MULTI-MULTI":
+            op_category = "M/M"
+
+        formatted_station = {
+            "callsign": call,
+            "score": score,
+            "power": power,
+            "assisted": assisted,
+            "category": op_category,
+            "bandData": band_data,
+            "totalQsos": qsos,
+            "multipliers": mults,
+            "lastUpdate": timestamp,
+            "position": pos,
+            "relativePosition": rel_pos
+        }
+        formatted_stations.append(formatted_station)
+
+    return {
+        "contest": contest,
+        "callsign": callsign,
+        "stations": formatted_stations,
+        "timestamp": datetime.now().isoformat()
+    }
 
 @app.route('/livescore-pilot/api/callsigns')
 def get_callsigns():

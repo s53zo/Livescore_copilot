@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 
 class BatchProcessor:
-    def __init__(self, db_handler, batch_interval=60):
+    def __init__(self, db_handler, batch_interval=30):
         self.db_handler = db_handler
         self.batch_interval = batch_interval
         self.queue = queue.Queue()
@@ -14,6 +14,8 @@ class BatchProcessor:
         self.processing_thread = None
         self.batch_size = 0
         self.logger = logging.getLogger('BatchProcessor')
+        self.last_processed_data = {}  # Track last processed data for each callsign
+        self.change_callbacks = []  # List of callbacks to notify on changes
         
     def start(self):
         """Start the batch processing thread"""
@@ -30,6 +32,18 @@ class BatchProcessor:
         if self.processing_thread:
             self.processing_thread.join()
             self.logger.info("Batch processor stopped")
+            
+    def register_callback(self, callback):
+        """Register a callback to be notified of changes"""
+        if callback not in self.change_callbacks:
+            self.change_callbacks.append(callback)
+            self.logger.debug(f"Registered new callback. Total callbacks: {len(self.change_callbacks)}")
+            
+    def unregister_callback(self, callback):
+        """Unregister a change callback"""
+        if callback in self.change_callbacks:
+            self.change_callbacks.remove(callback)
+            self.logger.debug(f"Unregistered callback. Total callbacks: {len(self.change_callbacks)}")
     
     def add_to_batch(self, xml_data):
         """Add XML data to processing queue"""
@@ -48,33 +62,65 @@ class BatchProcessor:
     
     def _process_batch_loop(self):
         """Main processing loop - runs every batch_interval seconds"""
+        last_update_time = 0
+        
         while self.is_running:
-            start_time = time.time()
-            batch = []
+            current_time = time.time()
             
-            try:
-                while True:
-                    batch.append(self.queue.get_nowait())
-                    self.batch_size -= 1
-            except queue.Empty:
-                pass
-            
-            if batch:
+            # Only process if we've reached the batch interval
+            if current_time - last_update_time >= self.batch_interval:
+                start_time = time.time()
+                batch = []
+                
+                # Collect all available items
                 try:
-                    batch_start = time.time()
-                    self.logger.info(f"Processing batch of {len(batch)} items")
-                    
-                    combined_xml = "\n".join(batch)
-                    contest_data = self.db_handler.parse_xml_data(combined_xml)
-                    if contest_data:
-                        self.db_handler.store_data(contest_data)
-                    
-                    batch_time = time.time() - batch_start
-                    self.logger.info(f"Batch processed in {batch_time:.2f} seconds")
-                    
-                except Exception as e:
-                    self.logger.error(f"Error processing batch: {e}")
-            
-            elapsed = time.time() - start_time
-            sleep_time = max(0, self.batch_interval - elapsed)
-            time.sleep(sleep_time)
+                    while True:
+                        batch.append(self.queue.get_nowait())
+                        self.batch_size -= 1
+                except queue.Empty:
+                    pass
+                
+                if batch:
+                    try:
+                        batch_start = time.time()
+                        self.logger.info(f"Processing batch of {len(batch)} items")
+                        
+                        combined_xml = "\n".join(batch)
+                        contest_data = self.db_handler.parse_xml_data(combined_xml)
+                        
+                        if contest_data:
+                            # Filter for changed records only
+                            changed_records = []
+                            for record in contest_data:
+                                callsign = record['callsign']
+                                if callsign not in self.last_processed_data or \
+                                   self.last_processed_data[callsign] != record:
+                                    changed_records.append(record)
+                                    self.last_processed_data[callsign] = record
+                            
+                            if changed_records:
+                                self.db_handler.store_data(changed_records)
+                                self.logger.info(f"Processed {len(changed_records)} changed records")
+                                
+                                # Notify all registered callbacks
+                                for callback in self.change_callbacks:
+                                    try:
+                                        callback(changed_records)
+                                    except Exception as e:
+                                        self.logger.error(f"Error in callback: {e}")
+                                
+                                # Update last processed time
+                                last_update_time = time.time()
+                        
+                        batch_time = time.time() - batch_start
+                        self.logger.info(f"Batch processed in {batch_time:.2f} seconds")
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error processing batch: {e}")
+                
+                elapsed = time.time() - start_time
+                sleep_time = max(0, self.batch_interval - elapsed)
+                time.sleep(sleep_time)
+            else:
+                # Sleep briefly to prevent busy waiting
+                time.sleep(0.1)
