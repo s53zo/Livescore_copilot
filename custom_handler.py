@@ -164,23 +164,25 @@ class CustomHandler(BaseHTTPRequestHandler):
 
             while True:
                 try:
-                    # Send keep-alive every 30 seconds
+                    # Check for new data and send updates only every 30 seconds
                     if keep_alive_counter >= 30:
+                        # Send keep-alive
                         self.wfile.write(b":keep-alive\n\n")
                         self.wfile.flush()
+                        
+                        # Check for new data
+                        new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
+                        new_data_json = json.dumps(new_data)
+
+                        # Only send update if data has actually changed
+                        if new_data_json != last_data_json:
+                            self.debug_print("Data changed, sending update")
+                            self.wfile.write(f"event: update\ndata: {new_data_json}\n\n".encode('utf-8'))
+                            self.wfile.flush()
+                            last_data_json = new_data_json
+
                         keep_alive_counter = 0
-                        self.debug_print("Keep-alive sent")
-
-                    # Check for new data
-                    new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
-                    new_data_json = json.dumps(new_data)
-
-                    # Only send update if data has actually changed
-                    if new_data_json != last_data_json:
-                        self.debug_print("Data changed, sending update")
-                        self.wfile.write(f"event: update\ndata: {new_data_json}\n\n".encode('utf-8'))
-                        self.wfile.flush()
-                        last_data_json = new_data_json
+                        self.debug_print("Keep-alive and data check completed")
 
                     time.sleep(1)
                     keep_alive_counter += 1
