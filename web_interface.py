@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
+from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response, Response
 import sqlite3
 import os
 import logging
@@ -8,6 +8,8 @@ import traceback
 import sql_queries
 from score_reporter import ScoreReporter
 from datetime import datetime
+import json
+import time
 
 # Define Config class first
 class Config:
@@ -181,6 +183,60 @@ def get_contests():
             return jsonify(contests)
     except Exception as e:
         logger.error(f"Error fetching contests: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    
+@app.route('/livescore-pilot/events')
+def sse_endpoint():
+    try:
+        # Get parameters from URL
+        callsign = request.args.get('callsign')
+        contest = request.args.get('contest')
+        filter_type = request.args.get('filter_type', 'none')
+        filter_value = request.args.get('filter_value', 'none')
+
+        if not (callsign and contest):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        # Create reporter instance
+        reporter = ScoreReporter(Config.DB_PATH)
+
+        def generate():
+            # Initial data
+            with get_db() as conn:
+                cursor = conn.cursor()
+                last_data = reporter.get_station_details(
+                    callsign, 
+                    contest, 
+                    filter_type, 
+                    filter_value
+                )
+                yield f"event: init\ndata: {json.dumps(last_data)}\n\n"
+
+                last_timestamp = datetime.now()
+
+                while True:
+                    current_timestamp = datetime.now()
+                    if (current_timestamp - last_timestamp).total_seconds() > 1:
+                        new_data = reporter.get_station_details(
+                            callsign, 
+                            contest, 
+                            filter_type, 
+                            filter_value
+                        )
+                        yield f"event: update\ndata: {json.dumps(new_data)}\n\n"
+                        last_timestamp = current_timestamp
+                    
+                    yield ":keep-alive\n\n"
+                    time.sleep(1)
+
+        response = Response(generate(), mimetype='text/event-stream')
+        response.headers['Cache-Control'] = 'no-cache'
+        response.headers['Connection'] = 'keep-alive'
+        return response
+
+    except Exception as e:
+        logger.error("Exception in SSE endpoint:")
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 @app.route('/livescore-pilot/api/callsigns')
