@@ -183,9 +183,12 @@ class CustomHandler(BaseHTTPRequestHandler):
 
                         keep_alive_counter = 0
                         self.debug_print("Keep-alive and data check completed")
-
-                    time.sleep(1)
-                    keep_alive_counter += 1
+                        # Sleep for 30 seconds after processing
+                        time.sleep(30)
+                    else:
+                        # Sleep for 1 second between checks
+                        time.sleep(1)
+                        keep_alive_counter += 1
 
                 except (BrokenPipeError, ConnectionResetError) as e:
                     self.debug_print(f"Client disconnected: {str(e)}")
