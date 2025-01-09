@@ -105,12 +105,8 @@ class BatchProcessor:
                                 self.db_handler.store_data(changed_records)
                                 self.logger.info(f"Processed {len(changed_records)} changed records")
                                 
-                                # Notify all registered callbacks
-                                for callback in self.change_callbacks:
-                                    try:
-                                        callback(changed_records)
-                                    except Exception as e:
-                                        self.logger.error(f"Error in callback: {e}")
+                                # Store changed records for batch notification
+                                self.pending_updates = changed_records
                                 
                                 # Update last processed time
                                 last_update_time = time.time()
@@ -124,12 +120,21 @@ class BatchProcessor:
                 elapsed = time.time() - start_time
                 sleep_time = max(0, self.batch_interval - elapsed)
                 time.sleep(sleep_time)
+                
+                # Notify callbacks at the end of the batch interval
+                if hasattr(self, 'pending_updates') and self.pending_updates:
+                    for callback in self.change_callbacks:
+                        try:
+                            callback(self.pending_updates)
+                        except Exception as e:
+                            self.logger.error(f"Error in callback: {e}")
+                    del self.pending_updates
             else:
                 # Sleep briefly to prevent busy waiting
                 time.sleep(0.1)
 
 # Create a shared processor instance
-from database_handler import DatabaseHandler
+from database_handler import ContestDatabaseHandler as DatabaseHandler
 shared_processor = BatchProcessor(db_handler=DatabaseHandler(), batch_interval=30)
 shared_processor.start()
 
