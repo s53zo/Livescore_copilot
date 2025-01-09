@@ -222,3 +222,73 @@ class ContestDatabaseHandler:
                 band_data['points'],
                 band_data['multipliers']
             ))
+
+    def get_scores(self, contest, callsign, filter_type, filter_value):
+        """Get scores with optional filtering"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # Base query
+            query = """
+                SELECT cs.*, qth.*
+                FROM contest_scores cs
+                LEFT JOIN qth_info qth ON cs.id = qth.contest_score_id
+                WHERE cs.contest = ?
+            """
+            params = [contest]
+
+            # Add callsign filter if provided
+            if callsign:
+                query += " AND cs.callsign = ?"
+                params.append(callsign)
+
+            # Add additional filters
+            if filter_type and filter_value:
+                if filter_type == 'dxcc':
+                    query += " AND qth.dxcc_country = ?"
+                elif filter_type == 'cq_zone':
+                    query += " AND qth.cq_zone = ?"
+                elif filter_type == 'iaru_zone':
+                    query += " AND qth.iaru_zone = ?"
+                elif filter_type == 'arrl_section':
+                    query += " AND qth.arrl_section = ?"
+                elif filter_type == 'state':
+                    query += " AND qth.state_province = ?"
+                elif filter_type == 'continent':
+                    query += " AND qth.continent = ?"
+                params.append(filter_value)
+
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+
+            # Format results
+            scores = []
+            for row in results:
+                score = dict(row)
+                # Get band breakdown
+                cursor.execute("""
+                    SELECT band, mode, qsos, points, multipliers
+                    FROM band_breakdown
+                    WHERE contest_score_id = ?
+                """, (row['id'],))
+                score['band_breakdown'] = {b['band']: b for b in cursor.fetchall()}
+                scores.append(score)
+
+            return {
+                'contest': contest,
+                'callsign': callsign,
+                'stations': scores,
+                'timestamp': self.get_last_update_timestamp()
+            }
+
+    def get_last_update_timestamp(self):
+        """Get the timestamp of the most recent update"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT MAX(timestamp) as last_update
+                FROM contest_scores
+            """)
+            result = cursor.fetchone()
+            return result[0] if result else datetime.now().isoformat()

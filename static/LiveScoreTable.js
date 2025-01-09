@@ -20,38 +20,62 @@ const LiveScoreTable = () => {
     const filterType = urlParams.get('filter_type');
     const filterValue = urlParams.get('filter_value');
 
-    // Fetch data function
-    const fetchData = async () => {
-        try {
-            const response = await fetch(`/livescore-pilot/api/scores?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`);
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            const jsonData = await response.json();
-            setData(jsonData);
-            setLoading(false);
-            setCountdown(120); // Reset countdown
-        } catch (err) {
-            setError(err.message);
-            setLoading(false);
-        }
-    };
-
-    // Initial data fetch
+    // Setup SSE connection with reconnect logic
     useEffect(() => {
-        fetchData();
-        
-        // Set up auto-refresh
-        const intervalId = setInterval(fetchData, 120000); // 2 minutes
-        
+        let eventSource;
+        let reconnectTimeout;
+        let isMounted = true;
+
+        const connect = () => {
+            eventSource = new EventSource(`/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`);
+
+            // Handle initial data
+            eventSource.addEventListener('init', (event) => {
+                if (!isMounted) return;
+                const data = JSON.parse(event.data);
+                setData(data);
+                setLoading(false);
+                setError(null);
+            });
+
+            // Handle updates
+            eventSource.addEventListener('update', (event) => {
+                if (!isMounted) return;
+                const data = JSON.parse(event.data);
+                setData(data);
+                setCountdown(120); // Reset countdown on update
+            });
+
+            // Handle errors
+            eventSource.onerror = () => {
+                if (!isMounted) return;
+                eventSource.close();
+                setError('Connection lost - attempting to reconnect...');
+                reconnectTimeout = setTimeout(() => {
+                    if (isMounted) {
+                        setError(null);
+                        setLoading(true);
+                        connect();
+                    }
+                }, 5000);
+            };
+        };
+
+        connect();
+
         // Countdown timer
-        const countdownId = setInterval(() => {
-            setCountdown(prev => prev > 0 ? prev - 1 : 120);
+        const countdownInterval = setInterval(() => {
+            setCountdown(prev => {
+                if (prev <= 0) return 120;
+                return prev - 1;
+            });
         }, 1000);
 
         return () => {
-            clearInterval(intervalId);
-            clearInterval(countdownId);
+            isMounted = false;
+            if (eventSource) eventSource.close();
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            clearInterval(countdownInterval);
         };
     }, [contest, callsign, filterType, filterValue]);
 
