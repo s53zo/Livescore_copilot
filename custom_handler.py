@@ -165,14 +165,21 @@ class CustomHandler(BaseHTTPRequestHandler):
                 try:
                     # Check for new data first
                     new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
+                    
+                    # Create copies without timestamp for comparison
+                    new_data_no_ts = new_data.copy()
+                    if 'timestamp' in new_data_no_ts:
+                        del new_data_no_ts['timestamp']
                     new_data_json = json.dumps(new_data)
-
-                    # Only send update if data has actually changed
-                    if new_data_json != last_data_json:
+                    new_data_no_ts_json = json.dumps(new_data_no_ts)
+                    
+                    # Only send update if data has actually changed (ignoring timestamp)
+                    if new_data_no_ts_json != last_data_no_ts_json:
                         self.debug_print("Data changed, sending update")
                         self.wfile.write(f"event: update\ndata: {new_data_json}\n\n".encode('utf-8'))
                         self.wfile.flush()
                         last_data_json = new_data_json
+                        last_data_no_ts_json = new_data_no_ts_json
 
                     # Send keep-alive after data check
                     self.wfile.write(b":keep-alive\n\n")
