@@ -6,6 +6,7 @@ import json
 import xml.etree.ElementTree as ET
 import re
 import traceback
+import time
 
 class CustomHandler(BaseHTTPRequestHandler):
     # Standard HTTP response messages
@@ -119,9 +120,69 @@ class CustomHandler(BaseHTTPRequestHandler):
         if self.path == '/health':
             self.debug_print("Health check requested")
             self._send_response(200)
+        elif self.path.startswith('/events'):
+            self.handle_sse()
         else:
             self.debug_print(f"Invalid path requested: {self.path}")
             self._send_response(404)
+
+    def handle_sse(self):
+        """Handle Server-Sent Events connection"""
+        try:
+            # Parse query parameters
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            
+            contest = params.get('contest', [''])[0]
+            callsign = params.get('callsign', [''])[0]
+            filter_type = params.get('filter_type', [''])[0]
+            filter_value = params.get('filter_value', [''])[0]
+
+            # Set SSE headers
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+
+            # Get initial data
+            db_handler = self.server.db_handler
+            last_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
+            last_timestamp = db_handler.get_last_update_timestamp()
+
+            # Send initial data
+            self.wfile.write(f"event: init\ndata: {json.dumps(last_data)}\n\n".encode('utf-8'))
+            self.wfile.flush()
+
+            # Event loop
+            while True:
+                try:
+                    # Check for new data
+                    current_timestamp = db_handler.get_last_update_timestamp()
+                    if current_timestamp > last_timestamp:
+                        new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
+                        self.wfile.write(f"event: update\ndata: {json.dumps(new_data)}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                        last_timestamp = current_timestamp
+                        last_data = new_data
+
+                    # Send keep-alive comment every 30 seconds
+                    self.wfile.write(b":keep-alive\n\n")
+                    self.wfile.flush()
+
+                    # Sleep to prevent busy waiting
+                    time.sleep(1)
+
+                except (BrokenPipeError, ConnectionResetError):
+                    self.debug_print("Client disconnected from SSE stream")
+                    break
+                except Exception as e:
+                    self.debug_print(f"SSE error: {str(e)}")
+                    break
+
+        except Exception as e:
+            self.debug_print(f"SSE setup error: {str(e)}")
+            self._send_response(500)
 
     def check_authorization(self):
         """Check if the request is authorized"""
