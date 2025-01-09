@@ -128,5 +128,10 @@ class BatchProcessor:
                 # Sleep briefly to prevent busy waiting
                 time.sleep(0.1)
 
-# Export the BatchProcessor class
-__all__ = ['BatchProcessor']
+# Create a shared processor instance
+from database_handler import DatabaseHandler
+shared_processor = BatchProcessor(db_handler=DatabaseHandler(), batch_interval=30)
+shared_processor.start()
+
+# Export the BatchProcessor class and shared instance
+__all__ = ['BatchProcessor', 'shared_processor']

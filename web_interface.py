@@ -215,9 +215,9 @@ def sse_endpoint():
             except Exception as e:
                 logger.error(f"Error in batch processor callback: {e}")
 
-        # Register callback with BatchProcessor
-        from batch_processor import batch_processor
-        batch_processor.register_callback(batch_processor_callback)
+        # Get shared BatchProcessor instance
+        from batch_processor import shared_processor
+        shared_processor.register_callback(batch_processor_callback)
 
         def generate():
             try:
@@ -249,7 +249,7 @@ def sse_endpoint():
                         
             finally:
                 # Clean up callback when connection closes
-                batch_processor.unregister_callback(batch_processor_callback)
+                shared_processor.unregister_callback(batch_processor_callback)
                 logger.info(f"SSE connection closed for {callsign} in {contest}")
 
         response = Response(generate(), mimetype='text/event-stream')
