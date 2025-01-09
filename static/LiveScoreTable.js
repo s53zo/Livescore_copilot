@@ -41,8 +41,40 @@ const LiveScoreTable = () => {
             // Handle updates
             eventSource.addEventListener('update', (event) => {
                 if (!isMounted) return;
-                const data = JSON.parse(event.data);
-                setData(data);
+                const update = JSON.parse(event.data);
+                
+                setData(prevData => {
+                    // If this is a full update (initial data)
+                    if (update.stations) {
+                        return update;
+                    }
+                    
+                    // Apply delta changes to existing stations
+                    const updatedStations = prevData.stations.map(station => {
+                        const stationUpdate = update.changes.find(change => 
+                            change.callsign === station.callsign
+                        );
+                        
+                        if (stationUpdate) {
+                            return {
+                                ...station,
+                                ...stationUpdate,
+                                bandData: {
+                                    ...station.bandData,
+                                    ...(stationUpdate.bandData || {})
+                                }
+                            };
+                        }
+                        return station;
+                    });
+                    
+                    return {
+                        ...prevData,
+                        timestamp: update.timestamp,
+                        stations: updatedStations
+                    };
+                });
+                
                 setCountdown(120); // Reset countdown on update
             });
 

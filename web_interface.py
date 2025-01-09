@@ -257,7 +257,7 @@ def sse_endpoint():
                 initial_data = get_formatted_data(stations)
                 yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
 
-                last_timestamp = None
+                last_data = None
 
                 while True:
                     current_stations = get_station_details(
@@ -266,9 +266,43 @@ def sse_endpoint():
                     current_data = get_formatted_data(current_stations)
                     
                     # Only send update if data has changed
-                    if current_data != last_timestamp:
-                        yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
-                        last_timestamp = current_data
+                    if current_data != last_data:
+                        # Calculate delta between current and last data
+                        if last_data:
+                            delta = {
+                                "contest": current_data["contest"],
+                                "callsign": current_data["callsign"],
+                                "timestamp": current_data["timestamp"],
+                                "changes": []
+                            }
+                            
+                            # Compare each station's data
+                            for i, (current_station, last_station) in enumerate(zip(current_data["stations"], last_data["stations"])):
+                                changes = {}
+                                for key in ["score", "totalQsos", "multipliers", "position", "relativePosition"]:
+                                    if current_station[key] != last_station[key]:
+                                        changes[key] = current_station[key]
+                                
+                                # Check band data changes
+                                band_changes = {}
+                                for band, data in current_station["bandData"].items():
+                                    if band not in last_station["bandData"] or last_station["bandData"][band] != data:
+                                        band_changes[band] = data
+                                
+                                if band_changes:
+                                    changes["bandData"] = band_changes
+                                
+                                if changes:
+                                    changes["callsign"] = current_station["callsign"]
+                                    delta["changes"].append(changes)
+                            
+                            if delta["changes"]:
+                                yield f"event: update\ndata: {json.dumps(delta)}\n\n"
+                        else:
+                            # First update - send full data
+                            yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
+                        
+                        last_data = current_data
                     
                     yield ":keep-alive\n\n"
                     time.sleep(30)
