@@ -229,22 +229,14 @@ def sse_endpoint():
                     initial_data = get_formatted_data(stations)
                     yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
 
-                last_update_time = time.time()
+                # Initialize timer for 30-second updates
+                next_update = time.time() + 30
                 
                 while True:
                     current_time = time.time()
-                    time_since_last_update = current_time - last_update_time
                     
-                    # Check if 30 seconds have passed since last update
-                    if time_since_last_update >= 30:
-                        # Check if we have any pending updates
-                        try:
-                            # Get all available updates without blocking
-                            while True:
-                                changed_records = update_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                            
+                    # Check if it's time for an update
+                    if current_time >= next_update:
                         # Get current station data
                         with get_db() as conn:
                             db_handler = ContestDatabaseHandler(conn)
@@ -252,24 +244,27 @@ def sse_endpoint():
                             current_data = get_formatted_data(stations)
                         
                         yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
-                        last_update_time = current_time
+                        next_update = current_time + 30
                     
                     # Send keep-alive every 15 seconds
-                    if time_since_last_update >= 15:
+                    if current_time % 15 < 1:
                         yield ":keep-alive\n\n"
                     
                     # Sleep briefly to prevent busy waiting
                     time.sleep(1)
-                        
+                    
+            except Exception as e:
+                logger.error(f"Error in SSE stream: {e}")
+                logger.error(traceback.format_exc())
             finally:
                 # Clean up callback when connection closes
                 shared_processor.unregister_callback(batch_processor_callback)
                 logger.info(f"SSE connection closed for {callsign} in {contest}")
 
-        response = Response(generate(), mimetype='text/event-stream')
-        response.headers['Cache-Control'] = 'no-cache'
-        response.headers['Connection'] = 'keep-alive'
-        return response
+        return Response(generate(), mimetype='text/event-stream', headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
+        })
 
     except Exception as e:
         logger.error("Exception in SSE endpoint:")

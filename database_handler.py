@@ -17,14 +17,40 @@ from sql_queries import (
 )
 
 class ContestDatabaseHandler:
-    def __init__(self, db_path='contest_data.db'):
-        self.db_path = db_path
+    def __init__(self, db_path_or_conn='contest_data.db'):
+        if isinstance(db_path_or_conn, (str, bytes)):
+            self.db_path = db_path_or_conn
+            self.conn = None
+        else:
+            self.db_path = None
+            self.conn = db_path_or_conn
+            
         self.callsign_lookup = CallsignLookup()
         self.logger = logging.getLogger('ContestDatabaseHandler')
         self.setup_database()
         self.batch_processor = shared_processor
         self.batch_processor.set_handler(self)
         self.batch_processor.start()
+
+    def setup_database(self):
+        """Create the database tables if they don't exist."""
+        if self.conn:
+            # Use existing connection
+            self.conn.execute(CREATE_CONTEST_SCORES_TABLE)
+            self.conn.execute(CREATE_BAND_BREAKDOWN_TABLE)
+            self.conn.execute(CREATE_QTH_INFO_TABLE)
+        else:
+            # Create new connection
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(CREATE_CONTEST_SCORES_TABLE)
+                conn.execute(CREATE_BAND_BREAKDOWN_TABLE)
+                conn.execute(CREATE_QTH_INFO_TABLE)
+
+    def get_connection(self):
+        """Get a database connection, either existing or new"""
+        if self.conn:
+            return self.conn
+        return sqlite3.connect(self.db_path)
 
     def process_submission(self, xml_data):
         """Add submission to batch instead of processing immediately"""
@@ -33,13 +59,6 @@ class ContestDatabaseHandler:
     def cleanup(self):
         """Cleanup resources"""
         self.batch_processor.stop()
-
-    def setup_database(self):
-        """Create the database tables if they don't exist."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(CREATE_CONTEST_SCORES_TABLE)
-            conn.execute(CREATE_BAND_BREAKDOWN_TABLE)
-            conn.execute(CREATE_QTH_INFO_TABLE)
 
     def parse_xml_data(self, xml_data):
         """Parse XML data and return structured contest data."""
@@ -180,38 +199,37 @@ class ContestDatabaseHandler:
 
     def store_data(self, contest_data):
         """Store contest data in the database."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            for data in contest_data:
-                try:
-                    # Insert main contest data
-                    cursor.execute(INSERT_CONTEST_DATA, (
-                        data['timestamp'], data['contest'], data['callsign'],
-                        data.get('power', ''), data.get('assisted', ''),
-                        data.get('transmitter', ''), data.get('ops', ''),
-                        data.get('bands', ''), data.get('mode', ''),
-                        data.get('overlay', ''), data['club'], data['section'],
-                        data['score'], data.get('qsos', 0), data.get('multipliers', 0),
-                        data.get('points', 0)
-                    ))
-                    
-                    contest_score_id = cursor.lastrowid
-                    
-                    # Store QTH info
-                    self._store_qth_info(cursor, contest_score_id, data['qth'])
-                    
-                    # Store band breakdown
-                    self._store_band_breakdown(cursor, contest_score_id, data.get('band_breakdown', []))
-                    
-                    conn.commit()
-                    
-                except Exception as e:
-                    self.logger.error(f"Error storing data for {data['callsign']}: {e}")
-                    self.logger.error(traceback.format_exc())
-                    raise
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        for data in contest_data:
+            try:
+                # Insert main contest data
+                cursor.execute(INSERT_CONTEST_DATA, (
+                    data['timestamp'], data['contest'], data['callsign'],
+                    data.get('power', ''), data.get('assisted', ''),
+                    data.get('transmitter', ''), data.get('ops', ''),
+                    data.get('bands', ''), data.get('mode', ''),
+                    data.get('overlay', ''), data['club'], data['section'],
+                    data['score'], data.get('qsos', 0), data.get('multipliers', 0),
+                    data.get('points', 0)
+                ))
+                
+                contest_score_id = cursor.lastrowid
+                
+                # Store QTH info
+                self._store_qth_info(cursor, contest_score_id, data['qth'])
+                
+                # Store band breakdown
+                self._store_band_breakdown(cursor, contest_score_id, data.get('band_breakdown', []))
+                
+                conn.commit()
+                
+            except Exception as e:
+                self.logger.error(f"Error storing data for {data['callsign']}: {e}")
+                self.logger.error(traceback.format_exc())
+                raise
 
-    
     def _store_band_breakdown(self, cursor, contest_score_id, band_breakdown):
         """Store band breakdown information in database."""
         for band_data in band_breakdown:
@@ -226,73 +244,73 @@ class ContestDatabaseHandler:
 
     def get_scores(self, contest, callsign, filter_type, filter_value):
         """Get scores with optional filtering"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-            # Base query
-            query = """
-                SELECT cs.*, qth.*
-                FROM contest_scores cs
-                LEFT JOIN qth_info qth ON cs.id = qth.contest_score_id
-                WHERE cs.contest = ?
-            """
-            params = [contest]
+        # Base query
+        query = """
+            SELECT cs.*, qth.*
+            FROM contest_scores cs
+            LEFT JOIN qth_info qth ON cs.id = qth.contest_score_id
+            WHERE cs.contest = ?
+        """
+        params = [contest]
 
-            # Add callsign filter if provided
-            if callsign:
-                query += " AND cs.callsign = ?"
-                params.append(callsign)
+        # Add callsign filter if provided
+        if callsign:
+            query += " AND cs.callsign = ?"
+            params.append(callsign)
 
-            # Add additional filters
-            if filter_type and filter_value:
-                if filter_type == 'dxcc':
-                    query += " AND qth.dxcc_country = ?"
-                elif filter_type == 'cq_zone':
-                    query += " AND qth.cq_zone = ?"
-                elif filter_type == 'iaru_zone':
-                    query += " AND qth.iaru_zone = ?"
-                elif filter_type == 'arrl_section':
-                    query += " AND qth.arrl_section = ?"
-                elif filter_type == 'state':
-                    query += " AND qth.state_province = ?"
-                elif filter_type == 'continent':
-                    query += " AND qth.continent = ?"
-                params.append(filter_value)
+        # Add additional filters
+        if filter_type and filter_value:
+            if filter_type == 'dxcc':
+                query += " AND qth.dxcc_country = ?"
+            elif filter_type == 'cq_zone':
+                query += " AND qth.cq_zone = ?"
+            elif filter_type == 'iaru_zone':
+                query += " AND qth.iaru_zone = ?"
+            elif filter_type == 'arrl_section':
+                query += " AND qth.arrl_section = ?"
+            elif filter_type == 'state':
+                query += " AND qth.state_province = ?"
+            elif filter_type == 'continent':
+                query += " AND qth.continent = ?"
+            params.append(filter_value)
 
-            cursor.execute(query, params)
-            results = cursor.fetchall()
+        cursor.execute(query, params)
+        results = cursor.fetchall()
 
-            # Format results
-            scores = []
-            for row in results:
-                score = dict(row)
-                # Get band breakdown
-                cursor.execute("""
-                    SELECT band, mode, qsos, points, multipliers
-                    FROM band_breakdown
-                    WHERE contest_score_id = ?
-                """, (row['id'],))
-                score['band_breakdown'] = {b['band']: b for b in cursor.fetchall()}
-                scores.append(score)
+        # Format results
+        scores = []
+        for row in results:
+            score = dict(row)
+            # Get band breakdown
+            cursor.execute("""
+                SELECT band, mode, qsos, points, multipliers
+                FROM band_breakdown
+                WHERE contest_score_id = ?
+            """, (row['id'],))
+            score['band_breakdown'] = {b['band']: b for b in cursor.fetchall()}
+            scores.append(score)
 
-            return {
-                'contest': contest,
-                'callsign': callsign,
-                'stations': scores,
-                'timestamp': self.get_last_update_timestamp()
-            }
+        return {
+            'contest': contest,
+            'callsign': callsign,
+            'stations': scores,
+            'timestamp': self.get_last_update_timestamp()
+        }
 
     def get_last_update_timestamp(self):
         """Get the timestamp of the most recent update"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT MAX(timestamp) as last_update
-                FROM contest_scores
-            """)
-            result = cursor.fetchone()
-            return result[0] if result else datetime.now().isoformat()
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT MAX(timestamp) as last_update
+            FROM contest_scores
+        """)
+        result = cursor.fetchone()
+        return result[0] if result else datetime.now().isoformat()
 
     def get_station_details(self, conn, callsign, contest, filter_type=None, filter_value=None):
         """Get detailed station information for web interface"""
