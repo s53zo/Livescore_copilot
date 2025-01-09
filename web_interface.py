@@ -271,7 +271,7 @@ def sse_endpoint():
                         last_timestamp = current_data
                     
                     yield ":keep-alive\n\n"
-                    time.sleep(1)
+                    time.sleep(30)
 
         response = Response(generate(), mimetype='text/event-stream')
         response.headers['Cache-Control'] = 'no-cache'
