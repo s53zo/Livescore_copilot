@@ -23,7 +23,7 @@ logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
-        logging.FileHandler('/opt/livescore/logs/debug.log'),
+        logging.FileHandler('logs/debug.log'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -235,8 +235,11 @@ def sse_endpoint():
                 while True:
                     current_time = time.time()
                     
-                    # Check if it's time for an update
-                    if current_time >= next_update:
+                    # Calculate time until next update
+                    time_until_update = next_update - time.time()
+                    
+                    # If it's time for an update
+                    if time_until_update <= 0:
                         # Get current station data
                         with get_db() as conn:
                             db_handler = ContestDatabaseHandler(conn)
@@ -244,14 +247,15 @@ def sse_endpoint():
                             current_data = get_formatted_data(stations)
                         
                         yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
-                        next_update = current_time + 30
+                        next_update = time.time() + 30
+                        time_until_update = 30
                     
-                    # Send keep-alive every 15 seconds
-                    if current_time % 15 < 1:
+                    # Send keep-alive if we're close to connection timeout (25 seconds)
+                    if time_until_update > 25:
                         yield ":keep-alive\n\n"
                     
-                    # Sleep briefly to prevent busy waiting
-                    time.sleep(1)
+                    # Sleep until next event (update or keep-alive)
+                    time.sleep(min(25, time_until_update))
                     
             except Exception as e:
                 logger.error(f"Error in SSE stream: {e}")

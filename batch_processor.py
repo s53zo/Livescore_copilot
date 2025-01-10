@@ -44,6 +44,10 @@ class BatchProcessor:
             self.change_callbacks.append(callback)
             self.logger.debug(f"Registered new callback. Total callbacks: {len(self.change_callbacks)}")
             
+    def set_handler(self, callback):
+        """Legacy method - alias for register_callback"""
+        self.register_callback(callback)
+            
     def unregister_callback(self, callback):
         """Unregister a change callback"""
         if callback in self.change_callbacks:
