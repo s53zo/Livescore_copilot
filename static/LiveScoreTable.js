@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const LiveScoreTable = () => {
     const [data, setData] = useState({
@@ -18,7 +18,6 @@ const LiveScoreTable = () => {
     const filterType = urlParams.get('filter_type');
     const filterValue = urlParams.get('filter_value');
 
-    // Setup SSE connection with reconnect logic
     useEffect(() => {
         let eventSource;
         let reconnectTimeout;
@@ -26,68 +25,37 @@ const LiveScoreTable = () => {
 
         const connect = () => {
             const url = `/livescore-pilot/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`;
-            console.log('Attempting to connect to SSE:', url);
+            console.log('Connecting to SSE:', url);
 
             eventSource = new EventSource(url);
-            console.log('EventSource created:', eventSource.readyState);
-
+            
             // Handle initial data
             eventSource.addEventListener('init', (event) => {
-                console.log('Received init event:', event);
                 if (!isMounted) return;
                 try {
-                    const data = JSON.parse(event.data);
-                    console.log('Parsed init data:', data);
-                    setData(data);
-                    setLoading(false);
-                    setError(null);
+                    const newData = JSON.parse(event.data);
+                    console.log('Parsed initial data:', newData);
+                    if (newData && newData.stations) {
+                        setData(newData);
+                        setLoading(false);
+                        setError(null);
+                    }
                 } catch (e) {
-                    console.error('Error parsing init data:', e);
+                    console.error('Error parsing initial data:', e);
                     setError('Failed to parse initial data');
                 }
             });
 
             // Handle updates
             eventSource.addEventListener('update', (event) => {
-                console.log('Received update event:', event);
                 if (!isMounted) return;
                 try {
-                    const update = JSON.parse(event.data);
-                    console.log('Parsed update data:', update);
-                    
-                    setData(prevData => {
-                        // If this is a full update (initial data)
-                        if (update.stations) {
-                            return update;
-                        }
-                        
-                        // Apply delta changes to existing stations
-                        const updatedStations = prevData.stations.map(station => {
-                            const stationUpdate = update.changes.find(change => 
-                                change.callsign === station.callsign
-                            );
-                            
-                            if (stationUpdate) {
-                                return {
-                                    ...station,
-                                    ...stationUpdate,
-                                    bandData: {
-                                        ...station.bandData,
-                                        ...(stationUpdate.bandData || {})
-                                    }
-                                };
-                            }
-                            return station;
-                        });
-                        
-                        return {
-                            ...prevData,
-                            timestamp: update.timestamp,
-                            stations: updatedStations
-                        };
-                    });
-                    
-                    setCountdown(120); // Reset countdown on update
+                    const newData = JSON.parse(event.data);
+                    console.log('Received update:', newData);
+                    if (newData && newData.stations) {
+                        setData(newData);
+                        setCountdown(120);
+                    }
                 } catch (e) {
                     console.error('Error processing update:', e);
                 }
@@ -109,27 +77,20 @@ const LiveScoreTable = () => {
                     if (isMounted) {
                         console.log('Attempting to reconnect...');
                         setError(null);
-                        setLoading(true);
                         connect();
                     }
                 }, 5000);
             };
         };
 
-        console.log('Setting up SSE connection...');
         connect();
 
         // Countdown timer
         const countdownInterval = setInterval(() => {
-            setCountdown(prev => {
-                if (prev <= 0) return 120;
-                return prev - 1;
-            });
+            setCountdown(prev => Math.max(0, prev - 1));
         }, 1000);
 
-        // Cleanup
         return () => {
-            console.log('Cleaning up SSE connection...');
             isMounted = false;
             if (eventSource) {
                 console.log('Closing EventSource connection');
@@ -139,30 +100,6 @@ const LiveScoreTable = () => {
             clearInterval(countdownInterval);
         };
     }, [contest, callsign, filterType, filterValue]);
-
-        // Countdown timer
-        const countdownInterval = setInterval(() => {
-            setCountdown(prev => {
-                if (prev <= 0) return 120;
-                return prev - 1;
-            });
-        }, 1000);
-
-        return () => {
-            isMounted = false;
-            if (eventSource) eventSource.close();
-            if (reconnectTimeout) clearTimeout(reconnectTimeout);
-            clearInterval(countdownInterval);
-        };
-    }, [contest, callsign, filterType, filterValue]);
-
-    // Memoize the processed stations data
-    const processedStations = useMemo(() => 
-        data.stations.map((station, index) => ({
-            ...station,
-            position: index + 1,
-            isHighlighted: station.callsign === data.callsign
-        })), [data.stations, data.callsign]);
 
     if (loading) {
         return (
@@ -183,7 +120,6 @@ const LiveScoreTable = () => {
 
     return (
         <div className="w-full">
-            {/* Header Section */}
             <div className="mb-6">
                 <h1 className="text-2xl font-bold mb-2">
                     Contest Progress Report - {data.contest}
@@ -193,12 +129,10 @@ const LiveScoreTable = () => {
                 </div>
             </div>
 
-            {/* Countdown Timer */}
             <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md">
                 Next update in {Math.floor(countdown/60)}:{(countdown%60).toString().padStart(2, '0')}
             </div>
 
-            {/* Score Table */}
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
@@ -217,10 +151,10 @@ const LiveScoreTable = () => {
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {processedStations.map((station) => (
+                        {data.stations.map((station, index) => (
                             <tr key={station.callsign} 
-                                className={station.isHighlighted ? 'bg-green-50' : 'hover:bg-gray-50'}>
-                                <td className="px-6 py-4 whitespace-nowrap">{station.position}</td>
+                                className={station.callsign === data.callsign ? 'bg-green-50' : 'hover:bg-gray-50'}>
+                                <td className="px-6 py-4 whitespace-nowrap">{index + 1}</td>
                                 <td className="px-6 py-4 whitespace-nowrap font-mono">{station.callsign}</td>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                     <div className="flex space-x-2">
@@ -262,12 +196,4 @@ const LiveScoreTable = () => {
     );
 };
 
-// Create root element and render
-const root = document.getElementById('root');
-if (root) {
-    ReactDOM.createRoot(root).render(
-        <React.StrictMode>
-            <LiveScoreTable />
-        </React.StrictMode>
-    );
-}
+export default LiveScoreTable;
