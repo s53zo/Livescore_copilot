@@ -4,6 +4,81 @@
     <title>Contest Progress Report - {contest}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
+        // SSE functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const params = new URLSearchParams(window.location.search);
+            const contest = params.get('contest');
+            const callsign = params.get('callsign');
+            const filterType = params.get('filter_type') || 'none';
+            const filterValue = params.get('filter_value') || 'none';
+
+            const eventSource = new EventSource(`/livescore-pilot/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`);
+
+            eventSource.addEventListener('init', function(event) {
+                console.log('Received initial data');
+                updateTable(JSON.parse(event.data));
+            });
+
+            eventSource.addEventListener('update', function(event) {
+                console.log('Received update');
+                updateTable(JSON.parse(event.data));
+            });
+
+            eventSource.onopen = function() {
+                console.log('SSE connection established');
+            };
+
+            eventSource.onerror = function(error) {
+                console.error('SSE connection error:', error);
+                eventSource.close();
+                setTimeout(function() {
+                    window.location.reload();
+                }, 5000);
+            };
+        });
+
+        function updateTable(data) {
+            const timestampElement = document.getElementById('timestamp');
+            if (timestampElement) {
+                timestampElement.textContent = new Date(data.timestamp).toLocaleString();
+            }
+
+            const tbody = document.querySelector('table tbody');
+            if (!tbody || !data.stations) return;
+
+            tbody.innerHTML = '';
+
+            data.stations.forEach((station, index) => {
+                const row = document.createElement('tr');
+                row.className = station.callsign === data.callsign ? 'highlight' : '';
+
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${station.callsign}</td>
+                    <td>
+                        <div class="flex space-x-2">
+                            <span class="category-tag">${station.category || ''}</span>
+                            <span class="category-tag">${station.power ? station.power[0] : ''}</span>
+                        </div>
+                    </td>
+                    <td class="text-right">${station.score.toLocaleString()}</td>
+                    <td class="band-data">${station.bandData['160'] || '-'}</td>
+                    <td class="band-data">${station.bandData['80'] || '-'}</td>
+                    <td class="band-data">${station.bandData['40'] || '-'}</td>
+                    <td class="band-data">${station.bandData['20'] || '-'}</td>
+                    <td class="band-data">${station.bandData['15'] || '-'}</td>
+                    <td class="band-data">${station.bandData['10'] || '-'}</td>
+                    <td class="band-data">${station.totalQsos}/${station.multipliers}</td>
+                    <td><span class="relative-time" data-timestamp="${station.lastUpdate}">${new Date(station.lastUpdate).toLocaleTimeString()}</span></td>
+                `;
+
+                tbody.appendChild(row);
+            });
+
+            updateRelativeTimes();
+        }
+
+        // Existing functionality
         function refreshPage() {{
             const params = new URLSearchParams(window.location.search);
             window.location.href = '/reports/live.html?' + params.toString();
@@ -298,28 +373,32 @@
     <div class="station-info">
         <div>Monitoring: {callsign} | 
         Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | 
-        Updated: {timestamp}</div>
+        Updated: <span id="timestamp">{timestamp}</span></div>
         <div>Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
         {filter_info_div}
     </div>
 
     <div class="table-container">
         <table>
-            <tr>
-                <th>No</th>
-                <th>Callsign</th>
-                <th>Cat</th>
-                <th>Score</th>
-                <th>160m</th>
-                <th>80m</th>
-                <th>40m</th>
-                <th>20m</th>
-                <th>15m</th>
-                <th>10m</th>
-                <th>Total<br>QSO/Mults</th>
-                <th>Last Update</th>
-            </tr>
-            {table_rows}
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>Callsign</th>
+                    <th>Cat</th>
+                    <th>Score</th>
+                    <th>160m</th>
+                    <th>80m</th>
+                    <th>40m</th>
+                    <th>20m</th>
+                    <th>15m</th>
+                    <th>10m</th>
+                    <th>Total<br>QSO/Mults</th>
+                    <th>Last Update</th>
+                </tr>
+            </thead>
+            <tbody>
+                {table_rows}
+            </tbody>
         </table>
     </div>
 
