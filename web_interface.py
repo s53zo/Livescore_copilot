@@ -277,52 +277,28 @@ def sse_endpoint():
 
 def get_formatted_data(stations_data):
     formatted_stations = []
-    for station in stations_data:
-        station_id, call, score, power, assisted, timestamp, qsos, mults, pos, rel_pos = station
-        
-        # Get band breakdown data
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT bb.band, bb.qsos, bb.points, bb.multipliers
-                FROM band_breakdown bb
-                JOIN contest_scores cs ON bb.contest_score_id = cs.id
-                WHERE cs.id = ?
-            """, (station_id,))
-            
-            band_data = {}
-            for band, qsos, points, band_mults in cursor.fetchall():
-                band_data[band] = f"{qsos}/{band_mults}"
-        
-        # Determine operator category
-        op_category = "SO"  # Default
-        if assisted == "ASSISTED":
-            op_category = "SOA"
-        elif assisted == "MULTI-SINGLE":
-            op_category = "M/S"
-        elif assisted == "MULTI-MULTI":
-            op_category = "M/M"
-
+    for station in stations_data['stations']:
+        # Use the dictionary format directly
         formatted_station = {
-            "callsign": call,
-            "score": score,
-            "power": power,
-            "assisted": assisted,
-            "category": op_category,
-            "bandData": band_data,
-            "totalQsos": qsos,
-            "multipliers": mults,
-            "lastUpdate": timestamp,
-            "position": pos,
-            "relativePosition": rel_pos
+            "callsign": station['callsign'],
+            "score": station['score'],
+            "power": station['power'],
+            "assisted": station['assisted'],
+            "category": station['category'],
+            "bandData": station['bandData'],
+            "totalQsos": station['totalQsos'],
+            "multipliers": station['multipliers'],
+            "lastUpdate": station['lastUpdate'],
+            "position": station['position'],
+            "relativePosition": station['relativePosition']
         }
         formatted_stations.append(formatted_station)
 
     return {
-        "contest": contest,
-        "callsign": callsign,
+        "contest": stations_data['contest'],
+        "callsign": stations_data['callsign'],
         "stations": formatted_stations,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": stations_data['timestamp']
     }
 
 @app.route('/livescore-pilot/api/callsigns')
