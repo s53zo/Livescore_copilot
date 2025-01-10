@@ -276,30 +276,99 @@ def sse_endpoint():
         return jsonify({"error": str(e)}), 500
 
 def get_formatted_data(stations_data):
+    """
+    Format station data for SSE events.
+    
+    Args:
+        stations_data (dict): Dictionary containing station data from ContestDatabaseHandler
+        
+    Returns:
+        dict: Formatted data suitable for SSE events
+    """
     formatted_stations = []
+    
+    # Handle both dictionary and tuple formats for backwards compatibility
     for station in stations_data['stations']:
-        # Use the dictionary format directly
-        formatted_station = {
-            "callsign": station['callsign'],
-            "score": station['score'],
-            "power": station['power'],
-            "assisted": station['assisted'],
-            "category": station['category'],
-            "bandData": station['bandData'],
-            "totalQsos": station['totalQsos'],
-            "multipliers": station['multipliers'],
-            "lastUpdate": station['lastUpdate'],
-            "position": station['position'],
-            "relativePosition": station['relativePosition']
-        }
+        if isinstance(station, dict):
+            # If station is already a dictionary, use it directly
+            formatted_station = {
+                "callsign": station.get('callsign'),
+                "score": station.get('score', 0),
+                "power": station.get('power', ''),
+                "assisted": station.get('assisted', ''),
+                "category": station.get('category', ''),
+                "bandData": station.get('bandData', {}),
+                "totalQsos": station.get('totalQsos', 0),
+                "multipliers": station.get('multipliers', 0),
+                "lastUpdate": station.get('lastUpdate', ''),
+                "position": station.get('position', 0),
+                "relativePosition": station.get('relativePosition', '')
+            }
+        else:
+            # If station is a tuple, unpack it carefully with defaults
+            try:
+                station_id = station[0] if len(station) > 0 else None
+                callsign = station[1] if len(station) > 1 else ''
+                score = station[2] if len(station) > 2 else 0
+                power = station[3] if len(station) > 3 else ''
+                assisted = station[4] if len(station) > 4 else ''
+                timestamp = station[5] if len(station) > 5 else ''
+                qsos = station[6] if len(station) > 6 else 0
+                mults = station[7] if len(station) > 7 else 0
+                position = station[8] if len(station) > 8 else 0
+                rel_pos = station[9] if len(station) > 9 else ''
+                
+                formatted_station = {
+                    "callsign": callsign,
+                    "score": score,
+                    "power": power,
+                    "assisted": assisted,
+                    "category": get_operator_category(power, assisted),
+                    "bandData": get_band_data(station_id) if station_id else {},
+                    "totalQsos": qsos,
+                    "multipliers": mults,
+                    "lastUpdate": timestamp,
+                    "position": position,
+                    "relativePosition": rel_pos
+                }
+            except Exception as e:
+                logger.error(f"Error formatting station data: {e}")
+                logger.debug(f"Station data: {station}")
+                # Skip malformed station data
+                continue
+
         formatted_stations.append(formatted_station)
 
     return {
-        "contest": stations_data['contest'],
-        "callsign": stations_data['callsign'],
+        "contest": stations_data.get('contest', ''),
+        "callsign": stations_data.get('callsign', ''),
         "stations": formatted_stations,
-        "timestamp": stations_data['timestamp']
+        "timestamp": stations_data.get('timestamp', datetime.utcnow().isoformat())
     }
+
+def get_operator_category(power, assisted):
+    """Helper function to determine operator category"""
+    if assisted and assisted.upper() == 'ASSISTED':
+        return 'SOA'
+    return 'SO'
+
+def get_band_data(station_id):
+    """Helper function to get band data for a station"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT band, qsos, multipliers
+                FROM band_breakdown
+                WHERE contest_score_id = ?
+            """, (station_id,))
+            band_data = {}
+            for band, qsos, mults in cursor.fetchall():
+                band_data[band] = f"{qsos}/{mults}"
+            return band_data
+    except Exception as e:
+        logger.error(f"Error getting band data: {e}")
+        return {}
 
 @app.route('/livescore-pilot/api/callsigns')
 def get_callsigns():
