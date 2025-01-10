@@ -232,13 +232,13 @@ def sse_endpoint():
                             next_update = time.time() + 30
                             time_until_update = 30
                         
-                        # Send keep-alive every 15 seconds
-                        if time_until_update > 15:
+                        # Only send keep-alive if we haven't sent an update recently
+                        if time_until_update > 25:
                             logger.debug(f"Sending keep-alive for {callsign}")
                             yield ":keep-alive\n\n"
-                            time.sleep(15)
-                        else:
-                            time.sleep(time_until_update)
+                        
+                        # Sleep for 1 second to prevent busy waiting
+                        time.sleep(1)
                             
                     except GeneratorExit:
                         logger.info(f"Client disconnected: {callsign}")
