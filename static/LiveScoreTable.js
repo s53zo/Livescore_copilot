@@ -53,7 +53,15 @@ const LiveScoreTable = () => {
                     const newData = JSON.parse(event.data);
                     console.log('Received update:', newData);
                     if (newData && newData.stations) {
-                        setData(newData);
+                        // Update only the changed stations
+                        setData(prevData => ({
+                            ...prevData,
+                            stations: prevData.stations.map(prevStation => {
+                                const updatedStation = newData.stations.find(s => s.callsign === prevStation.callsign);
+                                return updatedStation || prevStation;
+                            }),
+                            timestamp: newData.timestamp
+                        }));
                         setCountdown(120);
                     }
                 } catch (e) {
@@ -133,8 +141,8 @@ const LiveScoreTable = () => {
                 Next update in {Math.floor(countdown/60)}:{(countdown%60).toString().padStart(2, '0')}
             </div>
 
-            <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
+            <div className="overflow-x-auto transition-opacity duration-300">
+                <table className="min-w-full divide-y divide-gray-200 animate-fade-in">
                     <thead className="bg-gray-50">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pos</th>
@@ -154,9 +162,9 @@ const LiveScoreTable = () => {
                         {data.stations.map((station, index) => (
                             <tr key={station.callsign} 
                                 className={station.callsign === data.callsign ? 'bg-green-50' : 'hover:bg-gray-50'}>
-                                <td className="px-6 py-4 whitespace-nowrap">{index + 1}</td>
-                                <td className="px-6 py-4 whitespace-nowrap font-mono">{station.callsign}</td>
-                                <td className="px-6 py-4 whitespace-nowrap">
+                                <td className="px-6 py-4 whitespace-nowrap transition-all duration-300">{index + 1}</td>
+                                <td className="px-6 py-4 whitespace-nowrap font-mono transition-all duration-300">{station.callsign}</td>
+                                <td className="px-6 py-4 whitespace-nowrap transition-all duration-300">
                                     <div className="flex space-x-2">
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                                             ${station.category === 'SOA' ? 'bg-blue-100 text-blue-800' :
@@ -173,18 +181,18 @@ const LiveScoreTable = () => {
                                         </span>
                                     </div>
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-right font-mono">
+                                <td className="px-6 py-4 whitespace-nowrap text-right font-mono transition-all duration-300">
                                     {station.score.toLocaleString()}
                                 </td>
                                 {['160', '80', '40', '20', '15', '10'].map(band => (
-                                    <td key={band} className="px-6 py-4 whitespace-nowrap text-center font-mono">
+                                    <td key={band} className="px-6 py-4 whitespace-nowrap text-center font-mono transition-all duration-300">
                                         {station.bandData[band] || '-'}
                                     </td>
                                 ))}
-                                <td className="px-6 py-4 whitespace-nowrap text-center font-mono">
+                                <td className="px-6 py-4 whitespace-nowrap text-center font-mono transition-all duration-300">
                                     {station.totalQsos}/{station.multipliers}
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-center">
+                                <td className="px-6 py-4 whitespace-nowrap text-center transition-all duration-300">
                                     {new Date(station.lastUpdate).toLocaleTimeString()}
                                 </td>
                             </tr>
