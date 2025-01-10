@@ -53,15 +53,31 @@ const LiveScoreTable = () => {
                     const newData = JSON.parse(event.data);
                     console.log('Received update:', newData);
                     if (newData && newData.stations) {
-                        // Update only the changed stations
-                        setData(prevData => ({
-                            ...prevData,
-                            stations: prevData.stations.map(prevStation => {
-                                const updatedStation = newData.stations.find(s => s.callsign === prevStation.callsign);
-                                return updatedStation || prevStation;
-                            }),
-                            timestamp: newData.timestamp
-                        }));
+                        // Log previous state
+                        setData(prevData => {
+                            console.log('Previous state:', prevData);
+                            
+                            // Find changed stations
+                            const changedStations = newData.stations.filter(newStation => {
+                                const oldStation = prevData.stations.find(s => s.callsign === newStation.callsign);
+                                return !oldStation || JSON.stringify(oldStation) !== JSON.stringify(newStation);
+                            });
+                            
+                            if (changedStations.length > 0) {
+                                console.log('Changed stations:', changedStations);
+                            } else {
+                                console.log('No actual changes detected');
+                            }
+
+                            return {
+                                ...prevData,
+                                stations: prevData.stations.map(prevStation => {
+                                    const updatedStation = newData.stations.find(s => s.callsign === prevStation.callsign);
+                                    return updatedStation || prevStation;
+                                }),
+                                timestamp: newData.timestamp
+                            };
+                        });
                         setCountdown(120);
                     }
                 } catch (e) {
