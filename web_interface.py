@@ -194,31 +194,12 @@ def sse_endpoint():
         filter_type = request.args.get('filter_type', 'none')
         filter_value = request.args.get('filter_value', 'none')
 
+        logger.info(f"SSE connection attempt - contest: {contest}, callsign: {callsign}, "
+                   f"filter_type: {filter_type}, filter_value: {filter_value}")
+
         if not (callsign and contest):
+            logger.error("Missing required parameters")
             return jsonify({"error": "Missing required parameters"}), 400
-
-        # Queue to receive updates from BatchProcessor
-        update_queue = queue.Queue()
-
-        def batch_processor_callback(changed_records):
-            """Callback to receive updates from BatchProcessor"""
-            try:
-                # Filter records for this specific contest/callsign
-                relevant_records = [
-                    record for record in changed_records
-                    if record['contest'] == contest and 
-                    (record['callsign'] == callsign or 
-                     record['callsign'] in [s['callsign'] for s in ContestDatabaseHandler(get_db()).get_station_details(callsign, contest, filter_type, filter_value)])
-                ]
-                
-                if relevant_records:
-                    update_queue.put(relevant_records)
-            except Exception as e:
-                logger.error(f"Error in batch processor callback: {e}")
-
-        # Get shared BatchProcessor instance
-        from batch_processor import shared_processor
-        shared_processor.register_callback(batch_processor_callback)
 
         def generate():
             try:
@@ -227,51 +208,68 @@ def sse_endpoint():
                     db_handler = ContestDatabaseHandler(conn)
                     stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
                     initial_data = get_formatted_data(stations)
+                    logger.info(f"Sending initial data for {callsign}")
                     yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
 
                 # Initialize timer for 30-second updates
                 next_update = time.time() + 30
                 
                 while True:
-                    current_time = time.time()
-                    
-                    # Calculate time until next update
-                    time_until_update = next_update - time.time()
-                    
-                    # If it's time for an update
-                    if time_until_update <= 0:
-                        # Get current station data
-                        with get_db() as conn:
-                            db_handler = ContestDatabaseHandler(conn)
-                            stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
-                            current_data = get_formatted_data(stations)
+                    try:
+                        current_time = time.time()
+                        time_until_update = next_update - current_time
                         
-                        yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
-                        next_update = time.time() + 30
-                        time_until_update = 30
-                    
-                    # Send keep-alive if we're close to connection timeout (25 seconds)
-                    if time_until_update > 25:
-                        yield ":keep-alive\n\n"
-                    
-                    # Sleep until next event (update or keep-alive)
-                    time.sleep(min(25, time_until_update))
-                    
+                        # If it's time for an update
+                        if time_until_update <= 0:
+                            logger.debug(f"Fetching updates for {callsign}")
+                            with get_db() as conn:
+                                db_handler = ContestDatabaseHandler(conn)
+                                stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
+                                current_data = get_formatted_data(stations)
+                            
+                            logger.debug(f"Sending update for {callsign}")
+                            yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
+                            next_update = time.time() + 30
+                            time_until_update = 30
+                        
+                        # Send keep-alive every 15 seconds
+                        if time_until_update > 15:
+                            logger.debug(f"Sending keep-alive for {callsign}")
+                            yield ":keep-alive\n\n"
+                            time.sleep(15)
+                        else:
+                            time.sleep(time_until_update)
+                            
+                    except GeneratorExit:
+                        logger.info(f"Client disconnected: {callsign}")
+                        break
+                    except Exception as e:
+                        logger.error(f"Error in update loop: {str(e)}")
+                        logger.error(traceback.format_exc())
+                        time.sleep(5)  # Wait before retry
+                        
             except Exception as e:
-                logger.error(f"Error in SSE stream: {e}")
+                logger.error(f"Error in SSE generator: {str(e)}")
                 logger.error(traceback.format_exc())
             finally:
-                # Clean up callback when connection closes
-                shared_processor.unregister_callback(batch_processor_callback)
-                logger.info(f"SSE connection closed for {callsign} in {contest}")
+                logger.info(f"SSE connection closed for {callsign}")
 
-        return Response(generate(), mimetype='text/event-stream', headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive'
-        })
+        # Set up response with appropriate headers
+        response = Response(
+            generate(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no'  # Important for nginx
+            }
+        )
+        
+        logger.info(f"SSE response setup complete for {callsign}")
+        return response
 
     except Exception as e:
-        logger.error("Exception in SSE endpoint:")
+        logger.error(f"Error setting up SSE endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 

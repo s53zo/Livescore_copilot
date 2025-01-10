@@ -1,7 +1,5 @@
-// LiveScoreTable.js
 import React, { useState, useEffect, useMemo } from 'react';
 
-// Main component
 const LiveScoreTable = () => {
     const [data, setData] = useState({
         contest: '',
@@ -27,64 +25,89 @@ const LiveScoreTable = () => {
         let isMounted = true;
 
         const connect = () => {
-            eventSource = new EventSource(`/livescore-pilot/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`);
+            const url = `/livescore-pilot/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`;
+            console.log('Attempting to connect to SSE:', url);
+
+            eventSource = new EventSource(url);
+            console.log('EventSource created:', eventSource.readyState);
 
             // Handle initial data
             eventSource.addEventListener('init', (event) => {
+                console.log('Received init event:', event);
                 if (!isMounted) return;
-                const data = JSON.parse(event.data);
-                setData(data);
-                setLoading(false);
-                setError(null);
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Parsed init data:', data);
+                    setData(data);
+                    setLoading(false);
+                    setError(null);
+                } catch (e) {
+                    console.error('Error parsing init data:', e);
+                    setError('Failed to parse initial data');
+                }
             });
 
             // Handle updates
             eventSource.addEventListener('update', (event) => {
+                console.log('Received update event:', event);
                 if (!isMounted) return;
-                const update = JSON.parse(event.data);
-                
-                setData(prevData => {
-                    // If this is a full update (initial data)
-                    if (update.stations) {
-                        return update;
-                    }
+                try {
+                    const update = JSON.parse(event.data);
+                    console.log('Parsed update data:', update);
                     
-                    // Apply delta changes to existing stations
-                    const updatedStations = prevData.stations.map(station => {
-                        const stationUpdate = update.changes.find(change => 
-                            change.callsign === station.callsign
-                        );
-                        
-                        if (stationUpdate) {
-                            return {
-                                ...station,
-                                ...stationUpdate,
-                                bandData: {
-                                    ...station.bandData,
-                                    ...(stationUpdate.bandData || {})
-                                }
-                            };
+                    setData(prevData => {
+                        // If this is a full update (initial data)
+                        if (update.stations) {
+                            return update;
                         }
-                        return station;
+                        
+                        // Apply delta changes to existing stations
+                        const updatedStations = prevData.stations.map(station => {
+                            const stationUpdate = update.changes.find(change => 
+                                change.callsign === station.callsign
+                            );
+                            
+                            if (stationUpdate) {
+                                return {
+                                    ...station,
+                                    ...stationUpdate,
+                                    bandData: {
+                                        ...station.bandData,
+                                        ...(stationUpdate.bandData || {})
+                                    }
+                                };
+                            }
+                            return station;
+                        });
+                        
+                        return {
+                            ...prevData,
+                            timestamp: update.timestamp,
+                            stations: updatedStations
+                        };
                     });
                     
-                    return {
-                        ...prevData,
-                        timestamp: update.timestamp,
-                        stations: updatedStations
-                    };
-                });
-                
-                setCountdown(120); // Reset countdown on update
+                    setCountdown(120); // Reset countdown on update
+                } catch (e) {
+                    console.error('Error processing update:', e);
+                }
             });
 
+            // Handle connection open
+            eventSource.onopen = () => {
+                console.log('SSE connection opened');
+                setError(null);
+            };
+
             // Handle errors
-            eventSource.onerror = () => {
+            eventSource.onerror = (err) => {
+                console.error('SSE connection error:', err);
                 if (!isMounted) return;
                 eventSource.close();
                 setError('Connection lost - attempting to reconnect...');
                 reconnectTimeout = setTimeout(() => {
                     if (isMounted) {
+                        console.log('Attempting to reconnect...');
                         setError(null);
                         setLoading(true);
                         connect();
@@ -93,7 +116,29 @@ const LiveScoreTable = () => {
             };
         };
 
+        console.log('Setting up SSE connection...');
         connect();
+
+        // Countdown timer
+        const countdownInterval = setInterval(() => {
+            setCountdown(prev => {
+                if (prev <= 0) return 120;
+                return prev - 1;
+            });
+        }, 1000);
+
+        // Cleanup
+        return () => {
+            console.log('Cleaning up SSE connection...');
+            isMounted = false;
+            if (eventSource) {
+                console.log('Closing EventSource connection');
+                eventSource.close();
+            }
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            clearInterval(countdownInterval);
+        };
+    }, [contest, callsign, filterType, filterValue]);
 
         // Countdown timer
         const countdownInterval = setInterval(() => {
