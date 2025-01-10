@@ -4,6 +4,23 @@
     <title>Contest Progress Report - {contest}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
+        // Global updateRelativeTimes function
+        function updateRelativeTimes() {
+            document.querySelectorAll('.relative-time').forEach(function(el) {
+                const timestamp = new Date(el.dataset.timestamp + 'Z');
+                const now = new Date();
+                const diff = Math.floor((now - timestamp) / 1000 / 60);
+                
+                if (diff < 60) {
+                    el.textContent = diff + 'm ago';
+                } else if (diff < 1440) {
+                    el.textContent = Math.floor(diff/60) + 'h ' + (diff%60) + 'm ago';
+                } else {
+                    el.textContent = Math.floor(diff/1440) + 'd ago';
+                }
+            });
+        }
+
         // SSE functionality
         document.addEventListener('DOMContentLoaded', function() {
             const params = new URLSearchParams(window.location.search);
@@ -94,22 +111,6 @@
             function pad(num) {{
                 return num.toString().padStart(2, '0');
             }}
-
-            function updateRelativeTimes() {
-                document.querySelectorAll('.relative-time').forEach(function(el) {
-                    const timestamp = new Date(el.dataset.timestamp + 'Z');
-                    const now = new Date();
-                    const diff = Math.floor((now - timestamp) / 1000 / 60);
-                    
-                    if (diff < 60) {
-                        el.textContent = diff + 'm ago';
-                    } else if (diff < 1440) {
-                        el.textContent = Math.floor(diff/60) + 'h ' + (diff%60) + 'm ago';
-                    } else {
-                        el.textContent = Math.floor(diff/1440) + 'd ago';
-                    }
-                });
-            }
 
             const timer = setInterval(function() {
                 if (minutes === 0 && seconds === 0) {
