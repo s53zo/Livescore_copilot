@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response, Response
+from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
 import sqlite3
 import os
 import logging
@@ -7,11 +7,7 @@ import sys
 import traceback
 import sql_queries
 from score_reporter import ScoreReporter
-from database_handler import ContestDatabaseHandler
 from datetime import datetime
-import json
-import time
-import queue
 
 # Define Config class first
 class Config:
@@ -23,7 +19,7 @@ logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
-        logging.FileHandler('logs/debug.log'),
+        logging.FileHandler('/opt/livescore/logs/debug.log'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -57,6 +53,8 @@ def get_db():
         logger.error(f"Database connection failed: {str(e)}")
         logger.error(traceback.format_exc())
         raise
+
+
 
 @app.route('/livescore-pilot', methods=['GET', 'POST'])
 def index():
@@ -184,189 +182,6 @@ def get_contests():
     except Exception as e:
         logger.error(f"Error fetching contests: {str(e)}")
         return jsonify({"error": str(e)}), 500
-    
-@app.route('/livescore-pilot/events')
-def sse_endpoint():
-    try:
-        # Get parameters from URL
-        callsign = request.args.get('callsign')
-        contest = request.args.get('contest')
-        filter_type = request.args.get('filter_type', 'none')
-        filter_value = request.args.get('filter_value', 'none')
-
-        logger.info(f"SSE connection attempt - contest: {contest}, callsign: {callsign}, "
-                   f"filter_type: {filter_type}, filter_value: {filter_value}")
-
-        if not (callsign and contest):
-            logger.error("Missing required parameters")
-            return jsonify({"error": "Missing required parameters"}), 400
-
-        def generate():
-            try:
-                # Get initial data
-                with get_db() as conn:
-                    db_handler = ContestDatabaseHandler(conn)
-                    stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
-                    initial_data = get_formatted_data(stations)
-                    logger.info(f"Sending initial data for {callsign}")
-                    yield f"event: init\ndata: {json.dumps(initial_data)}\n\n"
-
-                # Initialize timer for 30-second updates
-                next_update = time.time() + 30
-                
-                while True:
-                    try:
-                        current_time = time.time()
-                        time_until_update = next_update - current_time
-                        
-                        # If it's time for an update
-                        if time_until_update <= 0:
-                            logger.debug(f"Fetching updates for {callsign}")
-                            with get_db() as conn:
-                                db_handler = ContestDatabaseHandler(conn)
-                                stations = db_handler.get_station_details(callsign, contest, filter_type, filter_value)
-                                current_data = get_formatted_data(stations)
-                            
-                            logger.debug(f"Sending update for {callsign}")
-                            yield f"event: update\ndata: {json.dumps(current_data)}\n\n"
-                            next_update = time.time() + 30
-                            time_until_update = 30
-                        
-                        # Only send keep-alive if we haven't sent an update recently
-                        if time_until_update > 25:
-                            logger.debug(f"Sending keep-alive for {callsign}")
-                            yield ":keep-alive\n\n"
-                        
-                        # Sleep for 1 second to prevent busy waiting
-                        time.sleep(1)
-                            
-                    except GeneratorExit:
-                        logger.info(f"Client disconnected: {callsign}")
-                        break
-                    except Exception as e:
-                        logger.error(f"Error in update loop: {str(e)}")
-                        logger.error(traceback.format_exc())
-                        time.sleep(5)  # Wait before retry
-                        
-            except Exception as e:
-                logger.error(f"Error in SSE generator: {str(e)}")
-                logger.error(traceback.format_exc())
-            finally:
-                logger.info(f"SSE connection closed for {callsign}")
-
-        # Set up response with appropriate headers
-        response = Response(
-            generate(),
-            mimetype='text/event-stream',
-            headers={
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'X-Accel-Buffering': 'no'  # Important for nginx
-            }
-        )
-        
-        logger.info(f"SSE response setup complete for {callsign}")
-        return response
-
-    except Exception as e:
-        logger.error(f"Error setting up SSE endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
-
-def get_formatted_data(stations_data):
-    """
-    Format station data for SSE events.
-    
-    Args:
-        stations_data (dict): Dictionary containing station data from ContestDatabaseHandler
-        
-    Returns:
-        dict: Formatted data suitable for SSE events
-    """
-    formatted_stations = []
-    
-    # Handle both dictionary and tuple formats for backwards compatibility
-    for station in stations_data['stations']:
-        if isinstance(station, dict):
-            # If station is already a dictionary, use it directly
-            formatted_station = {
-                "callsign": station.get('callsign'),
-                "score": station.get('score', 0),
-                "power": station.get('power', ''),
-                "assisted": station.get('assisted', ''),
-                "category": station.get('category', ''),
-                "bandData": station.get('bandData', {}),
-                "totalQsos": station.get('totalQsos', 0),
-                "multipliers": station.get('multipliers', 0),
-                "lastUpdate": station.get('lastUpdate', ''),
-                "position": station.get('position', 0),
-                "relativePosition": station.get('relativePosition', '')
-            }
-        else:
-            # If station is a tuple, unpack it carefully with defaults
-            try:
-                station_id = station[0] if len(station) > 0 else None
-                callsign = station[1] if len(station) > 1 else ''
-                score = station[2] if len(station) > 2 else 0
-                power = station[3] if len(station) > 3 else ''
-                assisted = station[4] if len(station) > 4 else ''
-                timestamp = station[5] if len(station) > 5 else ''
-                qsos = station[6] if len(station) > 6 else 0
-                mults = station[7] if len(station) > 7 else 0
-                position = station[8] if len(station) > 8 else 0
-                rel_pos = station[9] if len(station) > 9 else ''
-                
-                formatted_station = {
-                    "callsign": callsign,
-                    "score": score,
-                    "power": power,
-                    "assisted": assisted,
-                    "category": get_operator_category(power, assisted),
-                    "bandData": get_band_data(station_id) if station_id else {},
-                    "totalQsos": qsos,
-                    "multipliers": mults,
-                    "lastUpdate": timestamp,
-                    "position": position,
-                    "relativePosition": rel_pos
-                }
-            except Exception as e:
-                logger.error(f"Error formatting station data: {e}")
-                logger.debug(f"Station data: {station}")
-                # Skip malformed station data
-                continue
-
-        formatted_stations.append(formatted_station)
-
-    return {
-        "contest": stations_data.get('contest', ''),
-        "callsign": stations_data.get('callsign', ''),
-        "stations": formatted_stations,
-        "timestamp": stations_data.get('timestamp', datetime.utcnow().isoformat())
-    }
-
-def get_operator_category(power, assisted):
-    """Helper function to determine operator category"""
-    if assisted and assisted.upper() == 'ASSISTED':
-        return 'SOA'
-    return 'SO'
-
-def get_band_data(station_id):
-    """Helper function to get band data for a station"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT band, qsos, multipliers
-                FROM band_breakdown
-                WHERE contest_score_id = ?
-            """, (station_id,))
-            band_data = {}
-            for band, qsos, mults in cursor.fetchall():
-                band_data[band] = f"{qsos}/{mults}"
-            return band_data
-    except Exception as e:
-        logger.error(f"Error getting band data: {e}")
-        return {}
 
 @app.route('/livescore-pilot/api/callsigns')
 def get_callsigns():

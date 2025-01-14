@@ -6,7 +6,6 @@ import json
 import xml.etree.ElementTree as ET
 import re
 import traceback
-import time
 
 class CustomHandler(BaseHTTPRequestHandler):
     # Standard HTTP response messages
@@ -120,90 +119,9 @@ class CustomHandler(BaseHTTPRequestHandler):
         if self.path == '/health':
             self.debug_print("Health check requested")
             self._send_response(200)
-        elif self.path.startswith('/livescore-pilot/events'):
-            self.handle_sse()
         else:
             self.debug_print(f"Invalid path requested: {self.path}")
             self._send_response(404)
-
-    def handle_sse(self):
-        """Handle Server-Sent Events connection"""
-        try:
-            # Parse query parameters
-            query = urllib.parse.urlparse(self.path).query
-            params = urllib.parse.parse_qs(query)
-            
-            contest = params.get('contest', [''])[0]
-            callsign = params.get('callsign', [''])[0]
-            filter_type = params.get('filter_type', [''])[0]
-            filter_value = params.get('filter_value', [''])[0]
-
-            if not contest or not callsign:
-                self.debug_print("Missing required parameters")
-                self._send_response(400)
-                return
-
-            # Set SSE headers
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
-            self.end_headers()
-
-            # Get initial data
-            db_handler = self.server.db_handler
-            last_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
-            last_data_json = json.dumps(last_data)  # Cache the JSON string
-
-            # Send initial data
-            self.wfile.write(f"event: init\ndata: {last_data_json}\n\n".encode('utf-8'))
-            self.wfile.flush()
-
-            self.debug_print(f"SSE connection established for {callsign} in {contest}")
-
-            while True:
-                try:
-                    # Check for new data first
-                    new_data = db_handler.get_scores(contest, callsign, filter_type, filter_value)
-                    
-                    # Create copies without timestamp for comparison
-                    new_data_no_ts = new_data.copy()
-                    if 'timestamp' in new_data_no_ts:
-                        del new_data_no_ts['timestamp']
-                    new_data_json = json.dumps(new_data)
-                    new_data_no_ts_json = json.dumps(new_data_no_ts)
-                    
-                    # Only send update if data has actually changed (ignoring timestamp)
-                    if new_data_no_ts_json != last_data_no_ts_json:
-                        self.debug_print("Data changed, sending update")
-                        self.wfile.write(f"event: update\ndata: {new_data_json}\n\n".encode('utf-8'))
-                        self.wfile.flush()
-                        last_data_json = new_data_json
-                        last_data_no_ts_json = new_data_no_ts_json
-
-                    # Send keep-alive after data check
-                    self.wfile.write(b":keep-alive\n\n")
-                    self.wfile.flush()
-                    
-                    self.debug_print("Keep-alive and data check completed")
-                    
-                    # Sleep for 30 seconds between updates
-                    time.sleep(30)
-
-                except (BrokenPipeError, ConnectionResetError) as e:
-                    self.debug_print(f"Client disconnected: {str(e)}")
-                    break
-                except Exception as e:
-                    self.debug_print(f"Error in SSE loop: {str(e)}")
-                    self.debug_print(traceback.format_exc())
-                    break
-
-        except Exception as e:
-            self.debug_print(f"SSE setup error: {str(e)}")
-            self.debug_print(traceback.format_exc())
-            self._send_response(500)
-        finally:
-            self.debug_print(f"SSE connection closed for {callsign} in {contest}")
 
     def check_authorization(self):
         """Check if the request is authorized"""
