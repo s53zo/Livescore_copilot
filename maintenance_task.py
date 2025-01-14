@@ -70,33 +70,7 @@ def check_true_orphans(cursor):
 
 def analyze_contest_data(cursor):
     """Analyze contest data for diagnostic purposes"""
-    cursor.execute("""
-        WITH latest_scores AS (
-            SELECT cs.id, cs.callsign, cs.contest, cs.timestamp
-            FROM contest_scores cs
-            INNER JOIN (
-                SELECT callsign, contest, MAX(timestamp) as max_ts
-                FROM contest_scores
-                GROUP BY callsign, contest
-            ) latest ON cs.callsign = latest.callsign 
-                AND cs.contest = latest.contest
-                AND cs.timestamp = latest.max_ts
-        )
-        SELECT 
-            cs.contest,
-            COUNT(DISTINCT ls.callsign) as active_stations,
-            COUNT(*) as total_records,
-            COUNT(DISTINCT bb.contest_score_id) as records_with_bands,
-            COUNT(DISTINCT qi.contest_score_id) as records_with_qth,
-            MIN(cs.timestamp) as first_record,
-            MAX(cs.timestamp) as last_record
-        FROM contest_scores cs
-        JOIN latest_scores ls ON cs.id = ls.id
-        LEFT JOIN band_breakdown bb ON bb.contest_score_id = cs.id
-        LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-        GROUP BY cs.contest
-        ORDER BY active_stations DESC
-    """)
+    cursor.execute(sql_queries.ANALYZE_CONTEST_DATA)
     return cursor.fetchall()
 
 def cleanup_old_files(directory, days, dry_run, logger):
@@ -121,40 +95,13 @@ def cleanup_old_files(directory, days, dry_run, logger):
 
 def get_redundant_indexes(cursor):
     """Identify redundant and overlapping indexes"""
-    redundant_pairs = [
-        # Exact duplicates
-        ('idx_scores_callsign_contest', 'idx_callsign_contest'),
-        ('idx_scores_contest_timestamp', 'idx_cs_contest_timestamp'),
-        ('idx_scores_contest_ts', 'idx_opt_contest_ts'),
-        
-        # Overlapping (where one index is a prefix of another)
-        ('idx_scores_contest', 'idx_scores_contest_timestamp'),  # contest is prefix
-        ('idx_scores_callsign', 'idx_scores_callsign_timestamp'),  # callsign is prefix
-        ('idx_timestamp', 'idx_scores_callsign_timestamp'),  # redundant simple index
-        
-        # Additional duplicates from your output
-        ('idx_scores_contest_timestamp', 'idx_scores_contest_ts'),
-        ('idx_contest_scores_contest', 'idx_scores_contest'),
-    ]
-    
-    indexes_to_drop = []
-    for idx1, idx2 in redundant_pairs:
-        cursor.execute("""
-            SELECT COUNT(*) FROM sqlite_master 
-            WHERE type='index' AND name IN (?, ?)
-        """, (idx1, idx2))
-        if cursor.fetchone()[0] == 2:  # Both indexes exist
-            indexes_to_drop.append(idx2)  # Drop the second one
-            
-    return indexes_to_drop
+    cursor.execute(sql_queries.GET_REDUNDANT_INDEXES)
+    indexes = cursor.fetchall()
+    return [index[0] for index in indexes]
 
 def analyze_index_usage(cursor, logger):
     """Analyze index usage with improved metrics"""
-    cursor.execute("""
-        SELECT name, sql FROM sqlite_master 
-        WHERE type='index' AND sql IS NOT NULL
-        AND name NOT LIKE 'sqlite_autoindex%'
-    """)
+    cursor.execute(sql_queries.GET_INDEX_USAGE)
     
     essential_indexes = {
         'idx_scores_contest_callsign_ts',  # For latest score lookups
@@ -168,12 +115,7 @@ def analyze_index_usage(cursor, logger):
         if index_name in essential_indexes:
             continue  # Skip analysis of essential indexes
             
-        cursor.execute("""
-            SELECT COUNT(*) as usage_count
-            FROM sqlite_stat1
-            WHERE idx = ?
-        """, (index_name,))
-        
+        cursor.execute(sql_queries.GET_INDEX_STATS, (index_name,))
         stats = cursor.fetchone()
         if not stats or stats[0] == 0:
             logger.warning(f"Index {index_name} appears unused")
@@ -200,16 +142,7 @@ def optimize_database(cursor, logger):
         
         # 3. Rebuild remaining indexes
         logger.info("Rebuilding remaining indexes...")
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type = 'index' 
-            AND name NOT LIKE 'sqlite_autoindex%'
-            AND name NOT IN (
-                SELECT name FROM sqlite_master 
-                WHERE type = 'index' 
-                AND sql LIKE '%latest_contest_scores%'
-            )
-        """)
+        cursor.execute(sql_queries.GET_INDEXES_TO_REBUILD)
         indexes = cursor.fetchall()
         for index in indexes:
             logger.info(f"  Rebuilding index: {index[0]}")

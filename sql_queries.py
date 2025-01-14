@@ -362,3 +362,32 @@ DELETE_CONTEST_SCORES_BY_CONTEST = """
     DELETE FROM contest_scores
     WHERE contest = ?
 """
+
+# Maintenance queries
+GET_REDUNDANT_INDEXES = """
+    SELECT name FROM sqlite_master 
+    WHERE type = 'index' 
+    AND name NOT LIKE 'sqlite_autoindex%'
+    AND name NOT IN (
+        SELECT name FROM sqlite_master 
+        WHERE type = 'index' 
+        AND sql LIKE '%latest_contest_scores%'
+    )
+"""
+
+GET_INDEX_USAGE = """
+    SELECT name, sql FROM sqlite_master 
+    WHERE type='index' AND sql IS NOT NULL
+    AND name NOT LIKE 'sqlite_autoindex%'
+"""
+
+GET_INDEX_STATS = """
+    SELECT COUNT(*) as usage_count
+    FROM sqlite_stat1
+    WHERE idx = ?
+"""
+
+GET_DB_METRICS = """
+    PRAGMA page_size;
+    PRAGMA page_count;
+"""
