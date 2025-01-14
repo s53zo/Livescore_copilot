@@ -391,3 +391,15 @@ GET_DB_METRICS = """
     PRAGMA page_size;
     PRAGMA page_count;
 """
+
+GET_INDEXES_TO_REBUILD = """
+    SELECT name FROM sqlite_master
+    WHERE type = 'index'
+    AND name NOT LIKE 'sqlite_autoindex%'
+    AND name IN (
+        'idx_contest_scores_contest_timestamp',
+        'idx_contest_scores_callsign_contest_timestamp', 
+        'idx_band_breakdown_contest_score_id_band',
+        'idx_qth_info_contest_score_id'
+    )
+"""
