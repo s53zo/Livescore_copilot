@@ -119,8 +119,68 @@ def cleanup_old_files(directory, days, dry_run, logger):
                     except Exception as e:
                         logger.error(f"Failed to delete {filepath}: {e}")
 
+def get_redundant_indexes(cursor):
+    """Identify redundant and overlapping indexes"""
+    redundant_pairs = [
+        # Exact duplicates
+        ('idx_scores_callsign_contest', 'idx_callsign_contest'),
+        ('idx_scores_contest_timestamp', 'idx_cs_contest_timestamp'),
+        ('idx_scores_contest_ts', 'idx_opt_contest_ts'),
+        
+        # Overlapping (where one index is a prefix of another)
+        ('idx_scores_contest', 'idx_scores_contest_timestamp'),  # contest is prefix
+        ('idx_scores_callsign', 'idx_scores_callsign_timestamp'),  # callsign is prefix
+        ('idx_timestamp', 'idx_scores_callsign_timestamp'),  # redundant simple index
+        
+        # Additional duplicates from your output
+        ('idx_scores_contest_timestamp', 'idx_scores_contest_ts'),
+        ('idx_contest_scores_contest', 'idx_scores_contest'),
+    ]
+    
+    indexes_to_drop = []
+    for idx1, idx2 in redundant_pairs:
+        cursor.execute("""
+            SELECT COUNT(*) FROM sqlite_master 
+            WHERE type='index' AND name IN (?, ?)
+        """, (idx1, idx2))
+        if cursor.fetchone()[0] == 2:  # Both indexes exist
+            indexes_to_drop.append(idx2)  # Drop the second one
+            
+    return indexes_to_drop
+
+def analyze_index_usage(cursor, logger):
+    """Analyze index usage with improved metrics"""
+    cursor.execute("""
+        SELECT name, sql FROM sqlite_master 
+        WHERE type='index' AND sql IS NOT NULL
+        AND name NOT LIKE 'sqlite_autoindex%'
+    """)
+    
+    essential_indexes = {
+        'idx_scores_contest_callsign_ts',  # For latest score lookups
+        'idx_scores_contest_score',        # For rankings
+        'idx_band_contest_score_id',       # For band breakdowns
+        'idx_qth_contest_score_id'         # For QTH lookups
+    }
+    
+    for index in cursor.fetchall():
+        index_name = index[0]
+        if index_name in essential_indexes:
+            continue  # Skip analysis of essential indexes
+            
+        cursor.execute("""
+            SELECT COUNT(*) as usage_count
+            FROM sqlite_stat1
+            WHERE idx = ?
+        """, (index_name,))
+        
+        stats = cursor.fetchone()
+        if not stats or stats[0] == 0:
+            logger.warning(f"Index {index_name} appears unused")
+            logger.warning(f"Consider dropping: {index[1]}")
+
 def optimize_database(cursor, logger):
-    """Perform database optimization tasks"""
+    """Perform database optimization tasks with improved error handling"""
     try:
         logger.info("Starting database optimization...")
 
@@ -128,52 +188,37 @@ def optimize_database(cursor, logger):
         logger.info("Running ANALYZE to update database statistics...")
         cursor.execute("ANALYZE")
         
-        # 2. Rebuild indexes
-        logger.info("Rebuilding indexes...")
+        # 2. Check for and remove redundant indexes
+        logger.info("Checking for redundant indexes...")
+        redundant_indexes = get_redundant_indexes(cursor)
+        if redundant_indexes:
+            logger.info(f"Found {len(redundant_indexes)} redundant indexes to remove:")
+            for idx in redundant_indexes:
+                logger.info(f"  Dropping index: {idx}")
+                cursor.execute(f"DROP INDEX IF EXISTS {idx}")
+                logger.info(f"  Dropped index: {idx}")
+        
+        # 3. Rebuild remaining indexes
+        logger.info("Rebuilding remaining indexes...")
         cursor.execute("""
             SELECT name FROM sqlite_master 
-            WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex%'
+            WHERE type = 'index' 
+            AND name NOT LIKE 'sqlite_autoindex%'
+            AND name NOT IN (
+                SELECT name FROM sqlite_master 
+                WHERE type = 'index' 
+                AND sql LIKE '%latest_contest_scores%'
+            )
         """)
         indexes = cursor.fetchall()
         for index in indexes:
             logger.info(f"  Rebuilding index: {index[0]}")
-            cursor.execute(f"REINDEX {index[0]}")
+            try:
+                cursor.execute(f"REINDEX {index[0]}")
+            except sqlite3.Error as e:
+                logger.error(f"Error rebuilding index {index[0]}: {e}")
 
-        # 3. Check for and remove duplicate indexes
-        logger.info("Checking for duplicate indexes...")
-        cursor.execute("""
-            SELECT m1.name as idx1, m2.name as idx2, m1.sql
-            FROM sqlite_master m1, sqlite_master m2
-            WHERE m1.type = 'index' 
-            AND m2.type = 'index'
-            AND m1.sql = m2.sql
-            AND m1.name < m2.name
-        """)
-        duplicate_indexes = cursor.fetchall()
-        for idx1, idx2, sql in duplicate_indexes:
-            logger.warning(f"Found duplicate indexes: {idx1} and {idx2}")
-            logger.warning(f"SQL: {sql}")
-            logger.warning("Consider removing one of these indexes")
-
-        # 4. Identify unused indexes
-        logger.info("Analyzing index usage...")
-        cursor.execute("ANALYZE sqlite_master")
-        cursor.execute("""
-            SELECT name, sql FROM sqlite_master 
-            WHERE type = 'index' AND sql IS NOT NULL
-            AND name NOT LIKE 'sqlite_autoindex%'
-        """)
-        for index in cursor.fetchall():
-            cursor.execute(f"""
-                SELECT stat.idx, stat.stat FROM sqlite_stat1 stat 
-                WHERE stat.idx = ?
-            """, (index[0],))
-            stats = cursor.fetchone()
-            if stats and int(stats[1].split()[0]) < 100:
-                logger.warning(f"Index {index[0]} might be underutilized")
-                logger.warning(f"SQL: {index[1]}")
-
-        # 5. Run integrity check
+        # 4. Run integrity check
         logger.info("Running database integrity check...")
         cursor.execute("PRAGMA integrity_check")
         integrity_result = cursor.fetchall()
@@ -184,14 +229,30 @@ def optimize_database(cursor, logger):
         else:
             logger.info("Integrity check passed")
 
-        # 6. Check for fragmentation
+        # 5. Check for fragmentation with proper error handling
         logger.info("Checking database fragmentation...")
-        cursor.execute("PRAGMA page_count")
-        page_count = cursor.fetchone()[0]
-        cursor.execute("PRAGMA free_page_count")
-        free_pages = cursor.fetchone()[0]
-        fragmentation = (free_pages / page_count) * 100 if page_count > 0 else 0
-        logger.info(f"Database fragmentation: {fragmentation:.1f}%")
+        try:
+            cursor.execute("PRAGMA page_count")
+            page_count_result = cursor.fetchone()
+            cursor.execute("PRAGMA free_page_count")
+            free_page_result = cursor.fetchone()
+            
+            if page_count_result is not None and free_page_result is not None:
+                page_count = page_count_result[0]
+                free_pages = free_page_result[0]
+                if page_count > 0:
+                    fragmentation = (free_pages / page_count) * 100
+                    logger.info(f"Database fragmentation: {fragmentation:.1f}%")
+                else:
+                    logger.warning("Unable to calculate fragmentation: page count is 0")
+            else:
+                logger.warning("Unable to retrieve page count information")
+        except Exception as e:
+            logger.error(f"Error checking fragmentation: {e}")
+            
+        # 6. Analyze remaining index usage
+        logger.info("Analyzing remaining index usage...")
+        analyze_index_usage(cursor, logger)
 
         return True
 
