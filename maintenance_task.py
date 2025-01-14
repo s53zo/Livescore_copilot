@@ -230,7 +230,42 @@ def vacuum_database(db_path, logger):
         logger.error(traceback.format_exc())
         return False
 
-def perform_maintenance(db_path, dry_run=True, min_stations=5, retention_days=3, skip_vacuum=False):
+def cleanup_old_contests(cursor, retention_days, dry_run, logger):
+    """Clean up old contests and their related data"""
+    try:
+        cutoff_date = datetime.now() - timedelta(days=retention_days)
+        logger.info(f"Cleaning up contests older than {cutoff_date}")
+        
+        # Get list of old contests
+        cursor.execute(sql_queries.GET_OLD_CONTESTS, (cutoff_date,))
+        old_contests = cursor.fetchall()
+        
+        if not old_contests:
+            logger.info("No old contests found for cleanup")
+            return
+            
+        logger.info(f"Found {len(old_contests)} old contests for cleanup")
+        
+        for contest in old_contests:
+            contest_name = contest[0]
+            if dry_run:
+                logger.info(f"Would delete contest: {contest_name}")
+            else:
+                try:
+                    logger.info(f"Deleting contest: {contest_name}")
+                    cursor.execute(sql_queries.DELETE_OLD_CONTEST_DATA, 
+                                 (contest_name, contest_name, contest_name))
+                    logger.info(f"Successfully deleted contest: {contest_name}")
+                except Exception as e:
+                    logger.error(f"Error deleting contest {contest_name}: {e}")
+                    logger.error(traceback.format_exc())
+                    
+    except Exception as e:
+        logger.error(f"Error during contest cleanup: {e}")
+        logger.error(traceback.format_exc())
+        raise
+
+def perform_maintenance(db_path, dry_run=True, min_stations=5, retention_days=90, skip_vacuum=False):
     """
     Perform database maintenance tasks while preserving total-only scores
     
@@ -238,7 +273,7 @@ def perform_maintenance(db_path, dry_run=True, min_stations=5, retention_days=3,
         db_path (str): Path to the SQLite database
         dry_run (bool): If True, only show what would be done
         min_stations (int): Minimum number of stations for contest preservation
-        retention_days (int): Number of days to retain records
+        retention_days (int): Number of days to retain contest data
         skip_vacuum (bool): If True, skip the VACUUM operation
     """
     logger = setup_logging()
@@ -250,6 +285,10 @@ def perform_maintenance(db_path, dry_run=True, min_stations=5, retention_days=3,
             
             # Enable foreign keys
             cursor.execute("PRAGMA foreign_keys = ON")
+            
+            # Clean up old contests
+            logger.info("\nStarting contest cleanup...")
+            cleanup_old_contests(cursor, retention_days, dry_run, logger)
             
             # Previous maintenance tasks remain the same...
             # [Previous code for orphan cleanup, small contests, etc.]

@@ -330,6 +330,35 @@ FIND_SMALL_CONTESTS = """
     HAVING num_callsigns < 5
 """
 
+GET_OLD_CONTESTS = """
+    SELECT DISTINCT contest
+    FROM contest_scores
+    WHERE timestamp < ?
+    ORDER BY timestamp DESC
+"""
+
+DELETE_OLD_CONTEST_DATA = """
+    BEGIN TRANSACTION;
+    
+    -- Delete band breakdowns
+    DELETE FROM band_breakdown
+    WHERE contest_score_id IN (
+        SELECT id FROM contest_scores WHERE contest = ?
+    );
+    
+    -- Delete QTH info
+    DELETE FROM qth_info
+    WHERE contest_score_id IN (
+        SELECT id FROM contest_scores WHERE contest = ?
+    );
+    
+    -- Delete contest scores
+    DELETE FROM contest_scores
+    WHERE contest = ?;
+    
+    COMMIT;
+"""
+
 GET_OLD_RECORDS = """
     SELECT id
     FROM contest_scores
