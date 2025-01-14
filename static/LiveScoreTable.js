@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+// LiveScoreTable.js
+import React, { useState, useEffect, useMemo } from 'react';
 
+// Main component
 const LiveScoreTable = () => {
     const [data, setData] = useState({
         contest: '',
@@ -18,112 +20,48 @@ const LiveScoreTable = () => {
     const filterType = urlParams.get('filter_type');
     const filterValue = urlParams.get('filter_value');
 
+    // Fetch data function
+    const fetchData = async () => {
+        try {
+            const response = await fetch(`/livescore-pilot/api/scores?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`);
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            const jsonData = await response.json();
+            setData(jsonData);
+            setLoading(false);
+            setCountdown(120); // Reset countdown
+        } catch (err) {
+            setError(err.message);
+            setLoading(false);
+        }
+    };
+
+    // Initial data fetch
     useEffect(() => {
-        let eventSource;
-        let reconnectTimeout;
-        let isMounted = true;
-
-        const connect = () => {
-            const url = `/livescore-pilot/events?contest=${contest}&callsign=${callsign}&filter_type=${filterType}&filter_value=${filterValue}`;
-            console.log('Connecting to SSE:', url);
-
-            eventSource = new EventSource(url);
-            
-            // Handle initial data
-            eventSource.addEventListener('init', (event) => {
-                if (!isMounted) return;
-                try {
-                    const newData = JSON.parse(event.data);
-                    console.log('Parsed initial data:', newData);
-                    if (newData && newData.stations) {
-                        setData(newData);
-                        setLoading(false);
-                        setError(null);
-                    }
-                } catch (e) {
-                    console.error('Error parsing initial data:', e);
-                    setError('Failed to parse initial data');
-                }
-            });
-
-            // Handle updates
-            eventSource.addEventListener('update', (event) => {
-                if (!isMounted) return;
-                try {
-                    const newData = JSON.parse(event.data);
-                    console.log('Received update:', newData);
-                    if (newData && newData.stations) {
-                        // Log previous state
-                        setData(prevData => {
-                            console.log('Previous state:', prevData);
-                            
-                            // Find changed stations
-                            const changedStations = newData.stations.filter(newStation => {
-                                const oldStation = prevData.stations.find(s => s.callsign === newStation.callsign);
-                                return !oldStation || JSON.stringify(oldStation) !== JSON.stringify(newStation);
-                            });
-                            
-                            if (changedStations.length > 0) {
-                                console.log('Changed stations:', changedStations);
-                            } else {
-                                console.log('No actual changes detected');
-                            }
-
-                            return {
-                                ...prevData,
-                                stations: prevData.stations.map(prevStation => {
-                                    const updatedStation = newData.stations.find(s => s.callsign === prevStation.callsign);
-                                    return updatedStation || prevStation;
-                                }),
-                                timestamp: newData.timestamp
-                            };
-                        });
-                        setCountdown(120);
-                    }
-                } catch (e) {
-                    console.error('Error processing update:', e);
-                }
-            });
-
-            // Handle connection open
-            eventSource.onopen = () => {
-                console.log('SSE connection opened');
-                setError(null);
-            };
-
-            // Handle errors
-            eventSource.onerror = (err) => {
-                console.error('SSE connection error:', err);
-                if (!isMounted) return;
-                eventSource.close();
-                setError('Connection lost - attempting to reconnect...');
-                reconnectTimeout = setTimeout(() => {
-                    if (isMounted) {
-                        console.log('Attempting to reconnect...');
-                        setError(null);
-                        connect();
-                    }
-                }, 5000);
-            };
-        };
-
-        connect();
-
+        fetchData();
+        
+        // Set up auto-refresh
+        const intervalId = setInterval(fetchData, 120000); // 2 minutes
+        
         // Countdown timer
-        const countdownInterval = setInterval(() => {
-            setCountdown(prev => Math.max(0, prev - 1));
+        const countdownId = setInterval(() => {
+            setCountdown(prev => prev > 0 ? prev - 1 : 120);
         }, 1000);
 
         return () => {
-            isMounted = false;
-            if (eventSource) {
-                console.log('Closing EventSource connection');
-                eventSource.close();
-            }
-            if (reconnectTimeout) clearTimeout(reconnectTimeout);
-            clearInterval(countdownInterval);
+            clearInterval(intervalId);
+            clearInterval(countdownId);
         };
     }, [contest, callsign, filterType, filterValue]);
+
+    // Memoize the processed stations data
+    const processedStations = useMemo(() => 
+        data.stations.map((station, index) => ({
+            ...station,
+            position: index + 1,
+            isHighlighted: station.callsign === data.callsign
+        })), [data.stations, data.callsign]);
 
     if (loading) {
         return (
@@ -144,6 +82,7 @@ const LiveScoreTable = () => {
 
     return (
         <div className="w-full">
+            {/* Header Section */}
             <div className="mb-6">
                 <h1 className="text-2xl font-bold mb-2">
                     Contest Progress Report - {data.contest}
@@ -153,12 +92,14 @@ const LiveScoreTable = () => {
                 </div>
             </div>
 
+            {/* Countdown Timer */}
             <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md">
                 Next update in {Math.floor(countdown/60)}:{(countdown%60).toString().padStart(2, '0')}
             </div>
 
-            <div className="overflow-x-auto transition-opacity duration-300">
-                <table className="min-w-full divide-y divide-gray-200 animate-fade-in">
+            {/* Score Table */}
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pos</th>
@@ -175,12 +116,12 @@ const LiveScoreTable = () => {
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {data.stations.map((station, index) => (
+                        {processedStations.map((station) => (
                             <tr key={station.callsign} 
-                                className={station.callsign === data.callsign ? 'bg-green-50' : 'hover:bg-gray-50'}>
-                                <td className="px-6 py-4 whitespace-nowrap transition-all duration-300">{index + 1}</td>
-                                <td className="px-6 py-4 whitespace-nowrap font-mono transition-all duration-300">{station.callsign}</td>
-                                <td className="px-6 py-4 whitespace-nowrap transition-all duration-300">
+                                className={station.isHighlighted ? 'bg-green-50' : 'hover:bg-gray-50'}>
+                                <td className="px-6 py-4 whitespace-nowrap">{station.position}</td>
+                                <td className="px-6 py-4 whitespace-nowrap font-mono">{station.callsign}</td>
+                                <td className="px-6 py-4 whitespace-nowrap">
                                     <div className="flex space-x-2">
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                                             ${station.category === 'SOA' ? 'bg-blue-100 text-blue-800' :
@@ -197,18 +138,18 @@ const LiveScoreTable = () => {
                                         </span>
                                     </div>
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-right font-mono transition-all duration-300">
+                                <td className="px-6 py-4 whitespace-nowrap text-right font-mono">
                                     {station.score.toLocaleString()}
                                 </td>
                                 {['160', '80', '40', '20', '15', '10'].map(band => (
-                                    <td key={band} className="px-6 py-4 whitespace-nowrap text-center font-mono transition-all duration-300">
+                                    <td key={band} className="px-6 py-4 whitespace-nowrap text-center font-mono">
                                         {station.bandData[band] || '-'}
                                     </td>
                                 ))}
-                                <td className="px-6 py-4 whitespace-nowrap text-center font-mono transition-all duration-300">
+                                <td className="px-6 py-4 whitespace-nowrap text-center font-mono">
                                     {station.totalQsos}/{station.multipliers}
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-center transition-all duration-300">
+                                <td className="px-6 py-4 whitespace-nowrap text-center">
                                     {new Date(station.lastUpdate).toLocaleTimeString()}
                                 </td>
                             </tr>
@@ -220,4 +161,12 @@ const LiveScoreTable = () => {
     );
 };
 
-export default LiveScoreTable;
+// Create root element and render
+const root = document.getElementById('root');
+if (root) {
+    ReactDOM.createRoot(root).render(
+        <React.StrictMode>
+            <LiveScoreTable />
+        </React.StrictMode>
+    );
+}
