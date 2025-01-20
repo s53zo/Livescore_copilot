@@ -9,7 +9,11 @@ import sys
 from sql_queries import (CALCULATE_RATES, CALCULATE_BAND_RATES,
                         GET_BAND_BREAKDOWN, GET_BAND_BREAKDOWN_WITH_RATES,
                         GET_FILTERS, INSERT_CONTEST_DATA, INSERT_BAND_BREAKDOWN,
-                        INSERT_QTH_INFO)
+                        INSERT_QTH_INFO, ET_CONTEST_STANDINGS_BASE,
+                        GET_CONTEST_STANDINGS_QTH_FILTER,
+                        GET_CONTEST_STANDINGS_RANGE,
+                        GET_CONTEST_STANDINGS_ALL,
+                        FILTER_MAP)
 
 class RateCalculator:
     def __init__(self, db_path, debug=False):
@@ -149,88 +153,37 @@ class ScoreReporter:
             raise
         
     def get_station_details(self, callsign, contest, filter_type=None, filter_value=None, position_filter=None):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # Start building query
-                base_query = """
-                    WITH ranked_stations AS (
-                        SELECT 
-                            cs.id,
-                            cs.callsign,
-                            cs.score,
-                            cs.power,
-                            cs.assisted,
-                            cs.timestamp,
-                            cs.qsos,
-                            cs.multipliers,
-                            ROW_NUMBER() OVER (ORDER BY cs.score DESC) as position
-                        FROM contest_scores cs
-                        JOIN qth_info qi ON qi.contest_score_id = cs.id
-                        WHERE cs.contest = ?
-                        AND cs.id IN (
-                            SELECT MAX(id)
-                            FROM contest_scores
-                            WHERE contest = ?
-                            GROUP BY callsign
-                        )
-                """
-                
-                params = [contest, contest]
-                
-                # Add QTH filter if specified
-                if filter_type and filter_value and filter_type.lower() != 'none':
-                    filter_map = {
-                        'DXCC': 'qi.dxcc_country',
-                        'CQ Zone': 'qi.cq_zone',
-                        'IARU Zone': 'qi.iaru_zone',
-                        'ARRL Section': 'qi.arrl_section',
-                        'State/Province': 'qi.state_province',
-                        'Continent': 'qi.continent'
-                    }
-                    
-                    if field := filter_map.get(filter_type):
-                        base_query += f" AND {field} = ?"
-                        params.append(filter_value)
-                
-                base_query += ")"  # Close the CTE
-                
-                # Handle position filtering
-                position_filter = position_filter or 'all'  # Default to 'all' if None
-                if position_filter == 'range':
-                    query = base_query + """
-                        SELECT rs.*, 
-                            CASE WHEN rs.callsign = ? THEN 'current'
-                                    WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-                                    THEN 'above' ELSE 'below' END as rel_pos
-                        FROM ranked_stations rs
-                        WHERE EXISTS (
-                            SELECT 1 FROM ranked_stations ref 
-                            WHERE ref.callsign = ? 
-                            AND ABS(rs.position - ref.position) <= 5
-                        )
-                        ORDER BY rs.score DESC
-                    """
-                    params.extend([callsign, callsign, callsign])
-                else:
-                    query = base_query + """
-                        SELECT rs.*, 
-                            CASE WHEN rs.callsign = ? THEN 'current'
-                                    WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
-                                    THEN 'above' ELSE 'below' END as rel_pos
-                        FROM ranked_stations rs
-                        ORDER BY rs.score DESC
-                    """
-                    params.extend([callsign, callsign])  # Only need two parameters here
-
-                cursor.execute(query, params)
-                return cursor.fetchall()
-
-        except Exception as e:
-            self.logger.error(f"Error in get_station_details: {e}")
-            self.logger.error(traceback.format_exc())
-            return None
+      """Get station details with improved query performance"""
+      try:
+          with sqlite3.connect(self.db_path) as conn:
+              cursor = conn.cursor()
+              
+              # Start with base query
+              query = GET_CONTEST_STANDINGS_BASE
+              params = [contest]
+              
+              # Add QTH filter if specified
+              if filter_type and filter_value and filter_type.lower() != 'none':
+                  if field := FILTER_MAP.get(filter_type):
+                      query += GET_CONTEST_STANDINGS_QTH_FILTER.format(field=field)
+                      params.append(filter_value)
+              
+              # Handle position filtering
+              position_filter = position_filter or 'all'  # Default to 'all' if None
+              if position_filter == 'range':
+                  query += GET_CONTEST_STANDINGS_RANGE
+                  params.extend([callsign, callsign, callsign])
+              else:
+                  query += GET_CONTEST_STANDINGS_ALL
+                  params.extend([callsign, callsign])
+  
+              cursor.execute(query, params)
+              return cursor.fetchall()
+              
+      except Exception as e:
+          self.logger.error(f"Error in get_station_details: {e}")
+          self.logger.error(traceback.format_exc())
+          return None
 
     def get_band_breakdown_with_rates(self, station_id, callsign, contest, timestamp):
         """Get band breakdown with both 60-minute and 15-minute rates"""
