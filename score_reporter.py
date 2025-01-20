@@ -33,27 +33,33 @@ class RateCalculator:
         """Calculate QSO rates using centralized SQL query"""
         try:
             current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            
+            now = datetime.utcnow()
+
             # Calculate long window rate
-            long_window_start = current_ts - timedelta(minutes=long_window)
-            cursor.execute(CALCULATE_RATES, (callsign, contest, 
+            long_window_start_naive = current_ts - timedelta(minutes=long_window)
+            ninety_minutes_ago = now - timedelta(minutes=90)
+            long_window_start = max(long_window_start_naive, ninety_minutes_ago)
+
+            cursor.execute(CALCULATE_RATES, (callsign, contest,
                            long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                            current_ts.strftime('%Y-%m-%d %H:%M:%S'),
                            long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             row = cursor.fetchone()
             long_rate = int(round(row[0] * 60 / long_window)) if row and row[0] else 0
-    
+
             # Calculate short window rate
-            short_window_start = current_ts - timedelta(minutes=short_window) 
+            short_window_start_naive = current_ts - timedelta(minutes=short_window)
+            short_window_start = max(short_window_start_naive, ninety_minutes_ago)
+
             cursor.execute(CALCULATE_RATES, (callsign, contest,
                            short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                            current_ts.strftime('%Y-%m-%d %H:%M:%S'),
                            short_window_start.strftime('%Y-%m-%d %H:%M:%S')))
             row = cursor.fetchone()
             short_rate = int(round(row[0] * 60 / short_window)) if row and row[0] else 0
-    
+
             return long_rate, short_rate
-                
+
         except Exception as e:
             self.logger.error(f"Error calculating rates: {e}")
             self.logger.debug(traceback.format_exc())
@@ -63,14 +69,18 @@ class RateCalculator:
         """Calculate per-band QSO rates using centralized SQL query"""
         try:
             current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            
+            now = datetime.utcnow()
+
             # Get current band data
             cursor.execute(GET_BAND_BREAKDOWN, (callsign, contest, timestamp))
             band_data = {row[0]: [row[1], row[2], 0, 0] for row in cursor.fetchall()}
-    
+
             # Calculate long window rates
-            long_window_start = current_ts - timedelta(minutes=long_window)
-            cursor.execute(CALCULATE_BAND_RATES, (callsign, contest, 
+            long_window_start_naive = current_ts - timedelta(minutes=long_window)
+            ninety_minutes_ago = now - timedelta(minutes=90)
+            long_window_start = max(long_window_start_naive, ninety_minutes_ago)
+
+            cursor.execute(CALCULATE_BAND_RATES, (callsign, contest,
                            long_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                            current_ts.strftime('%Y-%m-%d %H:%M:%S'),
                            long_window_start.strftime('%Y-%m-%d %H:%M:%S')))
@@ -78,9 +88,11 @@ class RateCalculator:
                 band = row[0]
                 if band in band_data:
                     band_data[band][2] = int(round(row[1] * 60 / long_window))
-            
+
             # Calculate short window rates
-            short_window_start = current_ts - timedelta(minutes=short_window)
+            short_window_start_naive = current_ts - timedelta(minutes=short_window)
+            short_window_start = max(short_window_start_naive, ninety_minutes_ago)
+
             cursor.execute(CALCULATE_BAND_RATES, (callsign, contest,
                            short_window_start.strftime('%Y-%m-%d %H:%M:%S'),
                            current_ts.strftime('%Y-%m-%d %H:%M:%S'),
@@ -89,9 +101,9 @@ class RateCalculator:
                 band = row[0]
                 if band in band_data:
                     band_data[band][3] = int(round(row[1] * 60 / short_window))
-            
+
             return band_data
-                
+
         except Exception as e:
             self.logger.error(f"Error calculating band rates: {e}")
             self.logger.debug(traceback.format_exc())
