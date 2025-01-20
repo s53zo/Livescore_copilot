@@ -9,7 +9,7 @@ import sys
 from sql_queries import (CALCULATE_RATES, CALCULATE_BAND_RATES,
                         GET_BAND_BREAKDOWN, GET_BAND_BREAKDOWN_WITH_RATES,
                         GET_FILTERS, INSERT_CONTEST_DATA, INSERT_BAND_BREAKDOWN,
-                        INSERT_QTH_INFO, ET_CONTEST_STANDINGS_BASE,
+                        INSERT_QTH_INFO, GET_CONTEST_STANDINGS_BASE,
                         GET_CONTEST_STANDINGS_QTH_FILTER,
                         GET_CONTEST_STANDINGS_RANGE,
                         GET_CONTEST_STANDINGS_ALL,
