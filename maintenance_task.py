@@ -6,6 +6,51 @@ from datetime import datetime, timedelta
 import os
 import shutil
 import time
+from sql_queries import (
+    GET_CONTESTS,
+    GET_CALLSIGNS,
+    API_GET_CALLSIGNS,
+    VERIFY_STATION,
+    GET_FILTERS,
+    CALCULATE_RATES,
+    CALCULATE_BAND_RATES,
+    GET_BAND_BREAKDOWN,
+    GET_BAND_BREAKDOWN_WITH_RATES,
+    CREATE_CONTEST_SCORES_TABLE,
+    CREATE_BAND_BREAKDOWN_TABLE,
+    CREATE_QTH_INFO_TABLE,
+    INSERT_QTH_INFO,
+    INSERT_BAND_BREAKDOWN,
+    INSERT_CONTEST_DATA,
+    CHECK_QSO_CONSISTENCY,
+    COUNT_ORPHANED_BAND_BREAKDOWN,
+    COUNT_ORPHANED_QTH_INFO,
+    ANALYZE_ORPHANED_BAND_BREAKDOWN,
+    ANALYZE_ORPHANED_QTH_INFO,
+    DELETE_ORPHANED_BAND_BREAKDOWN,
+    DELETE_ORPHANED_QTH_INFO,
+    FIND_SMALL_CONTESTS,
+    GET_OLD_CONTESTS,
+    DELETE_OLD_CONTEST_DATA,
+    GET_OLD_RECORDS,
+    GET_ARCHIVE_RECORDS,
+    DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID,
+    DELETE_QTH_INFO_BY_CONTEST_SCORE_ID,
+    DELETE_CONTEST_SCORES_BY_CONTEST,
+    GET_REDUNDANT_INDEXES,
+    GET_INDEX_USAGE,
+    GET_INDEX_STATS,
+    GET_DB_METRICS,
+    GET_INDEXES_TO_REBUILD,
+    GET_CONTEST_STANDINGS_BASE,
+    GET_CONTEST_STANDINGS_QTH_FILTER,
+    GET_CONTEST_STANDINGS_RANGE,
+    GET_CONTEST_STANDINGS_ALL,
+    FILTER_MAP,
+    VERIFY_STATION_LATEST,
+    GET_FILTERS_LATEST,
+)
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -56,38 +101,11 @@ def analyze_orphaned_records(cursor):
     """Analyze orphaned records to provide detailed information"""
     try:
         # Analyze orphaned band breakdown records
-        cursor.execute("""
-            SELECT bb.contest_score_id, 
-                   COUNT(*) as record_count,
-                   SUM(bb.qsos) as total_qsos,
-                   GROUP_CONCAT(bb.band) as bands,
-                   MIN(bb.qsos) as min_qsos,
-                   MAX(bb.qsos) as max_qsos
-            FROM band_breakdown bb 
-            WHERE NOT EXISTS (
-                SELECT 1 FROM contest_scores cs 
-                WHERE cs.id = bb.contest_score_id
-            )
-            GROUP BY bb.contest_score_id
-            ORDER BY total_qsos DESC
-            LIMIT 10
-        """)
+        cursor.execute(ANALYZE_ORPHANED_BAND_BREAKDOWN)
         bb_analysis = cursor.fetchall()
 
         # Analyze orphaned QTH info records
-        cursor.execute("""
-            SELECT qi.contest_score_id,
-                   qi.dxcc_country,
-                   qi.continent,
-                   qi.cq_zone,
-                   qi.iaru_zone
-            FROM qth_info qi 
-            WHERE NOT EXISTS (
-                SELECT 1 FROM contest_scores cs 
-                WHERE cs.id = qi.contest_score_id
-            )
-            LIMIT 10
-        """)
+        cursor.execute(ANALYZE_ORPHANED_QTH_INFO)
         qth_analysis = cursor.fetchall()
 
         return {'band_breakdown': bb_analysis, 'qth_info': qth_analysis}
@@ -99,10 +117,10 @@ def analyze_orphaned_records(cursor):
 def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
     """Handle orphaned records with safeguards"""
     # Get counts
-    cursor.execute("SELECT COUNT(*) FROM band_breakdown bb WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = bb.contest_score_id)")
+    cursor.execute(COUNT_ORPHANED_BAND_BREAKDOWN)
     orphaned_bb = cursor.fetchone()[0]
     
-    cursor.execute("SELECT COUNT(*) FROM qth_info qi WHERE NOT EXISTS (SELECT 1 FROM contest_scores cs WHERE cs.id = qi.contest_score_id)")
+    cursor.execute(COUNT_ORPHANED_QTH_INFO)
     orphaned_qth = cursor.fetchone()[0]
 
     if orphaned_bb > 0 or orphaned_qth > 0:
@@ -135,10 +153,10 @@ def handle_orphaned_records(cursor, dry_run=True, threshold=1000):
             logger.info("\nRemoving orphaned records...")
             try:
                 # Delete orphaned records
-                cursor.execute("DELETE FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                cursor.execute(DELETE_ORPHANED_BAND_BREAKDOWN)
                 bb_deleted = cursor.rowcount
                 
-                cursor.execute("DELETE FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+                cursor.execute(DELETE_ORPHANED_QTH_INFO)
                 qth_deleted = cursor.rowcount
                 
                 logger.info(f"Successfully removed {bb_deleted:,} band breakdown and {qth_deleted:,} QTH info orphaned records")
@@ -268,11 +286,7 @@ def optimize_database(db_path):
 def archive_old_records(cursor, archive_dir, conn):
     """Helper function to archive old records"""
     logger.info("Archiving old contest records...")
-    cursor.execute("""
-        SELECT id, contest, timestamp
-        FROM contest_scores
-        WHERE timestamp < ?
-    """, (datetime.now() - timedelta(days=365),))
+    cursor.execute(GET_ARCHIVE_RECORDS, (datetime.now() - timedelta(days=365),))
     old_records = cursor.fetchall()
 
     if old_records:
@@ -321,12 +335,7 @@ def perform_maintenance(db_path, dry_run):
                         raise Exception("Failed to handle orphaned records")
 
                     # Clean up small contests
-                    cursor.execute("""
-                        SELECT contest, COUNT(DISTINCT callsign) as num_callsigns
-                        FROM contest_scores
-                        GROUP BY contest
-                        HAVING num_callsigns < 5
-                    """)
+                    cursor.execute(FIND_SMALL_CONTESTS)
                     contests_to_delete = cursor.fetchall()
 
                     for contest, num_callsigns in contests_to_delete:
@@ -394,9 +403,9 @@ def perform_maintenance(db_path, dry_run):
             total_stations = cursor.fetchone()[0]
 
             # Get orphaned records count
-            cursor.execute("SELECT COUNT(*) FROM band_breakdown WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+            cursor.execute(COUNT_ORPHANED_BAND_BREAKDOWN)
             orphaned_bb = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM qth_info WHERE contest_score_id NOT IN (SELECT id FROM contest_scores)")
+            cursor.execute(COUNT_ORPHANED_QTH_INFO)
             orphaned_qth = cursor.fetchone()[0]
 
             logger.info("\nMaintenance Summary:")
@@ -406,6 +415,31 @@ def perform_maintenance(db_path, dry_run):
             logger.info(f"Orphaned Records Found: {orphaned_bb + orphaned_qth}")
             logger.info(f"Logs without Band Breakdown: {logs_without_breakdown}")
             logger.info(f"True QSO Inconsistencies: {len(inconsistent_qsos)}")
+        
+            # Example usage of GET_CONTEST_STANDINGS_BASE and filters
+            logger.info("\nExample Contest Standings Query (showing top positions):")
+            example_contest = "CQWW-SSB"
+            example_callsign = "W1AW"
+            standings_query = GET_CONTEST_STANDINGS_BASE
+            standings_params = [example_contest]
+
+            # Adding filter for 'DXCC'
+            filter_type = 'DXCC'
+            filter_value = 'United States'
+
+            if filter_type in FILTER_MAP:
+               standings_query += GET_CONTEST_STANDINGS_QTH_FILTER.format(field=FILTER_MAP[filter_type])
+               standings_params.append(filter_value)
+
+            standings_query += GET_CONTEST_STANDINGS_RANGE
+            standings_params.extend([example_callsign, example_callsign, example_callsign])
+
+
+            cursor.execute(standings_query, standings_params)
+            standings_results = cursor.fetchall()
+            for row in standings_results:
+                logger.info(f"  Rank:{row[9]} Call:{row[1]} Score:{row[2]} Rel:{row[10]}")
+
 
         return True
 
