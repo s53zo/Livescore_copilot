@@ -432,3 +432,82 @@ GET_INDEXES_TO_REBUILD = """
         'idx_qth_info_contest_score_id'
     )
 """
+
+# Add these to sql_queries.py
+
+# Base query for contest standings using latest_contest_scores
+GET_CONTEST_STANDINGS_BASE = """
+    WITH ranked_stations AS (
+        SELECT 
+            ls.id,
+            ls.callsign,
+            ls.score,
+            ls.power,
+            ls.assisted,
+            ls.timestamp,
+            ls.qsos,
+            ls.multipliers,
+            ROW_NUMBER() OVER (ORDER BY ls.score DESC) as position
+        FROM latest_contest_scores ls
+        WHERE ls.contest = ?
+"""
+
+# Extension for QTH filters
+GET_CONTEST_STANDINGS_QTH_FILTER = """
+        AND {field} = ?
+"""
+
+# Close CTE and add position range filter
+GET_CONTEST_STANDINGS_RANGE = """
+    )
+    SELECT rs.*, 
+        CASE WHEN rs.callsign = ? THEN 'current'
+             WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+             THEN 'above' ELSE 'below' END as rel_pos
+    FROM ranked_stations rs
+    WHERE EXISTS (
+        SELECT 1 FROM ranked_stations ref 
+        WHERE ref.callsign = ? 
+        AND ABS(rs.position - ref.position) <= 5
+    )
+    ORDER BY rs.score DESC
+"""
+
+# Close CTE and add standard ordering
+GET_CONTEST_STANDINGS_ALL = """
+    )
+    SELECT rs.*, 
+        CASE WHEN rs.callsign = ? THEN 'current'
+             WHEN rs.score > (SELECT score FROM ranked_stations WHERE callsign = ?) 
+             THEN 'above' ELSE 'below' END as rel_pos
+    FROM ranked_stations rs
+    ORDER BY rs.score DESC
+"""
+
+# Map of filter types to their column names in latest_contest_scores
+FILTER_MAP = {
+    'DXCC': 'ls.dxcc_country',
+    'CQ Zone': 'ls.cq_zone',
+    'IARU Zone': 'ls.iaru_zone',
+    'ARRL Section': 'ls.arrl_section',
+    'State/Province': 'ls.state_province',
+    'Continent': 'ls.continent'
+}
+
+# Verify station exists in contest
+VERIFY_STATION_LATEST = """
+    SELECT COUNT(*) 
+    FROM latest_contest_scores
+    WHERE contest = ?
+    AND callsign = ?
+"""
+
+# Get filter options for a station
+GET_FILTERS_LATEST = """
+    SELECT dxcc_country, cq_zone, iaru_zone, 
+           arrl_section, state_province, continent
+    FROM latest_contest_scores
+    WHERE contest = ? AND callsign = ?
+    LIMIT 1
+"""
+
