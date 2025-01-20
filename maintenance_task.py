@@ -169,11 +169,19 @@ def fix_timestamps(cursor):
         return False
 
 def update_latest_scores_table(cursor):
-    """Refresh the latest_contest_scores table"""
+    """Refresh the latest_contest_scores table with ordered data"""
     try:
         cursor.execute("DELETE FROM latest_contest_scores")
         
         cursor.execute("""
+            WITH latest_ids AS (
+                SELECT cs.callsign,
+                       cs.contest,
+                       MAX(cs.id) as max_id
+                FROM contest_scores cs
+                WHERE cs.qsos > 0
+                GROUP BY cs.callsign, cs.contest
+            )
             INSERT INTO latest_contest_scores
             SELECT 
                 cs.id,
@@ -192,13 +200,9 @@ def update_latest_scores_table(cursor):
                 qi.arrl_section,
                 qi.state_province
             FROM contest_scores cs
+            JOIN latest_ids li ON cs.id = li.max_id
             LEFT JOIN qth_info qi ON qi.contest_score_id = cs.id
-            WHERE cs.id IN (
-                SELECT MAX(id)
-                FROM contest_scores
-                WHERE qsos > 0
-                GROUP BY callsign, contest
-            )
+            ORDER BY cs.contest, cs.score DESC, cs.callsign
         """)
         
         rows_affected = cursor.rowcount
