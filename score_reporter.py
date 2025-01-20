@@ -421,7 +421,9 @@ class ScoreReporter:
                 )
 
                 # Format timestamp
-                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                corrected_timestamp = timestamp.replace('.', ':')
+                ts = datetime.strptime(corrected_timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                # ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
 
                 # Build row HTML
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
