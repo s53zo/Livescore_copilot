@@ -5,7 +5,6 @@ import os
 import logging
 import sys
 import traceback
-import sql_queries
 from score_reporter import ScoreReporter
 from datetime import datetime
 
@@ -65,7 +64,12 @@ def index():
             cursor = db.cursor()
             
             # Get contests with station counts
-            cursor.execute(sql_queries.GET_CONTESTS)
+            cursor.execute("""
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY contest
+            """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
             
             # Get contest and callsign from form or query parameters
@@ -76,7 +80,24 @@ def index():
             
             if selected_contest:
                 # Fetch unique callsigns with their latest QSO count for the selected contest
-                cursor.execute(sql_queries.GET_CALLSIGNS, (selected_contest, selected_contest))
+                cursor.execute("""
+                    WITH latest_scores AS (
+                        SELECT cs.callsign, cs.qsos, cs.timestamp
+                        FROM contest_scores cs
+                        INNER JOIN (
+                            SELECT callsign, MAX(timestamp) as max_ts
+                            FROM contest_scores
+                            WHERE contest = ?
+                            GROUP BY callsign
+                        ) latest ON cs.callsign = latest.callsign 
+                            AND cs.timestamp = latest.max_ts
+                        WHERE cs.contest = ?
+                        AND cs.qsos > 0
+                    )
+                    SELECT DISTINCT callsign, qsos as qso_count
+                    FROM latest_scores
+                    ORDER BY callsign
+                """, (selected_contest, selected_contest))
                 callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
                 
         return render_template('select_form.html', 
@@ -111,20 +132,17 @@ def live_report():
         # Verify contest and callsign exist in database
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(sql_queries.VERIFY_STATION, (contest, callsign))
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM contest_scores 
+                WHERE contest = ? AND callsign = ?
+            """, (contest, callsign))
             if cursor.fetchone()[0] == 0:
                 return render_template('error.html', 
                     error=f"No data found for {callsign} in {contest}")
 
         # Get station data with filters
-        position_filter = request.args.get('position_filter', 'all')
-        stations = reporter.get_station_details(
-            callsign, 
-            contest, 
-            filter_type, 
-            filter_value,
-            position_filter
-        )
+        stations = reporter.get_station_details(callsign, contest, filter_type, filter_value)
 
         if stations:
             # Generate HTML content directly
@@ -132,15 +150,7 @@ def live_report():
             with open(template_path, 'r') as f:
                 template = f.read()
 
-            html_content = reporter.generate_html_content(
-                template, 
-                callsign, 
-                contest, 
-                stations,
-                filter_type,
-                filter_value,
-                position_filter
-            )
+            html_content = reporter.generate_html_content(template, callsign, contest, stations)
             
             # Return response with appropriate headers
             response = make_response(html_content)
@@ -176,7 +186,12 @@ def get_contests():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            cursor.execute(sql_queries.API_GET_CONTESTS)
+            cursor.execute("""
+                SELECT contest, COUNT(DISTINCT callsign) AS active_stations
+                FROM contest_scores
+                GROUP BY contest
+                ORDER BY contest
+            """)
             contests = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
             return jsonify(contests)
     except Exception as e:
@@ -192,7 +207,24 @@ def get_callsigns():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            cursor.execute(sql_queries.API_GET_CALLSIGNS, (contest, contest))
+            cursor.execute("""
+                WITH latest_scores AS (
+                    SELECT cs.callsign, cs.qsos, cs.timestamp
+                    FROM contest_scores cs
+                    INNER JOIN (
+                        SELECT callsign, MAX(timestamp) as max_ts
+                        FROM contest_scores
+                        WHERE contest = ?
+                        GROUP BY callsign
+                    ) latest ON cs.callsign = latest.callsign 
+                        AND cs.timestamp = latest.max_ts
+                    WHERE cs.contest = ?
+                    AND cs.qsos > 0
+                )
+                SELECT DISTINCT callsign, qsos as qso_count
+                FROM latest_scores
+                ORDER BY callsign
+            """, (contest, contest))
             callsigns = [{"name": row[0], "qso_count": row[1]} for row in cursor.fetchall()]
             return jsonify(callsigns)
     except Exception as e:
@@ -210,7 +242,15 @@ def get_filters():
     try:
         with get_db() as db:
             cursor = db.cursor()
-            cursor.execute(sql_queries.GET_FILTERS, (contest, callsign))
+            cursor.execute("""
+                SELECT qi.dxcc_country, qi.cq_zone, qi.iaru_zone, 
+                       qi.arrl_section, qi.state_province, qi.continent
+                FROM contest_scores cs
+                JOIN qth_info qi ON qi.contest_score_id = cs.id
+                WHERE cs.contest = ? AND cs.callsign = ?
+                ORDER BY cs.timestamp DESC
+                LIMIT 1
+            """, (contest, callsign))
             
             row = cursor.fetchone()
             if not row:

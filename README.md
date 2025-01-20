@@ -26,7 +26,6 @@
 - **Index Creation**: The `database_manager.py` script can create indexes to optimize database queries.
 - **Cleanup Operations**: Removes contests with fewer participants than a specified threshold to maintain database efficiency.
 - **Reindexing**: Provides functionality to rebuild indexes for performance optimization.
-- **Centralized SQL Queries**: All database queries are maintained in `sql_queries.py` for easy management and reuse.
 
 ### 3. Data Analysis and Reporting
 
@@ -39,10 +38,6 @@
 - **User Interaction**: The Flask app (`web_interface.py`) allows users to select contests and callsigns, and apply filters.
 - **Live Reports**: Generates and serves live contest progress reports, updating at regular intervals.
 - **Error Handling**: Provides user-friendly error messages via the `error.html` template.
-- **API Endpoints**:
-  - `/livescore-pilot/api/callsigns`: Returns list of callsigns with QSO counts for a given contest
-  - `/livescore-pilot/api/contests`: Returns list of available contests
-  - `/livescore-pilot/api/filters`: Returns available filters for a callsign
 
 ### 5. Service Deployment
 

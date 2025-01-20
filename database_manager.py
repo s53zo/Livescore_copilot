@@ -3,16 +3,6 @@ import sqlite3
 import argparse
 import sys
 from tabulate import tabulate
-from sql_queries import (
-    CREATE_INDEXES,
-    GET_SMALL_CONTESTS,
-    DELETE_CONTEST_RECORDS,
-    GET_INDEX_INFO,
-    EXAMPLE_QUERIES,
-    DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID,
-    DELETE_QTH_INFO_BY_CONTEST_SCORE_ID,
-    DELETE_CONTEST_SCORES_BY_CONTEST
-)
 
 class DatabaseManager:
     def __init__(self, db_path):
@@ -56,13 +46,81 @@ class DatabaseManager:
             print(f"Error analyzing query: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # Modified setup_indexes method in database_manager.py
     def setup_indexes(self, analyze=True):
         """Create indexes on the contest database"""
         print(f"Setting up indexes on database: {self.db_path}")
         
+        index_commands = [
+            # Contest Scores indexes
+            """CREATE INDEX IF NOT EXISTS idx_scores_callsign 
+               ON contest_scores(callsign)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_contest 
+               ON contest_scores(contest)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_timestamp 
+               ON contest_scores(timestamp)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_callsign_contest 
+               ON contest_scores(callsign, contest)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_contest_timestamp 
+               ON contest_scores(contest, timestamp)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_callsign_timestamp 
+               ON contest_scores(callsign, timestamp)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_scores_combined 
+               ON contest_scores(callsign, contest, timestamp)""",
+               
+            # For scores filtering
+            """CREATE INDEX IF NOT EXISTS idx_scores_qsos 
+               ON contest_scores(qsos)""",
+               
+            """CREATE INDEX IF NOT EXISTS idx_scores_score 
+               ON contest_scores(score)""",
+            
+            # Band Breakdown indexes
+            """CREATE INDEX IF NOT EXISTS idx_band_contest_score_id 
+               ON band_breakdown(contest_score_id)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_band_band 
+               ON band_breakdown(band)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_band_combined 
+               ON band_breakdown(contest_score_id, band)""",
+            
+            # QTH Info indexes
+            """CREATE INDEX IF NOT EXISTS idx_qth_contest_score_id 
+               ON qth_info(contest_score_id)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_dxcc 
+               ON qth_info(dxcc_country)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_continent 
+               ON qth_info(continent)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_cq_zone 
+               ON qth_info(cq_zone)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_iaru_zone 
+               ON qth_info(iaru_zone)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_section 
+               ON qth_info(arrl_section)""",
+            
+            """CREATE INDEX IF NOT EXISTS idx_qth_state 
+               ON qth_info(state_province)""",
+               
+            # Combined indexes for frequent queries
+            """CREATE INDEX IF NOT EXISTS idx_qth_multi_location 
+               ON qth_info(dxcc_country, continent, cq_zone)"""
+        ]
+
         try:
             with sqlite3.connect(self.db_path) as conn:
-                for cmd in CREATE_INDEXES:
+                for cmd in index_commands:
                     print(f"Creating index...")
                     print(cmd.replace('\n', ' ').strip())
                     conn.execute(cmd)
@@ -91,7 +149,20 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 
                 # First, get a list of contests and their participant counts
-                cursor.execute(GET_SMALL_CONTESTS, (min_participants,))
+                cursor.execute("""
+                    WITH UniqueCalls AS (
+                        SELECT DISTINCT contest, callsign
+                        FROM contest_scores
+                    )
+                    SELECT 
+                        contest,
+                        COUNT(DISTINCT callsign) as participant_count
+                    FROM UniqueCalls
+                    GROUP BY contest
+                    HAVING participant_count < ?
+                    ORDER BY participant_count DESC, contest
+                """, (min_participants,))
+                
                 small_contests = cursor.fetchall()
                 
                 if not small_contests:
@@ -116,20 +187,34 @@ class DatabaseManager:
                     print(f"Processing {contest}...")
                     
                     # Get contest_score_ids for this contest
-                    cursor.execute(DELETE_CONTEST_RECORDS, (contest,))
+                    cursor.execute("""
+                        SELECT id FROM contest_scores WHERE contest = ?
+                    """, (contest,))
                     score_ids = [row[0] for row in cursor.fetchall()]
                     
                     if score_ids:
                         # Delete from band_breakdown
-                        cursor.execute(DELETE_BAND_BREAKDOWN_BY_CONTEST_SCORE_ID, (contest,))
+                        cursor.execute("""
+                            DELETE FROM band_breakdown 
+                            WHERE contest_score_id IN (
+                                SELECT id FROM contest_scores WHERE contest = ?
+                            )
+                        """, (contest,))
                         bb_count = cursor.rowcount
                         
                         # Delete from qth_info
-                        cursor.execute(DELETE_QTH_INFO_BY_CONTEST_SCORE_ID, (contest,))
+                        cursor.execute("""
+                            DELETE FROM qth_info 
+                            WHERE contest_score_id IN (
+                                SELECT id FROM contest_scores WHERE contest = ?
+                            )
+                        """, (contest,))
                         qth_count = cursor.rowcount
                         
                         # Delete from contest_scores
-                        cursor.execute(DELETE_CONTEST_SCORES_BY_CONTEST, (contest,))
+                        cursor.execute("""
+                            DELETE FROM contest_scores WHERE contest = ?
+                        """, (contest,))
                         cs_count = cursor.rowcount
                         
                         print(f"Removed {cs_count} score entries, " +
@@ -170,7 +255,18 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                cursor.execute(GET_INDEX_INFO)
+                cursor.execute("""
+                    SELECT 
+                        m.tbl_name as table_name,
+                        m.name as index_name,
+                        GROUP_CONCAT(ii.name) as columns
+                    FROM sqlite_master m
+                    LEFT JOIN pragma_index_info(m.name) ii
+                    WHERE m.type = 'index'
+                    GROUP BY m.name
+                    ORDER BY m.tbl_name, m.name
+                """)
+                
                 indexes = cursor.fetchall()
                 
                 if indexes:
@@ -184,6 +280,43 @@ class DatabaseManager:
             print(f"Error listing indexes: {e}", file=sys.stderr)
             sys.exit(1)
 
+def get_example_queries():
+    """Return a dictionary of example queries to analyze"""
+    return {
+        "latest_scores": """
+            WITH latest_records AS (
+                SELECT MAX(id) as latest_id
+                FROM contest_scores cs1
+                GROUP BY callsign, contest
+            )
+            SELECT cs.callsign, cs.contest, cs.timestamp, cs.score
+            FROM contest_scores cs
+            INNER JOIN latest_records lr ON cs.id = lr.latest_id
+            ORDER BY cs.timestamp DESC
+            LIMIT 10
+        """,
+        
+        "band_breakdown": """
+            SELECT cs.callsign, bb.band, bb.qsos, bb.points
+            FROM contest_scores cs
+            JOIN band_breakdown bb ON bb.contest_score_id = cs.id
+            WHERE cs.callsign = 'W1AW'
+            ORDER BY cs.timestamp DESC
+        """,
+        
+        "contest_summary": """
+            SELECT 
+                contest,
+                COUNT(DISTINCT callsign) as participants,
+                SUM(qsos) as total_qsos,
+                MAX(score) as top_score
+            FROM contest_scores
+            GROUP BY contest
+            ORDER BY COUNT(DISTINCT callsign) DESC
+        """
+    }
+
+       
 def main():
     parser = argparse.ArgumentParser(
         description='Contest Database Management Tool',
@@ -217,7 +350,7 @@ Examples:
     action_group.add_argument('--list', action='store_true',
                           help='List existing indexes')
     action_group.add_argument('--explain',
-                          choices=list(EXAMPLE_QUERIES.keys()),
+                          choices=list(get_example_queries().keys()),
                           help='Analyze query execution plan for example queries')
     action_group.add_argument('--cleanup-contests', type=int, metavar='MIN_PARTICIPANTS',
                           help='Remove contests with fewer than MIN_PARTICIPANTS participants')
@@ -241,7 +374,7 @@ Examples:
     elif args.list:
         db_manager.list_indexes()
     elif args.explain:
-        query = EXAMPLE_QUERIES[args.explain]
+        query = get_example_queries()[args.explain]
         print(f"\nAnalyzing query: {args.explain}")
         print("Query text:")
         print(query)
