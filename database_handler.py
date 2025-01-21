@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sqlite3
+from sqlite3 import DatabaseError, OperationalError, IntegrityError
 import logging
 import xml.etree.ElementTree as ET
 import re
@@ -21,9 +22,8 @@ class ContestDatabaseHandler:
         self.db_path = db_path
         self.callsign_lookup = CallsignLookup()
         self.logger = logging.getLogger('ContestDatabaseHandler')
-        self.setup_database()
+        self.connection_pool = None
         self.batch_processor = BatchProcessor(self)
-        self.batch_processor.start()
 
     def process_submission(self, xml_data):
         """Add submission to batch instead of processing immediately"""
@@ -31,14 +31,30 @@ class ContestDatabaseHandler:
 
     def cleanup(self):
         """Cleanup resources"""
-        self.batch_processor.stop()
+        try:
+            self.batch_processor.stop()
+            if self.connection_pool:
+                self.connection_pool.close()
+                self.logger.info("Database connection pool closed")
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
 
-    def setup_database(self):
-        """Create the database tables if they don't exist."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(CREATE_CONTEST_SCORES_TABLE)
-            conn.execute(CREATE_BAND_BREAKDOWN_TABLE)
-            conn.execute(CREATE_QTH_INFO_TABLE)
+    def setup_connection_pool(self):
+        """Initialize database connection pool with WAL mode"""
+        try:
+            self.connection_pool = sqlite3.connect(self.db_path, check_same_thread=False)
+            with self.connection_pool:
+                self.connection_pool.execute("PRAGMA journal_mode=WAL")
+                self.connection_pool.execute("PRAGMA foreign_keys=ON")
+                self.connection_pool.execute("PRAGMA busy_timeout=5000")
+                self.connection_pool.execute(CREATE_CONTEST_SCORES_TABLE)
+                self.connection_pool.execute(CREATE_BAND_BREAKDOWN_TABLE)
+                self.connection_pool.execute(CREATE_QTH_INFO_TABLE)
+            self.logger.info("Database connection pool initialized")
+            self.batch_processor.start()
+        except OperationalError as e:
+            self.logger.critical(f"Database connection failed: {e}")
+            raise SystemExit(1) from e
 
     def parse_xml_data(self, xml_data):
         """Parse XML data and return structured contest data."""
@@ -178,37 +194,39 @@ class ContestDatabaseHandler:
         ))
 
     def store_data(self, contest_data):
-        """Store contest data in the database."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            for data in contest_data:
-                try:
-                    # Insert main contest data
-                    cursor.execute(INSERT_CONTEST_DATA, (
-                        data['timestamp'], data['contest'], data['callsign'],
-                        data.get('power', ''), data.get('assisted', ''),
-                        data.get('transmitter', ''), data.get('ops', ''),
-                        data.get('bands', ''), data.get('mode', ''),
-                        data.get('overlay', ''), data['club'], data['section'],
-                        data['score'], data.get('qsos', 0), data.get('multipliers', 0),
-                        data.get('points', 0)
-                    ))
-                    
-                    contest_score_id = cursor.lastrowid
-                    
-                    # Store QTH info
-                    self._store_qth_info(cursor, contest_score_id, data['qth'])
-                    
-                    # Store band breakdown
-                    self._store_band_breakdown(cursor, contest_score_id, data.get('band_breakdown', []))
-                    
-                    conn.commit()
-                    
-                except Exception as e:
-                    self.logger.error(f"Error storing data for {data['callsign']}: {e}")
-                    self.logger.error(traceback.format_exc())
-                    raise
+        """Store contest data using connection pool"""
+        if not self.connection_pool:
+            raise DatabaseError("Connection pool not initialized")
+
+        cursor = self.connection_pool.cursor()
+        
+        for data in contest_data:
+            try:
+                # Insert main contest data
+                cursor.execute(INSERT_CONTEST_DATA, (
+                    data['timestamp'], data['contest'], data['callsign'],
+                    data.get('power', ''), data.get('assisted', ''),
+                    data.get('transmitter', ''), data.get('ops', ''),
+                    data.get('bands', ''), data.get('mode', ''),
+                    data.get('overlay', ''), data['club'], data['section'],
+                    data['score'], data.get('qsos', 0), data.get('multipliers', 0),
+                    data.get('points', 0)
+                ))
+                
+                contest_score_id = cursor.lastrowid
+                
+                # Store QTH info
+                self._store_qth_info(cursor, contest_score_id, data['qth'])
+                
+                # Store band breakdown
+                self._store_band_breakdown(cursor, contest_score_id, data.get('band_breakdown', []))
+                
+                self.connection_pool.commit()
+                
+            except Exception as e:
+                self.logger.error(f"Error storing data for {data['callsign']}: {e}")
+                self.logger.error(traceback.format_exc())
+                raise
 
     
     def _store_band_breakdown(self, cursor, contest_score_id, band_breakdown):
