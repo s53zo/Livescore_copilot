@@ -69,7 +69,8 @@ CALCULATE_RATES = """
         SELECT datetime('now') as current_utc
     ),
     total_qsos AS (
-        SELECT cs.timestamp, SUM(bb.qsos) as total
+        SELECT /*+ INDEX(cs idx_contest_callsign_timestamp) */
+            cs.timestamp, SUM(bb.qsos) as total
         FROM contest_scores cs
         JOIN band_breakdown bb ON bb.contest_score_id = cs.id
         CROSS JOIN now n 
@@ -195,8 +196,11 @@ CREATE_CONTEST_SCORES_TABLE = """
         score INTEGER,
         qsos INTEGER,
         multipliers INTEGER,
-        points INTEGER
-    )
+        points INTEGER,
+        -- Added index for common lookup pattern
+        CONSTRAINT idx_contest_callsign_timestamp 
+            UNIQUE (contest, callsign, timestamp)
+    ) WITHOUT ROWID;
 """
 
 CREATE_BAND_BREAKDOWN_TABLE = """
@@ -241,7 +245,7 @@ INSERT_BAND_BREAKDOWN = """
 """
 
 INSERT_CONTEST_DATA = """
-    INSERT INTO contest_scores (
+    INSERT OR REPLACE INTO contest_scores (
         timestamp, contest, callsign, power, assisted, transmitter,
         ops, bands, mode, overlay, club, section, score, qsos,
         multipliers, points
@@ -510,4 +514,3 @@ GET_FILTERS_LATEST = """
     WHERE contest = ? AND callsign = ?
     LIMIT 1
 """
-
