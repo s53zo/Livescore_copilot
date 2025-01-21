@@ -419,26 +419,45 @@ class ScoreReporter:
                         avg_rate = round(sum(top_rates) / len(top_rates))
                         band_avg_rates[band] = self.format_band_rates(avg_rate)
 
-            # Replace band headers in template
-            html_content = template
+            # Replace band headers in template using precise placeholders
+            band_placeholders = {
+                '160': ('{0OPs@}', '{20}'), 
+                '80': ('{0OPs@}', '{46}'),
+                '40': ('{1OPs@}', '{20}'),
+                '20': ('{2OPs@}', '{46}'),
+                '15': ('{1OPs@}', '{92}'),
+                '10': ('{0OPs@}', '{0}')
+            }
+
             for band in ['160', '80', '40', '20', '15', '10']:
                 count = active_ops[band]
-                rates_html = band_avg_rates.get(band, "")
+                avg_rate = band_avg_rates.get(band, "0")
+                ops_placeholder, rate_placeholder = band_placeholders[band]
+                
                 html_content = html_content.replace(
-                    f'>{band}m</th>',
-                    f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
+                    ops_placeholder, 
+                    f"{count}OPs@"
+                ).replace(
+                    rate_placeholder,
+                    f"{avg_rate}/h"
                 )
 
             # Final template variables
+            monitored_station = next((s for s in stations if s[1] == callsign), None)
             template_vars = {
                 'contest': safe_contest,
                 'callsign': safe_callsign,
                 'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
                 'power': stations[0][3] if stations else 'Unknown',
                 'assisted': stations[0][4] if stations else 'Unknown',
+                'category_tags': self.get_category_tags(monitored_station) if monitored_station else '',
                 'filter_info_div': filter_info_div,
                 'table_rows': '\n'.join(table_rows),
-                'additional_css': ''
+                'additional_css': '',
+                '20': band_avg_rates.get('40', '20'), 
+                '46': band_avg_rates.get('20', '46'),
+                '92': band_avg_rates.get('15', '92'),
+                '0': band_avg_rates.get('10', '0')
             }
 
             # Perform template substitution
@@ -525,3 +544,22 @@ class ScoreReporter:
         if rate > 0:
             return f'<div class="band-rates">Top 10 avg: {rate}/h</div>'
         return ""
+
+    def get_category_tags(self, station):
+        """Generate HTML for category tags"""
+        _, callsign_val, _, power, assisted, _, _, _, _, _ = station
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ops, transmitter 
+                FROM contest_scores 
+                WHERE callsign = ?""", (callsign_val,))
+            ops, transmitter = cursor.fetchone()
+        
+        category = self.get_operator_category(ops, transmitter, assisted)
+        power_class = power.lower() if power else 'unknown'
+        
+        return f"""
+        <span class="category-tag cat-{category.lower()}">{category}</span>
+        <span class="category-tag cat-power-{power_class}">{power[0].upper()}</span>
+        """

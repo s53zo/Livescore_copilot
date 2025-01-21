@@ -297,7 +297,7 @@
     
     <div class="station-info">
         <div>Monitoring: {callsign} | 
-        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | 
+        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> {category_tags} | 
         Updated: {timestamp}</div>
         <div>Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
         {filter_info_div}
@@ -310,12 +310,12 @@
                 <th>Callsign</th>
                 <th>Cat</th>
                 <th>Score</th>
-                <th>160m</th>
-                <th>80m</th>
-                <th>40m</th>
-                <th>20m</th>
-                <th>15m</th>
-                <th>10m</th>
+                <th class="band-header"><span class="band-rates">{0OPs@}</span> 160m</th>
+                <th class="band-header"><span class="band-rates">{0OPs@}</span> 80m</th>
+                <th class="band-header"><span class="band-rates">{1OPs@}</span> 40m<div class="band-rates">Top 10 avg: {20}/h</div></th>
+                <th class="band-header"><span class="band-rates">{2OPs@}</span> 20m<div class="band-rates">Top 10 avg: {46}/h</div></th>
+                <th class="band-header"><span class="band-rates">{1OPs@}</span> 15m<div class="band-rates">Top 10 avg: {92}/h</div></th>
+                <th class="band-header"><span class="band-rates">{0OPs@}</span> 10m</th>
                 <th>Total<br>QSO/Mults</th>
                 <th>Last Update</th>
             </tr>
