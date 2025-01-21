@@ -26,6 +26,9 @@ class ContestServer:
     def start(self):
         """Start the server"""
         try:
+            # Initialize database connection pool
+            self.db_handler.setup_connection_pool()
+            
             server_address = (self.host, self.port)
             httpd = CustomServer(server_address, 
                                lambda *args, **kwargs: CustomHandler(*args, 
@@ -36,9 +39,15 @@ class ContestServer:
             self.logger.info(f"Starting server on {self.host}:{self.port}")
             httpd.serve_forever()
             
+        except OSError as e:
+            self.logger.critical(f"Port {self.port} unavailable: {e}")
+            raise SystemExit(1) from e
+        except DatabaseError as e:
+            self.logger.critical(f"Database connection failed: {e}")
+            raise SystemExit(1) from e
         except Exception as e:
-            self.logger.error(f"Error starting server: {e}")
-            raise
+            self.logger.critical(f"Critical server error: {e}", exc_info=self.debug)
+            raise SystemExit(1) from e
         finally:
             self.cleanup()
             
@@ -55,10 +64,20 @@ class ContestServer:
 class CustomServer(HTTPServer):
     def __init__(self, *args, db_path='contest_data.db', debug=False, **kwargs):
         super().__init__(*args, **kwargs)
-        self.db_handler = ContestDatabaseHandler(db_path)
+        try:
+            self.db_handler = ContestDatabaseHandler(db_path)
+            self.db_handler.setup_connection_pool()
+        except OperationalError as e:
+            logging.critical(f"Failed to initialize database: {e}")
+            raise SystemExit(1) from e
         self.debug = debug
                 
     def server_close(self):
-        if hasattr(self, 'db_handler'):
-            self.db_handler.cleanup()
-        super().server_close()
+        try:
+            if hasattr(self, 'db_handler') and self.db_handler:
+                self.db_handler.cleanup()
+                self.db_handler = None
+        except Exception as e:
+            logging.error(f"Error during server shutdown: {e}")
+        finally:
+            super().server_close()
