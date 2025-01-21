@@ -419,6 +419,9 @@ class ScoreReporter:
                         avg_rate = round(sum(top_rates) / len(top_rates))
                         band_avg_rates[band] = self.format_band_rates(avg_rate)
 
+            # Initialize html_content with template
+            html_content = template
+            
             # Replace band headers in template using precise placeholders
             band_placeholders = {
                 '160': ('{0OPs@}', '{20}'), 
@@ -430,17 +433,20 @@ class ScoreReporter:
             }
 
             for band in ['160', '80', '40', '20', '15', '10']:
-                count = active_ops[band]
+                count = active_ops.get(band, 0)
                 avg_rate = band_avg_rates.get(band, "0")
                 ops_placeholder, rate_placeholder = band_placeholders[band]
                 
-                html_content = html_content.replace(
-                    ops_placeholder, 
-                    f"{count}OPs@"
-                ).replace(
-                    rate_placeholder,
-                    f"{avg_rate}/h"
-                )
+                if ops_placeholder in html_content and rate_placeholder in html_content:
+                    html_content = html_content.replace(
+                        ops_placeholder, 
+                        f"{count}OPs@"
+                    ).replace(
+                        rate_placeholder,
+                        f"{avg_rate}/h"
+                    )
+                else:
+                    self.logger.warning(f"Placeholders missing for {band}m band")
 
             # Final template variables
             monitored_station = next((s for s in stations if s[1] == callsign), None)
