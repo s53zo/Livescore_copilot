@@ -305,86 +305,89 @@ def archive_old_records(cursor, archive_dir, conn):
 def perform_maintenance(db_path, dry_run):
     """Performs enhanced maintenance tasks"""
     try:
-        with sqlite3.connect(db_path, timeout=30) as conn:
-            conn.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+        with sqlite3.connect(db_path, timeout=30.0) as conn:
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.cursor()
 
-            # 1. First perform read-only analysis
-            logger.info("Checking for orphaned records...")
-            orphaned_analysis = analyze_orphaned_records(cursor)
-            if orphaned_analysis:
-                logger.info("Analysis completed, proceeding with maintenance")
+            try:
+                conn.execute("BEGIN IMMEDIATE")  # Get write lock immediately
 
-            # 2. Perform QSO consistency check
-            logger.info("Checking QSO count consistency...")
-            inconsistent_qsos, logs_without_breakdown = check_qso_consistency(cursor)
-            logger.info(f"Found {logs_without_breakdown} logs without band breakdown data (this is normal)")
-            if inconsistent_qsos:
-                logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches")
+                # 1. First perform read-only analysis
+                logger.info("Checking for orphaned records...")
+                orphaned_analysis = analyze_orphaned_records(cursor)
+                if orphaned_analysis:
+                    logger.info("Analysis completed, proceeding with maintenance")
 
-            # 3. Perform write operations in a single transaction
-            if not dry_run:
-                cursor.execute("BEGIN IMMEDIATE")
-                try:
-                    # Fix timestamps
-                    if not fix_timestamps(cursor):
-                        raise Exception("Failed to fix timestamps")
+                # 2. Perform QSO consistency check
+                logger.info("Checking QSO count consistency...")
+                inconsistent_qsos, logs_without_breakdown = check_qso_consistency(cursor)
+                logger.info(f"Found {logs_without_breakdown} logs without band breakdown data (this is normal)")
+                if inconsistent_qsos:
+                    logger.warning(f"Found {len(inconsistent_qsos)} records with QSO count mismatches")
 
-                    # Handle orphaned records
-                    if not handle_orphaned_records(cursor, dry_run=False):
-                        raise Exception("Failed to handle orphaned records")
+                # 3. Perform write operations in a single transaction
+                if not dry_run:
+                    try:
+                        # Fix timestamps
+                        if not fix_timestamps(cursor):
+                            raise Exception("Failed to fix timestamps")
 
-                    # Clean up small contests
-                    cursor.execute(FIND_SMALL_CONTESTS)
-                    contests_to_delete = cursor.fetchall()
+                        # Handle orphaned records
+                        if not handle_orphaned_records(cursor, dry_run=False):
+                            raise Exception("Failed to handle orphaned records")
 
-                    for contest, num_callsigns in contests_to_delete:
-                        logger.info(f"Removing contest: {contest} ({num_callsigns} callsigns)")
-                        cursor.execute("SELECT id FROM contest_scores WHERE contest = ?", (contest,))
-                        contest_ids = [row[0] for row in cursor.fetchall()]
+                        # Clean up small contests
+                        cursor.execute(FIND_SMALL_CONTESTS)
+                        contests_to_delete = cursor.fetchall()
+
+                        for contest, num_callsigns in contests_to_delete:
+                            logger.info(f"Removing contest: {contest} ({num_callsigns} callsigns)")
+                            cursor.execute("SELECT id FROM contest_scores WHERE contest = ?", (contest,))
+                            contest_ids = [row[0] for row in cursor.fetchall()]
+                            
+                            if contest_ids:
+                                delete_in_batches(cursor, "band_breakdown", "contest_score_id", contest_ids)
+                                delete_in_batches(cursor, "qth_info", "contest_score_id", contest_ids)
+                                delete_in_batches(cursor, "contest_scores", "id", contest_ids)
+
+                        # Delete old records
+                        threshold_date = datetime.now() - timedelta(days=3)
+                        cursor.execute("SELECT id FROM contest_scores WHERE timestamp < ?", (threshold_date,))
+                        old_ids = [row[0] for row in cursor.fetchall()]
                         
-                        if contest_ids:
-                            delete_in_batches(cursor, "band_breakdown", "contest_score_id", contest_ids)
-                            delete_in_batches(cursor, "qth_info", "contest_score_id", contest_ids)
-                            delete_in_batches(cursor, "contest_scores", "id", contest_ids)
+                        if old_ids:
+                            delete_in_batches(cursor, "band_breakdown", "contest_score_id", old_ids)
+                            delete_in_batches(cursor, "qth_info", "contest_score_id", old_ids)
+                            delete_in_batches(cursor, "contest_scores", "id", old_ids)
+                            logger.info(f"Deleted {len(old_ids)} old contest records and related data")
 
-                    # Delete old records
-                    threshold_date = datetime.now() - timedelta(days=3)
-                    cursor.execute("SELECT id FROM contest_scores WHERE timestamp < ?", (threshold_date,))
-                    old_ids = [row[0] for row in cursor.fetchall()]
-                    
-                    if old_ids:
-                        delete_in_batches(cursor, "band_breakdown", "contest_score_id", old_ids)
-                        delete_in_batches(cursor, "qth_info", "contest_score_id", old_ids)
-                        delete_in_batches(cursor, "contest_scores", "id", old_ids)
-                        logger.info(f"Deleted {len(old_ids)} old contest records and related data")
+                        # Update latest scores table
+                        if not update_latest_scores_table(cursor):
+                            raise Exception("Failed to update latest scores table")
 
-                    # Update latest scores table
-                    if not update_latest_scores_table(cursor):
-                        raise Exception("Failed to update latest scores table")
+                        # File System Maintenance
+                        backup_dir = "./backups"
+                        reports_dir = "./reports"
+                        archive_dir = "./archive"
 
-                    # File System Maintenance
-                    backup_dir = "./backups"
-                    reports_dir = "./reports"
-                    archive_dir = "./archive"
+                        for directory in [backup_dir, reports_dir, archive_dir]:
+                            os.makedirs(directory, exist_ok=True)
 
-                    for directory in [backup_dir, reports_dir, archive_dir]:
-                        os.makedirs(directory, exist_ok=True)
+                        cleanup_old_files(backup_dir, 30, dry_run, "backup")
+                        cleanup_old_files(reports_dir, 3, dry_run, "report")
 
-                    cleanup_old_files(backup_dir, 30, dry_run, "backup")
-                    cleanup_old_files(reports_dir, 3, dry_run, "report")
+                        # Archive old records
+                        archive_old_records(cursor, archive_dir, conn)
 
-                    # Archive old records
-                    archive_old_records(cursor, archive_dir, conn)
+                        # Commit all changes
+                        conn.commit()
+                        logger.info("Database cleanup and file system maintenance completed successfully")
 
-                    # Commit all changes
-                    cursor.execute("COMMIT")
-                    logger.info("Database cleanup and file system maintenance completed successfully")
-
-                except Exception as e:
-                    cursor.execute("ROLLBACK")
-                    logger.error(f"Error during maintenance, rolling back: {e}")
-                    raise
+                    except Exception as e:
+                        conn.rollback()
+                        logger.error(f"Error during maintenance, rolling back: {e}")
+                        raise
 
                 # 4. Perform optimization as a separate operation
                 try:
@@ -394,52 +397,54 @@ def perform_maintenance(db_path, dry_run):
                 except Exception as e:
                     logger.error(f"Optimization error (non-fatal): {e}")
 
-            # 5. Final Statistics
-            cursor.execute("SELECT COUNT(*) FROM contest_scores")
-            total_scores = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(DISTINCT contest) FROM contest_scores")
-            total_contests = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(DISTINCT callsign) FROM contest_scores")
-            total_stations = cursor.fetchone()[0]
+                # 5. Final Statistics
+                cursor.execute("SELECT COUNT(*) FROM contest_scores")
+                total_scores = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(DISTINCT contest) FROM contest_scores")
+                total_contests = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(DISTINCT callsign) FROM contest_scores")
+                total_stations = cursor.fetchone()[0]
 
-            # Get orphaned records count
-            cursor.execute(COUNT_ORPHANED_BAND_BREAKDOWN)
-            orphaned_bb = cursor.fetchone()[0]
-            cursor.execute(COUNT_ORPHANED_QTH_INFO)
-            orphaned_qth = cursor.fetchone()[0]
+                # Get orphaned records count
+                cursor.execute(COUNT_ORPHANED_BAND_BREAKDOWN)
+                orphaned_bb = cursor.fetchone()[0]
+                cursor.execute(COUNT_ORPHANED_QTH_INFO)
+                orphaned_qth = cursor.fetchone()[0]
 
-            logger.info("\nMaintenance Summary:")
-            logger.info(f"Total Contests: {total_contests}")
-            logger.info(f"Total Stations: {total_stations}")
-            logger.info(f"Total Score Records: {total_scores}")
-            logger.info(f"Orphaned Records Found: {orphaned_bb + orphaned_qth}")
-            logger.info(f"Logs without Band Breakdown: {logs_without_breakdown}")
-            logger.info(f"True QSO Inconsistencies: {len(inconsistent_qsos)}")
-        
-            # Example usage of GET_CONTEST_STANDINGS_BASE and filters
-            logger.info("\nExample Contest Standings Query (showing top positions):")
-            example_contest = "CQWW-SSB"
-            example_callsign = "W1AW"
-            standings_query = GET_CONTEST_STANDINGS_BASE
-            standings_params = [example_contest]
+                logger.info("\nMaintenance Summary:")
+                logger.info(f"Total Contests: {total_contests}")
+                logger.info(f"Total Stations: {total_stations}")
+                logger.info(f"Total Score Records: {total_scores}")
+                logger.info(f"Orphaned Records Found: {orphaned_bb + orphaned_qth}")
+                logger.info(f"Logs without Band Breakdown: {logs_without_breakdown}")
+                logger.info(f"True QSO Inconsistencies: {len(inconsistent_qsos)}")
 
-            # Adding filter for 'DXCC'
-            filter_type = 'DXCC'
-            filter_value = 'United States'
+                # Example usage of contest standings queries
+                logger.info("\nExample Contest Standings Query (showing top positions):")
+                example_contest = "CQWW-SSB"
+                example_callsign = "W1AW"
+                standings_query = GET_CONTEST_STANDINGS_BASE
+                standings_params = [example_contest]
 
-            if filter_type in FILTER_MAP:
-               standings_query += GET_CONTEST_STANDINGS_QTH_FILTER.format(field=FILTER_MAP[filter_type])
-               standings_params.append(filter_value)
+                filter_type = 'DXCC'
+                filter_value = 'United States'
 
-            standings_query += GET_CONTEST_STANDINGS_RANGE
-            standings_params.extend([example_callsign, example_callsign, example_callsign])
+                if filter_type in FILTER_MAP:
+                    standings_query += GET_CONTEST_STANDINGS_QTH_FILTER.format(field=FILTER_MAP[filter_type])
+                    standings_params.append(filter_value)
 
+                standings_query += GET_CONTEST_STANDINGS_RANGE
+                standings_params.extend([example_callsign, example_callsign, example_callsign])
 
-            cursor.execute(standings_query, standings_params)
-            standings_results = cursor.fetchall()
-            for row in standings_results:
-                logger.info(f"  Rank:{row[9]} Call:{row[1]} Score:{row[2]} Rel:{row[10]}")
+                cursor.execute(standings_query, standings_params)
+                standings_results = cursor.fetchall()
+                for row in standings_results:
+                    logger.info(f"  Rank:{row[9]} Call:{row[1]} Score:{row[2]} Rel:{row[10]}")
 
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Database error: {e}")
+                return False
 
         return True
 
