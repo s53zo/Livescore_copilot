@@ -10,6 +10,7 @@ from datetime import datetime
 class BatchProcessor:
     def __init__(self, db_handler, batch_interval=60):
         self.db_handler = db_handler
+        self.db_path = db_handler.db_path
         self.batch_interval = batch_interval
         self.queue = queue.Queue()
         self.is_running = False
