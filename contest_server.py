@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import logging
+import sqlite3
+from sqlite3 import DatabaseError, OperationalError
 import urllib.parse
 from http.server import HTTPServer
 from custom_handler import CustomHandler
