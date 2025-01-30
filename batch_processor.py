@@ -3,6 +3,8 @@ import queue
 import threading
 import time
 import logging
+import sqlite3
+import traceback
 from datetime import datetime
 
 class BatchProcessor:
@@ -47,34 +49,63 @@ class BatchProcessor:
         self.paused = False
     
     def _process_batch_loop(self):
-        """Main processing loop - runs every batch_interval seconds"""
-        while self.is_running:
-            start_time = time.time()
-            batch = []
-            
-            try:
-                while True:
+    """Main processing loop - runs every batch_interval seconds"""
+    while self.is_running:
+        start_time = time.time()
+        batch = []
+        
+        try:
+            # Collect items from queue
+            while True:
+                try:
                     batch.append(self.queue.get_nowait())
                     self.batch_size -= 1
-            except queue.Empty:
-                pass
+                except queue.Empty:
+                    break
             
             if batch:
                 try:
                     batch_start = time.time()
                     self.logger.info(f"Processing batch of {len(batch)} items")
                     
-                    combined_xml = "\n".join(batch)
-                    contest_data = self.db_handler.parse_xml_data(combined_xml)
-                    if contest_data:
-                        self.db_handler.store_data(contest_data)
-                    
-                    batch_time = time.time() - batch_start
-                    self.logger.info(f"Batch processed in {batch_time:.2f} seconds")
-                    
+                    # Try to connect with timeout and process the batch
+                    try:
+                        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                            conn.execute("PRAGMA busy_timeout = 30000")
+                            combined_xml = "\n".join(batch)
+                            contest_data = self.db_handler.parse_xml_data(combined_xml)
+                            if contest_data:
+                                self.db_handler.store_data(contest_data)
+                            
+                            batch_time = time.time() - batch_start
+                            self.logger.info(f"Batch processed in {batch_time:.2f} seconds")
+                            
+                    except sqlite3.OperationalError as e:
+                        if "database is locked" in str(e):
+                            self.logger.warning("Database locked, waiting before retry...")
+                            time.sleep(1)  # Wait before retry
+                            # Put items back in queue
+                            for item in batch:
+                                self.queue.put(item)
+                                self.batch_size += 1
+                        else:
+                            raise
+                            
                 except Exception as e:
                     self.logger.error(f"Error processing batch: {e}")
+                    self.logger.error(traceback.format_exc())
+                    # Put items back in queue on error
+                    for item in batch:
+                        self.queue.put(item)
+                        self.batch_size += 1
             
+            # Calculate and handle sleep time
             elapsed = time.time() - start_time
             sleep_time = max(0, self.batch_interval - elapsed)
-            time.sleep(sleep_time)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+                
+        except Exception as e:
+            self.logger.error(f"Error in batch processing loop: {e}")
+            self.logger.error(traceback.format_exc())
+            time.sleep(self.batch_interval)  # Wait before retry
