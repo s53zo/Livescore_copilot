@@ -7,16 +7,19 @@ from database_handler import ContestDatabaseHandler
 
 class ContestServer:
     def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False):
-     with sqlite3.connect(db_path) as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA synchronous=NORMAL")    self.host = host
+        self.host = host
         self.port = port
         self.db_path = db_path
         self.debug = debug
         self.logger = self._setup_logging(debug)
         self.db_handler = ContestDatabaseHandler(db_path)
         
+        # Configure database with WAL mode after initialization
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+
     def _setup_logging(self, debug):
         logger = logging.getLogger('ContestServer')
         logger.setLevel(logging.DEBUG if debug else logging.INFO)
