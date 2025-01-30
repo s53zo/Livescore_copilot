@@ -7,7 +7,10 @@ from database_handler import ContestDatabaseHandler
 
 class ContestServer:
     def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False):
-        self.host = host
+     with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA synchronous=NORMAL")    self.host = host
         self.port = port
         self.db_path = db_path
         self.debug = debug
