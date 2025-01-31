@@ -8,13 +8,11 @@ import traceback
 from datetime import datetime
 from callsign_utils import CallsignLookup
 from batch_processor import BatchProcessor
+from contest_score_manager import ContestScoreManager
 from sql_queries import (
     CREATE_CONTEST_SCORES_TABLE,
     CREATE_BAND_BREAKDOWN_TABLE,
-    CREATE_QTH_INFO_TABLE,
-    INSERT_QTH_INFO,
-    INSERT_BAND_BREAKDOWN,
-    INSERT_CONTEST_DATA
+    CREATE_QTH_INFO_TABLE
 )
 
 class ContestDatabaseHandler:
@@ -24,6 +22,7 @@ class ContestDatabaseHandler:
         self.logger = logging.getLogger('ContestDatabaseHandler')
         self.connection_pool = None
         self.batch_processor = BatchProcessor(self)
+        self.score_manager = ContestScoreManager(db_path)
 
     def process_submission(self, xml_data):
         """Add submission to batch instead of processing immediately"""
@@ -179,64 +178,36 @@ class ContestDatabaseHandler:
             self.logger.error(f"Error extracting breakdown data: {e}")
             self.logger.debug(f"Breakdown XML: {ET.tostring(breakdown, encoding='unicode')}")
             raise
-    
-    def _store_qth_info(self, cursor, contest_score_id, qth_data):
-        """Store QTH information in database."""
-        cursor.execute(INSERT_QTH_INFO, (
-            contest_score_id,
-            qth_data.get('dxcc_country', ''),
-            qth_data.get('continent', ''),  # Fixed typo in variable name
-            qth_data.get('cq_zone', ''),
-            qth_data.get('iaru_zone', ''),
-            qth_data.get('arrl_section', ''),
-            qth_data.get('state_province', ''),
-            qth_data.get('grid6', '')
-        ))
 
     def store_data(self, contest_data):
-        """Store contest data using connection pool"""
-        if not self.connection_pool:
-            raise DatabaseError("Connection pool not initialized")
+        """Store contest data using score manager"""
+        try:
+            for data in contest_data:
+                # Format data for score manager
+                score_data = {
+                    'timestamp': data['timestamp'],
+                    'contest': data['contest'],
+                    'callsign': data['callsign'],
+                    'power': data.get('power', ''),
+                    'assisted': data.get('assisted', ''),
+                    'transmitter': data.get('transmitter', ''),
+                    'ops': data.get('ops', ''),
+                    'bands': data.get('bands', ''),
+                    'mode': data.get('mode', ''),
+                    'overlay': data.get('overlay', ''),
+                    'club': data['club'],
+                    'section': data['section'],
+                    'score': data['score'],
+                    'qsos': data.get('qsos', 0),
+                    'multipliers': data.get('multipliers', 0),
+                    'points': data.get('points', 0),
+                    'band_breakdown': data.get('band_breakdown', []),
+                    'qth': data['qth']
+                }
 
-        cursor = self.connection_pool.cursor()
-        
-        for data in contest_data:
-            try:
-                # Insert main contest data
-                cursor.execute(INSERT_CONTEST_DATA, (
-                    data['timestamp'], data['contest'], data['callsign'],
-                    data.get('power', ''), data.get('assisted', ''),
-                    data.get('transmitter', ''), data.get('ops', ''),
-                    data.get('bands', ''), data.get('mode', ''),
-                    data.get('overlay', ''), data['club'], data['section'],
-                    data['score'], data.get('qsos', 0), data.get('multipliers', 0),
-                    data.get('points', 0)
-                ))
-                
-                contest_score_id = cursor.lastrowid
-                
-                # Store QTH info
-                self._store_qth_info(cursor, contest_score_id, data['qth'])
-                
-                # Store band breakdown
-                self._store_band_breakdown(cursor, contest_score_id, data.get('band_breakdown', []))
-                
-                self.connection_pool.commit()
-                
-            except Exception as e:
-                self.logger.error(f"Error storing data for {data['callsign']}: {e}")
-                self.logger.error(traceback.format_exc())
-                raise
+                self.score_manager.insert_score(score_data)
 
-    
-    def _store_band_breakdown(self, cursor, contest_score_id, band_breakdown):
-        """Store band breakdown information in database."""
-        for band_data in band_breakdown:
-            cursor.execute(INSERT_BAND_BREAKDOWN, (
-                contest_score_id,
-                band_data['band'],
-                band_data['mode'],
-                band_data['qsos'],
-                band_data['points'],
-                band_data['multipliers']
-            ))
+        except Exception as e:
+            self.logger.error(f"Error storing data: {e}")
+            self.logger.error(traceback.format_exc())
+            raise
