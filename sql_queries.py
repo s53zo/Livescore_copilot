@@ -514,3 +514,28 @@ GET_FILTERS_LATEST = """
     WHERE contest = ? AND callsign = ?
     LIMIT 1
 """
+
+# Contest score insertion query
+INSERT_SCORE = """
+    INSERT INTO contest_scores 
+    (timestamp, contest, callsign, power, assisted, transmitter, 
+     ops, bands, mode, overlay, club, section, score, qsos, 
+     multipliers, points)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+# QTH info insertion for a contest score
+INSERT_SCORE_QTH = """
+    INSERT INTO qth_info 
+    (contest_score_id, dxcc_country, continent, cq_zone, 
+     iaru_zone, arrl_section, state_province, grid6)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+# Band breakdown insertion for a contest score
+INSERT_SCORE_BAND = """
+    INSERT INTO band_breakdown
+    (contest_score_id, band, mode, qsos, points, multipliers)
+    VALUES (?, ?, ?, ?, ?, ?)
+"""
+
