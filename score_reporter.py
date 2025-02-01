@@ -401,7 +401,7 @@ class ScoreReporter:
                     <td>{i}</td>
                     {callsign_cell}
                     <td>{category_html}</td>
-                    <td>{score:,}</td>
+                    <td>{int(score):,}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('160'), reference_breakdown, '160')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('80'), reference_breakdown, '80')}</td>
                     <td class="band-data">{self.format_band_data(band_breakdown.get('40'), reference_breakdown, '40')}</td>
