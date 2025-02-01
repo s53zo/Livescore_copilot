@@ -3,14 +3,11 @@ import queue
 import threading
 import time
 import logging
-import sqlite3
-import traceback
 from datetime import datetime
 
 class BatchProcessor:
     def __init__(self, db_handler, batch_interval=60):
         self.db_handler = db_handler
-        self.db_path = db_handler.db_path
         self.batch_interval = batch_interval
         self.queue = queue.Queue()
         self.is_running = False
@@ -56,57 +53,28 @@ class BatchProcessor:
             batch = []
             
             try:
-                # Collect items from queue
                 while True:
-                    try:
-                        batch.append(self.queue.get_nowait())
-                        self.batch_size -= 1
-                    except queue.Empty:
-                        break
-                
-                if batch:
-                    try:
-                        batch_start = time.time()
-                        self.logger.info(f"Processing batch of {len(batch)} items")
-                        
-                        # Try to connect with timeout and process the batch
-                        try:
-                            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
-                                conn.execute("PRAGMA busy_timeout = 30000")
-                                combined_xml = "\n".join(batch)
-                                contest_data = self.db_handler.parse_xml_data(combined_xml)
-                                if contest_data:
-                                    self.db_handler.store_data(contest_data)
-                                
-                                batch_time = time.time() - batch_start
-                                self.logger.info(f"Batch processed in {batch_time:.2f} seconds")
-                                
-                        except sqlite3.OperationalError as e:
-                            if "database is locked" in str(e):
-                                self.logger.warning("Database locked, waiting before retry...")
-                                time.sleep(1)  # Wait before retry
-                                # Put items back in queue
-                                for item in batch:
-                                    self.queue.put(item)
-                                    self.batch_size += 1
-                            else:
-                                raise
-                                
-                    except Exception as e:
-                        self.logger.error(f"Error processing batch: {e}")
-                        self.logger.error(traceback.format_exc())
-                        # Put items back in queue on error
-                        for item in batch:
-                            self.queue.put(item)
-                            self.batch_size += 1
-                
-                # Calculate and handle sleep time
-                elapsed = time.time() - start_time
-                sleep_time = max(0, self.batch_interval - elapsed)
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+                    batch.append(self.queue.get_nowait())
+                    self.batch_size -= 1
+            except queue.Empty:
+                pass
+            
+            if batch:
+                try:
+                    batch_start = time.time()
+                    self.logger.info(f"Processing batch of {len(batch)} items")
                     
-            except Exception as e:
-                self.logger.error(f"Error in batch processing loop: {e}")
-                self.logger.error(traceback.format_exc())
-                time.sleep(self.batch_interval)  # Wait before retry
+                    combined_xml = "\n".join(batch)
+                    contest_data = self.db_handler.parse_xml_data(combined_xml)
+                    if contest_data:
+                        self.db_handler.store_data(contest_data)
+                    
+                    batch_time = time.time() - batch_start
+                    self.logger.info(f"Batch processed in {batch_time:.2f} seconds")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error processing batch: {e}")
+            
+            elapsed = time.time() - start_time
+            sleep_time = max(0, self.batch_interval - elapsed)
+            time.sleep(sleep_time)
