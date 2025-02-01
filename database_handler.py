@@ -127,7 +127,7 @@ class ContestDatabaseHandler:
             'timestamp': root.findtext('timestamp', ''),
             'club': root.findtext('club', '').strip(),
             'section': root.find('.//qth/arrlsection').text if root.find('.//qth/arrlsection') is not None else '',
-            'score': int(root.findtext('score', 0)),
+            'score': int(float(root.findtext('score', 0))),
             'qth': qth_data
         }
 
