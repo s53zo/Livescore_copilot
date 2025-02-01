@@ -36,7 +36,10 @@ class RateCalculator:
     def calculate_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
         """Calculate QSO rates using centralized SQL query"""
         try:
-            current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            if isinstance(timestamp, int):
+                current_ts = datetime.fromtimestamp(timestamp)
+            else:
+                current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
             
             # Calculate long window rate
             long_window_start = current_ts - timedelta(minutes=long_window)
@@ -66,7 +69,11 @@ class RateCalculator:
     def calculate_band_rates(self, cursor, callsign, contest, timestamp, long_window=60, short_window=15):
         """Calculate per-band QSO rates using centralized SQL query"""
         try:
-            current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            if isinstance(timestamp, int):
+                current_ts = datetime.fromtimestamp(timestamp)
+            else:
+                current_ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+
             
             # Get current band data
             cursor.execute(GET_BAND_BREAKDOWN, (callsign, contest, timestamp))
