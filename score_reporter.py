@@ -374,9 +374,16 @@ class ScoreReporter:
                 )
 
                 # Format timestamp
-                corrected_timestamp = timestamp.replace('.', ':')
-                ts = datetime.strptime(corrected_timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
-                # ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                from datetime import datetime
+
+                if isinstance(timestamp, int):
+                    # Convert Unix timestamp (int) to datetime string in the desired format
+                    ts = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M')
+                else:
+                    # If it's already a string, ensure it uses colons instead of periods
+                    corrected_timestamp = str(timestamp).replace('.', ':')
+                    ts = datetime.strptime(corrected_timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+
 
                 # Build row HTML
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
