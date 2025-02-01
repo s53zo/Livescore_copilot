@@ -639,7 +639,23 @@ class ScoreReporter:
                     station_id, callsign_val, contest, timestamp
                 )
                 
-                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M')
+                try:
+                    # If the time part uses colons already, this will succeed
+                    dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    # Otherwise, assume the time part uses periods (e.g. "17.40.29")
+                    try:
+                        # Optionally, you can be more specific by splitting the string:
+                        date_part, time_part = timestamp.split(' ')
+                        # Only replace if there are no colons in the time part
+                        if ':' not in time_part:
+                            time_part = time_part.replace('.', ':')
+                        normalized_timestamp = f"{date_part} {time_part}"
+                        dt = datetime.strptime(normalized_timestamp, '%Y-%m-%d %H:%M:%S')
+                    except Exception as inner_e:
+                        logger.error(f"Failed to normalize timestamp {timestamp}: {inner_e}")
+                        raise
+                ts = dt.strftime('%Y-%m-%d %H:%M')
                 
                 highlight = ' class="highlight"' if callsign_val == callsign else ''
     
