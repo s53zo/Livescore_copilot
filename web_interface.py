@@ -7,6 +7,8 @@ import re # For sanitizing room names
 import logging
 import sys
 import traceback
+import urllib.parse # For XML POST handling
+import xml.etree.ElementTree as ET # For XML validation
 from score_reporter import ScoreReporter
 from datetime import datetime
 
@@ -409,6 +411,93 @@ def get_filters():
     except Exception as e:
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+# --- XML Ingestion Route ---
+
+# Helper function (from custom_handler.py - adapt if needed)
+def validate_xml_data(xml_data):
+    """Validate XML data format"""
+    try:
+        # Find all XML documents if multiple are concatenated
+        xml_docs = re.findall(r'<\?xml.*?</dynamicresults>', xml_data, re.DOTALL)
+        if not xml_docs:
+            logger.error("No valid XML document structure found in POST data.")
+            return False
+        # Validate the first document found as a basic check
+        ET.fromstring(xml_docs[0])
+        logger.debug(f"XML validation successful for first document out of {len(xml_docs)}.")
+        return True
+    except ET.ParseError as e:
+        logger.error(f"XML validation failed: ParseError - {e}")
+        return False
+    except Exception as e:
+        logger.error(f"XML validation failed: Unexpected error - {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+# Helper function (from custom_handler.py - adapt if needed)
+def check_authorization(request_headers):
+    """Check if the request is authorized (placeholder)"""
+    # Example: Check for an API key in headers
+    # api_key = request_headers.get('X-API-Key')
+    # Implement your actual authorization logic here
+    # For now, allow all authenticated via Nginx IP restriction perhaps
+    logger.debug("Performing placeholder authorization check (always True).")
+    return True
+
+@app.route('/livescore', methods=['POST'])
+def handle_livescore_post():
+    """Handle POST requests with XML contest data."""
+    logger.info("Received POST request on /livescore")
+    try:
+        # Retrieve db_handler stored in app.config by livescore.py
+        db_handler = app.config.get('DB_HANDLER')
+        if not db_handler:
+            logger.error("DB_HANDLER not found in app.config. Cannot process submission.")
+            return "Internal Server Error - Configuration missing", 500
+
+        # Get raw data
+        content_length = request.content_length
+        if not content_length:
+             logger.warning("Received POST request with no Content-Length.")
+             return "Bad Request - Missing Content-Length", 400
+
+        post_data_raw = request.get_data()
+        if not post_data_raw:
+             logger.warning("Received POST request with no data.")
+             return "Bad Request - Empty body", 400
+
+        # Decode data (assuming UTF-8 and URL encoding)
+        try:
+            post_data_decoded = urllib.parse.unquote_plus(post_data_raw.decode('utf-8'))
+            logger.debug(f"Received {len(post_data_decoded)} bytes of decoded data.")
+        except Exception as decode_err:
+            logger.error(f"Failed to decode POST data: {decode_err}")
+            return "Bad Request - Data decoding failed", 400
+
+        # Validate XML
+        if not validate_xml_data(post_data_decoded):
+            logger.warning("Invalid XML data received.")
+            return "Bad Request - Invalid XML format", 400
+
+        # Check Authorization (using placeholder)
+        if not check_authorization(request.headers):
+            logger.warning("Unauthorized access attempt to /livescore.")
+            return "Forbidden - Unauthorized access", 403
+
+        # Process submission via BatchProcessor
+        db_handler.process_submission(post_data_decoded)
+        logger.info("XML submission added to batch processor queue.")
+
+        # Return success response (as plain text, matching old handler)
+        return "OK-Full", 200
+
+    except Exception as e:
+        logger.error(f"Error processing /livescore POST request: {e}")
+        logger.error(traceback.format_exc())
+        return "Internal Server Error - Server processing failed", 500
+
 
 # --- Main Execution Logic ---
 

@@ -4,7 +4,9 @@ import logging
 import sys
 # Import the app and socketio instance from web_interface
 from web_interface import app, socketio
-from contest_server import ContestServer # Keep for initializing db_handler/batch_processor
+# Import ContestDatabaseHandler directly
+from database_handler import ContestDatabaseHandler
+# from contest_server import ContestServer # No longer needed
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from maintenance_task import perform_maintenance
@@ -110,18 +112,17 @@ def main():
     scheduler.start()
     logger.info(f"Scheduled maintenance job for {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
 
-    # Initialize ContestServer primarily to setup db_handler and batch_processor
-    # Pass the imported socketio instance
-    # Note: The host/port args here are for the *old* HTTP server, which isn't really used now.
-    # We pass None for host/port to avoid confusion, or use the Flask host/port if needed internally.
-    contest_server_instance = ContestServer(
-        host=None, # Not directly used for serving anymore
-        port=None, # Not directly used for serving anymore
-        db_path=args.db_file,
-        debug=args.debug,
-        socketio=socketio # Pass the imported socketio instance
-    )
-    # contest_server_instance.start() # This no longer starts the main server
+    # Initialize ContestDatabaseHandler directly, passing socketio
+    # This also starts the BatchProcessor thread internally
+    logger.info("Initializing Database Handler and Batch Processor...")
+    db_handler = ContestDatabaseHandler(db_path=args.db_file, socketio=socketio)
+
+    # Make db_handler accessible to Flask routes
+    app.config['DB_HANDLER'] = db_handler
+    logger.info("Database Handler instance stored in app.config['DB_HANDLER']")
+
+    # Remove old ContestServer initialization
+    # contest_server_instance = ContestServer(...)
 
     logger.info("Starting Flask-SocketIO server...")
     try:
@@ -143,9 +144,13 @@ def main():
         # Cleanup
         logger.info("Shutting down scheduler...")
         scheduler.shutdown(wait=False) # Don't wait for jobs to finish on shutdown
-        if 'contest_server_instance' in locals():
-            logger.info("Cleaning up ContestServer resources (db_handler, batch_processor)...")
-            contest_server_instance.cleanup()
+        # Cleanup db_handler (which stops the batch processor)
+        if 'db_handler' in locals():
+             logger.info("Cleaning up Database Handler (stops batch processor)...")
+             db_handler.cleanup()
+        # Remove old ContestServer cleanup
+        # if 'contest_server_instance' in locals():
+        #     contest_server_instance.cleanup()
         logger.info("Application shutdown complete.")
 
 if __name__ == "__main__":
