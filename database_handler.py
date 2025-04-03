@@ -84,12 +84,17 @@ class ContestDatabaseHandler:
         """Parse XML data and return structured contest data."""
         xml_docs = re.findall(r'<\?xml.*?</dynamicresults>', xml_data, re.DOTALL)
         results = []
-        
-        for xml_doc in xml_docs:
+        self.logger.debug(f"Found {len(xml_docs)} XML document(s) in the batch.")
+
+        for i, xml_doc in enumerate(xml_docs):
+            self.logger.debug(f"--- Processing XML document {i+1} ---")
+            # Log first few chars for identification without logging huge strings
+            self.logger.debug(f"Raw XML snippet: {xml_doc[:200]}...")
             try:
                 root = ET.fromstring(xml_doc)
                 callsign = root.findtext('call', '')
-                
+                self.logger.debug(f"Extracted callsign: {callsign}")
+
                 # Get QTH info
                 qth_elem = root.find('qth')
                 qth_data = {
@@ -99,21 +104,30 @@ class ContestDatabaseHandler:
                     'state_province': qth_elem.findtext('stprvoth', ''),
                     'grid6': qth_elem.findtext('grid6', '')
                 } if qth_elem is not None else {}
-                
+                self.logger.debug(f"Raw QTH data from XML: {qth_data}")
+
                 # Get callsign info
+                self.logger.debug(f"Looking up callsign info for: {callsign}")
                 callsign_info = self.callsign_lookup.get_callsign_info(callsign)
+                self.logger.debug(f"Callsign lookup result: {callsign_info}")
                 if callsign_info:
-                    qth_data['dxcc_country'] = callsign_info['prefix']
-                    qth_data['continent'] = callsign_info['continent']
-                    if qth_data.get('cq_zone') in [None, '', '0']:
-                        qth_data['cq_zone'] = callsign_info['cq_zone']
-                    if qth_data.get('iaru_zone') in [None, '', '0']:
-                        qth_data['iaru_zone'] = callsign_info['itu_zone']
-                
+                    # Enrich qth_data
+                    qth_data['dxcc_country'] = callsign_info.get('prefix', qth_data.get('dxcc_country')) # Keep original if lookup fails
+                    qth_data['continent'] = callsign_info.get('continent', qth_data.get('continent'))
+                    # Only overwrite if missing or zero in original data
+                    if not qth_data.get('cq_zone') or qth_data.get('cq_zone') == '0':
+                        qth_data['cq_zone'] = callsign_info.get('cq_zone')
+                    if not qth_data.get('iaru_zone') or qth_data.get('iaru_zone') == '0':
+                        qth_data['iaru_zone'] = callsign_info.get('itu_zone')
+                    self.logger.debug(f"Enriched QTH data: {qth_data}")
+
                 # Extract contest data
+                self.logger.debug("Extracting main contest data...")
                 contest_data = self._extract_contest_data(root, callsign, qth_data)
+                self.logger.debug(f"Final structured data for this doc: {contest_data}")
                 results.append(contest_data)
-                
+                self.logger.debug(f"--- Finished processing XML document {i+1} ---")
+
             except ET.ParseError as e:
                 self.logger.error(f"Error parsing XML: {e}")
             except Exception as e:
