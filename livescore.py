@@ -2,7 +2,9 @@
 import argparse
 import logging
 import sys
-from contest_server import ContestServer
+# Import the app and socketio instance from web_interface
+from web_interface import app, socketio
+from contest_server import ContestServer # Keep for initializing db_handler/batch_processor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from maintenance_task import perform_maintenance
@@ -54,13 +56,15 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Contest Data Server')
     parser.add_argument('-d', '--debug', action='store_true',
                       help='Enable debug mode')
+    # Host/Port now apply to the Flask/SocketIO server
     parser.add_argument('--host', default='127.0.0.1',
-                      help='Host to bind to (default: 127.0.0.1)')
-    parser.add_argument('--port', type=int, default=8088,
-                      help='Port to bind to (default: 8088)')
-    parser.add_argument('--log-file', default='contest_server.log',
-                      help='Log file path (default: contest_server.log)')
-    parser.add_argument('--db-file', default='contest_data.db',
+                      help='Host for Flask/SocketIO server (default: 127.0.0.1)')
+    parser.add_argument('--port', type=int, default=8089, # Default changed to match old Flask dev port
+                      help='Port for Flask/SocketIO server (default: 8089)')
+    # Log file might need renaming or consolidation if desired
+    parser.add_argument('--log-file', default='livescore_app.log',
+                      help='Log file path (default: livescore_app.log)')
+    parser.add_argument('--db-file', default='/opt/livescore/contest_data.db', # Match default in Config
                       help='Database file path (default: contest_data.db)')
     parser.add_argument('--maintenance-hour', type=int, default=2,
                       help='Hour to run maintenance (24-hour format, default: 2)')
@@ -72,13 +76,13 @@ def main():
     # Parse command line arguments
     args = parse_arguments()
     
-    # Setup logging
+    # Setup logging (might need adjustment if Flask/SocketIO logging is configured differently)
     logger = setup_logging(args.debug, args.log_file)
-    
+
     # Log startup information
-    logging.info("Server starting up with configuration:")
-    logging.info(f"Host: {args.host}")
-    logging.info(f"Port: {args.port}")
+    logging.info("Livescore Application starting up with configuration:")
+    logging.info(f"Flask/SocketIO Host: {args.host}")
+    logging.info(f"Flask/SocketIO Port: {args.port}")
     logging.info(f"Debug Mode: {'ON' if args.debug else 'OFF'}")
     logging.info(f"Log File: {args.log_file}")
     logging.info(f"Database File: {args.db_file}")
@@ -105,25 +109,44 @@ def main():
     # Start the scheduler
     scheduler.start()
     logger.info(f"Scheduled maintenance job for {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
-    
+
+    # Initialize ContestServer primarily to setup db_handler and batch_processor
+    # Pass the imported socketio instance
+    # Note: The host/port args here are for the *old* HTTP server, which isn't really used now.
+    # We pass None for host/port to avoid confusion, or use the Flask host/port if needed internally.
+    contest_server_instance = ContestServer(
+        host=None, # Not directly used for serving anymore
+        port=None, # Not directly used for serving anymore
+        db_path=args.db_file,
+        debug=args.debug,
+        socketio=socketio # Pass the imported socketio instance
+    )
+    # contest_server_instance.start() # This no longer starts the main server
+
+    logger.info("Starting Flask-SocketIO server...")
     try:
-        # Create and start server
-        server = ContestServer(args.host, args.port, args.db_file, args.debug)
-        server.start()
-        
+        # Run the Flask app with SocketIO
+        # Use host/port from arguments
+        # debug=args.debug enables Flask debug mode (auto-reload, etc.)
+        # Use use_reloader=False if APScheduler conflicts with Flask reloader
+        socketio.run(app, host=args.host, port=args.port, debug=args.debug, use_reloader=False)
+
     except KeyboardInterrupt:
-        logger.info("Received shutdown signal")
+        logger.info("Received shutdown signal (KeyboardInterrupt)")
+    except SystemExit:
+        logger.info("Received shutdown signal (SystemExit)")
     except Exception as e:
-        logger.error(f"Error starting server: {e}")
+        logger.error(f"Error starting Flask-SocketIO server: {e}")
         logger.exception("Server error details:")
-        raise
+        # No need to raise again, just log and exit finally block
     finally:
         # Cleanup
         logger.info("Shutting down scheduler...")
-        scheduler.shutdown()
-        if 'server' in locals():
-            server.cleanup()
-        logger.info("Server shutdown complete")
+        scheduler.shutdown(wait=False) # Don't wait for jobs to finish on shutdown
+        if 'contest_server_instance' in locals():
+            logger.info("Cleaning up ContestServer resources (db_handler, batch_processor)...")
+            contest_server_instance.cleanup()
+        logger.info("Application shutdown complete.")
 
 if __name__ == "__main__":
     main()

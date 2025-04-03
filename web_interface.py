@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from flask import Flask, render_template, request, redirect, send_from_directory, jsonify, make_response
+from flask_socketio import SocketIO, join_room, leave_room
 import sqlite3
 import os
+import re # For sanitizing room names
 import logging
 import sys
 import traceback
@@ -31,6 +33,10 @@ try:
     # Create Flask app
     app = Flask(__name__)
     logger.info("Flask app created successfully")
+    # Initialize SocketIO
+    # Make socketio global so batch_processor can potentially access it (consider better patterns later)
+    socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*") # Added cors_allowed_origins for flexibility
+    logger.info("Flask-SocketIO initialized successfully")
 
 except Exception as e:
     logger.error(f"Failed to create Flask app")
@@ -170,6 +176,132 @@ def live_report():
         logger.error(traceback.format_exc())
         return render_template('error.html', error=f"Error: {str(e)}")
 
+
+# --- New API Endpoint for Latest Score ---
+def _sanitize_room_name(name):
+    """Remove potentially problematic characters for room names."""
+    return re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+
+@app.route('/livescore-pilot/api/latest_score/<contest>/<callsign>')
+def get_latest_score(contest, callsign):
+    """Fetches the latest score, band breakdown, and QTH info for a callsign/contest."""
+    logger.debug(f"API request for latest score: {contest}/{callsign}")
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            # Find the latest score entry ID
+            cursor.execute("""
+                SELECT id, timestamp, score, qsos, multipliers, power, assisted, transmitter, ops, bands, mode, club, section, points
+                FROM contest_scores
+                WHERE contest = ? AND callsign = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (contest, callsign))
+            score_row = cursor.fetchone()
+
+            if not score_row:
+                logger.warning(f"No score data found for {contest}/{callsign}")
+                return jsonify({"error": "No score data found"}), 404
+
+            score_id, timestamp, score, qsos, multipliers, power, assisted, transmitter, ops, bands, mode, club, section, points = score_row
+
+            # Fetch band breakdown for this score ID
+            cursor.execute("""
+                SELECT band, mode, qsos, points, multipliers
+                FROM band_breakdown
+                WHERE contest_score_id = ?
+            """, (score_id,))
+            band_rows = cursor.fetchall()
+            band_breakdown_dict = {}
+            for band, b_mode, b_qsos, b_points, b_mults in band_rows:
+                 band_key = f"{band}m" # Match format used in mqtt_distributor
+                 band_breakdown_dict[band_key] = {
+                     "mode": b_mode,
+                     "qsos": b_qsos,
+                     "points": b_points,
+                     "mults": b_mults
+                 }
+
+
+            # Fetch QTH info for this score ID
+            cursor.execute("""
+                SELECT dxcc_country, cq_zone, iaru_zone, arrl_section, state_province, grid6, continent
+                FROM qth_info
+                WHERE contest_score_id = ?
+            """, (score_id,))
+            qth_row = cursor.fetchone()
+            qth_info_dict = {}
+            if qth_row:
+                dxcc, cqz, ituz, arrl_sec, state, grid, continent = qth_row
+                qth_info_dict = {
+                    "dxcc": dxcc,
+                    "cqz": cqz,
+                    "ituz": ituz,
+                    "section": arrl_sec or section, # Use score section if qth section is empty
+                    "state": state,
+                    "grid": grid,
+                    "continent": continent
+                }
+
+            latest_data = {
+                "timestamp": timestamp,
+                "contest": contest,
+                "callsign": callsign,
+                "score": score,
+                "qsos": qsos,
+                "multipliers": multipliers,
+                "points": points,
+                "power": power,
+                "assisted": assisted,
+                "transmitter": transmitter,
+                "ops": ops,
+                "bands_class": bands, # Renamed to avoid clash with breakdown
+                "mode": mode,
+                "club": club,
+                "section": section, # From main score table
+                "bands": band_breakdown_dict, # Band breakdown details
+                "qth": qth_info_dict
+            }
+
+            logger.debug(f"Returning latest score data for {contest}/{callsign}")
+            return jsonify(latest_data)
+
+    except Exception as e:
+        logger.error(f"Error fetching latest score for {contest}/{callsign}: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": "Internal server error"}), 500
+
+
+# --- SocketIO Event Handlers ---
+
+@socketio.on('connect')
+def handle_connect():
+    logger.info(f"Client connected: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    # Rooms are left automatically by Flask-SocketIO
+    logger.info(f"Client disconnected: {request.sid}")
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    """Client joins a room based on contest and callsign"""
+    contest = data.get('contest')
+    callsign = data.get('callsign')
+    if contest and callsign:
+        # Sanitize inputs before creating room name
+        safe_contest = _sanitize_room_name(contest)
+        safe_callsign = _sanitize_room_name(callsign)
+        room = f"{safe_contest}_{safe_callsign}"
+        join_room(room)
+        logger.info(f"Client {request.sid} joined room: {room}")
+    else:
+        logger.warning(f"Client {request.sid} sent invalid join_room data: {data}")
+
+
+# --- Error Handlers ---
+
 @app.errorhandler(404)
 def not_found_error(error):
     logger.error(f"404 error: {error}")
@@ -278,9 +410,15 @@ def get_filters():
         logger.error(f"Error fetching filters: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-if __name__ == '__main__':
-    logger.info("Starting development server")
-    app.run(host='127.0.0.1', port=8089)
-else:
-    # When running under gunicorn
-    logger.info("Starting under gunicorn")
+# --- Main Execution Logic ---
+
+# Remove the old __main__ block, startup will be handled by socketio.run or gunicorn
+# if __name__ == '__main__':
+#     logger.info("Starting development server with SocketIO")
+#     # Use socketio.run for development
+#     socketio.run(app, host='127.0.0.1', port=8089, debug=True) # Add debug=True for development ease
+
+# Keep the gunicorn log message if needed
+# else:
+#     # When running under gunicorn
+#     logger.info("Starting under gunicorn with SocketIO")

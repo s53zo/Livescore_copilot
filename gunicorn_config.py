@@ -6,9 +6,10 @@ log_dir = "/opt/livescore/logs"
 os.makedirs(log_dir, exist_ok=True)
 
 # Basic configurations
-bind = "127.0.0.1:8089"
+bind = "127.0.0.1:8089" # Ensure this matches the port used by livescore.py if running via gunicorn
 workers = multiprocessing.cpu_count() * 2 + 1
-worker_class = "sync"
+# Changed worker_class to gevent for Flask-SocketIO
+worker_class = "gevent"
 timeout = 120
 keepalive = 5
 
@@ -29,4 +30,3 @@ graceful_timeout = 30
 
 # Trust the X-Forwarded-For headers from local proxies
 forwarded_allow_ips = '*'
-

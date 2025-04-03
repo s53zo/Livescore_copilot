@@ -9,12 +9,15 @@ from callsign_utils import CallsignLookup
 from batch_processor import BatchProcessor
 
 class ContestDatabaseHandler:
-    def __init__(self, db_path='contest_data.db'):
+    # Modified __init__ to accept socketio instance
+    def __init__(self, db_path='contest_data.db', socketio=None):
         self.db_path = db_path
+        self.socketio = socketio # Store socketio instance
         self.callsign_lookup = CallsignLookup()
         self.logger = logging.getLogger('ContestDatabaseHandler')
         self.setup_database()
-        self.batch_processor = BatchProcessor(self)
+        # Pass socketio instance to BatchProcessor
+        self.batch_processor = BatchProcessor(self, self.socketio)
         self.batch_processor.start()
 
     def process_submission(self, xml_data):

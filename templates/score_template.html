@@ -1,198 +1,302 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Contest Progress Report - {contest}</title>
+    <title>Live Contest Report - {contest}</title> <!-- Changed title slightly -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include Socket.IO Client Library -->
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
     <script>
-        function refreshPage() {{
+        // --- Real-time Update Logic ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const statusElement = document.getElementById('update-status');
             const params = new URLSearchParams(window.location.search);
-            window.location.href = '/reports/live.html?' + params.toString();
-        }}
-        
-        setInterval(refreshPage, 120000);
+            const currentContest = params.get('contest');
+            const currentCallsign = params.get('callsign'); // The callsign being monitored
 
-        function updateCountdown() {{
-            const countdownElement = document.getElementById('countdown');
-            let minutes = 1;
-            let seconds = 59;
+            if (!currentContest || !currentCallsign) {
+                console.error("Missing contest or callsign in URL parameters.");
+                statusElement.textContent = 'Error: Missing parameters';
+                statusElement.style.backgroundColor = '#dc3545'; // Red for error
+                return;
+            }
 
-            function pad(num) {{
-                return num.toString().padStart(2, '0');
-            }}
+            console.log(`Monitoring: Contest=${currentContest}, Callsign=${currentCallsign}`);
+            statusElement.textContent = 'Connecting...';
 
-            function updateRelativeTimes() {{
-                document.querySelectorAll('.relative-time').forEach(el => {{
-                    const timestamp = new Date(el.dataset.timestamp + 'Z');
+            const socket = io(); // Connect to the server that served the page
+
+            socket.on('connect', () => {
+                console.log('Socket.IO connected:', socket.id);
+                statusElement.textContent = 'Live';
+                statusElement.style.backgroundColor = '#28a745'; // Green for connected
+                // Join the room for the specific contest/callsign being viewed
+                socket.emit('join_room', { contest: currentContest, callsign: currentCallsign });
+                console.log(`Emitted join_room for ${currentContest}_${currentCallsign}`);
+                // Optional: Initial fetch might be good here if the page load is older than batch interval
+                // fetchLatestAndUpdate(currentContest, currentCallsign);
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Socket.IO disconnected');
+                statusElement.textContent = 'Disconnected';
+                statusElement.style.backgroundColor = '#ffc107'; // Yellow for disconnected
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('Socket.IO connection error:', error);
+                statusElement.textContent = 'Connection Error';
+                statusElement.style.backgroundColor = '#dc3545'; // Red for error
+            });
+
+            // Listen for the notification from the server
+            socket.on('score_updated_notification', (notification) => {
+                console.log('Received score update notification:', notification);
+                // Fetch latest data for the monitored callsign when *any* update for their contest happens
+                statusElement.textContent = 'Updating...';
+                statusElement.style.backgroundColor = '#17a2b8'; // Blue for updating
+                fetchLatestAndUpdate(currentContest, currentCallsign);
+            });
+
+            // Function to fetch latest data and update the table
+            function fetchLatestAndUpdate(contest, callsign) {
+                console.log(`Fetching latest score data for ${contest}/${callsign}...`);
+                // Fetching full HTML fragment approach (simpler for now)
+                let reportUrl = `/reports/live.html?contest=${encodeURIComponent(contest)}&callsign=${encodeURIComponent(callsign)}`;
+                const filterType = params.get('filter_type');
+                const filterValue = params.get('filter_value');
+                if (filterType && filterValue && filterType !== 'none' && filterValue !== 'none') {
+                    reportUrl += `&filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`;
+                }
+
+                fetch(reportUrl)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.text(); // Get HTML content
+                    })
+                    .then(htmlContent => {
+                        console.log('Received updated HTML fragment.');
+                        // Replace the table container and station info content
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(htmlContent, 'text/html');
+                        const newTableContainer = doc.querySelector('.table-container');
+                        const oldTableContainer = document.querySelector('.table-container');
+                        const newStationInfo = doc.querySelector('.station-info');
+                        const oldStationInfo = document.querySelector('.station-info');
+
+                        if (newTableContainer && oldTableContainer) {
+                            oldTableContainer.innerHTML = newTableContainer.innerHTML;
+                            console.log('Table updated.');
+                        } else {
+                            console.error('Could not find table container in fetched HTML or current page.');
+                        }
+                        if (newStationInfo && oldStationInfo) {
+                            oldStationInfo.innerHTML = newStationInfo.innerHTML;
+                             // Re-attach filter click handlers if needed
+                            attachFilterHandlers();
+                            console.log('Station info updated.');
+                        } else {
+                             console.error('Could not find station info in fetched HTML or current page.');
+                        }
+
+                        statusElement.textContent = 'Live';
+                        statusElement.style.backgroundColor = '#28a745'; // Green
+                        updateRelativeTimes(); // Update relative times after table refresh
+                    })
+                    .catch(error => {
+                        console.error('Error fetching latest report HTML:', error);
+                        statusElement.textContent = 'Update Error';
+                        statusElement.style.backgroundColor = '#dc3545'; // Red
+                    });
+            }
+
+            // --- Relative Time Update Logic ---
+            function updateRelativeTimes() {
+                document.querySelectorAll('.relative-time').forEach(el => {
+                    const timestampStr = el.dataset.timestamp;
+                    if (!timestampStr) return; // Skip if no timestamp
+                    // Attempt to parse timestamp, assuming UTC if no timezone specified
+                    const timestamp = new Date(timestampStr.endsWith('Z') ? timestampStr : timestampStr + 'Z');
+                    if (isNaN(timestamp)) return; // Skip if invalid date
+
                     const now = new Date();
-                    const diff = Math.floor((now - timestamp) / 1000 / 60);
-                    
-                    if (diff < 60) {{
-                        el.textContent = `${{diff}}m ago`;
-                    }} else if (diff < 1440) {{
-                        el.textContent = `${{Math.floor(diff/60)}}h ${{diff%60}}m ago`;
-                    }} else {{
-                        el.textContent = Math.floor(diff/1440) + 'd ago';
-                    }}
-                }});
-            }}
+                    const diff = Math.floor((now - timestamp) / 1000 / 60); // Difference in minutes
 
-            const timer = setInterval(() => {{
-                if (minutes === 0 && seconds === 0) {{
-                    clearInterval(timer);
-                    return;
-                }}
+                    if (diff < 0) { // Handle potential future timestamps or clock skew
+                         el.textContent = 'just now';
+                    } else if (diff < 60) {
+                        el.textContent = `${diff}m ago`;
+                    } else if (diff < 1440) { // Less than a day
+                        el.textContent = `${Math.floor(diff / 60)}h ${diff % 60}m ago`;
+                    } else { // More than a day
+                        el.textContent = Math.floor(diff / 1440) + 'd ago';
+                    }
+                });
+            }
 
-                if (seconds === 0) {{
-                    minutes--;
-                    seconds = 59;
-                }} else {{
-                    seconds--;
-                }}
+            // Run relative time updates periodically
+            setInterval(updateRelativeTimes, 60000); // Update every minute
+            updateRelativeTimes(); // Initial call
 
-                countdownElement.textContent = `${{minutes}}:${{pad(seconds)}}`;
-                updateRelativeTimes();
-            }}, 1000);
+            // --- Filter Link Handling ---
+            function attachFilterHandlers() {
+                document.querySelectorAll('.filter-link').forEach(link => {
+                    // Remove existing listeners first to avoid duplicates if re-attaching
+                    link.replaceWith(link.cloneNode(true));
+                });
+                // Add new listeners to the cloned elements
+                 document.querySelectorAll('.filter-link').forEach(link => {
+                    link.addEventListener('click', function(event) {
+                        event.preventDefault();
+                        const url = this.getAttribute('href');
+                        if (url) {
+                            window.location.href = url; // Navigate to apply filter
+                        }
+                    });
+                });
+            }
+            attachFilterHandlers(); // Attach handlers on initial load
 
-            updateRelativeTimes();
-        }}
-
-        document.addEventListener('DOMContentLoaded', updateCountdown);
+        }); // End DOMContentLoaded
     </script>
     <style>
         /* Base styles */
-        body {{ 
-            font-family: Arial, sans-serif; 
-            margin: 0; 
-            padding: 10px; 
-            color: #333; 
-            padding-bottom: 60px; 
-        }}
-        
-        h1 {{ 
-            color: #2c3e50; 
-            margin-bottom: 10px; 
-            font-size: 1.5rem; 
-            word-break: break-word; 
-        }}
-        
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 10px;
+            color: #333;
+            padding-bottom: 60px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1.5rem;
+            word-break: break-word;
+        }
+
         /* Station info styles */
-        .station-info {{ 
-            background-color: #f8f9fa; 
-            padding: 15px; 
-            border-radius: 4px; 
-            margin-bottom: 20px; 
+        .station-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
             line-height: 1.5;
             font-size: 0.9rem;
-        }}
-        
-        .category-tag {{ 
-            display: inline-block; 
-            padding: 2px 8px; 
-            background-color: #e7f3ff; 
-            border: 1px solid #cce5ff; 
-            border-radius: 3px; 
-            color: #0066cc; 
+        }
+
+        .category-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            background-color: #e7f3ff;
+            border: 1px solid #cce5ff;
+            border-radius: 3px;
+            color: #0066cc;
             margin: 2px;
             font-size: 0.85rem;
-        }}
-        
+        }
+
         /* Table styles */
-        .table-container {{
+        .table-container {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             margin-bottom: 20px;
-            background: linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)), 
+            background: linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)),
                         linear-gradient(to left, white 30%, rgba(255, 255, 255, 0)) 100% 0;
             background-size: 50px 100%;
             background-repeat: no-repeat;
             background-attachment: local, local;
-        }}
-        
-        table {{ 
-            border-collapse: collapse; 
+        }
+
+        table {
+            border-collapse: collapse;
             width: 100%;
             min-width: 800px;
-            margin-bottom: 20px; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
-        }}
-        
-        th, td {{ 
-            border: 1px solid #dee2e6; 
-            padding: 6px 4px; 
-            text-align: center; 
-            font-size: 0.85rem; 
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        th, td {
+            border: 1px solid #dee2e6;
+            padding: 6px 4px;
+            text-align: center;
+            font-size: 0.85rem;
             white-space: nowrap;
-        }}
-        
-        th {{ 
-            background-color: #f8f9fa; 
-            font-weight: bold; 
-            color: #2c3e50; 
-            position: sticky; 
-            top: 0; 
-            z-index: 1; 
-        }}
-        
-        tr:nth-child(even) {{ 
-            background-color: #f8f9fa; 
-        }}
-        
-        .highlight {{ 
-            background-color: #e8f5e9 !important; 
-            font-weight: bold; 
-        }}
-        
-        .highlight td {{ 
-            border-top: 2px solid #4caf50; 
-            border-bottom: 2px solid #4caf50; 
-        }}
-        
+        }
+
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #2c3e50;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        .highlight {
+            background-color: #e8f5e9 !important;
+            font-weight: bold;
+        }
+
+        .highlight td {
+            border-top: 2px solid #4caf50;
+            border-bottom: 2px solid #4caf50;
+        }
+
         /* Fixed elements */
-        .refresh-info {{ 
-            position: fixed; 
-            top: 10px; 
-            right: 10px; 
-            background-color: #4caf50; 
-            color: white; 
-            padding: 8px 12px; 
-            border-radius: 4px; 
-            font-size: 0.85rem; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-            z-index: 1000; 
-        }}
-        
-        .footer {{ 
-            position: fixed; 
-            bottom: 0; 
-            left: 0; 
-            right: 0; 
-            background-color: #f8f9fa; 
-            padding: 10px; 
-            text-align: center; 
-            font-size: 0.75rem; 
-            color: #666; 
-            border-top: 1px solid #dee2e6; 
+        .refresh-info { /* Reused for update-status */
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #4caf50;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 1000;
-        }}
-        
+            min-width: 100px; /* Ensure it doesn't collapse */
+            text-align: center;
+        }
+
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #f8f9fa;
+            padding: 10px;
+            text-align: center;
+            font-size: 0.75rem;
+            color: #666;
+            border-top: 1px solid #dee2e6;
+            z-index: 1000;
+        }
+
         /* Rate display */
-        .band-data {{ 
-            font-family: monospace; 
-            white-space: nowrap; 
+        .band-data {
+            font-family: monospace;
+            white-space: nowrap;
             font-size: 0.8rem;
-        }}
-        
-        .better-rate {{ 
-            color: #c71212; 
-            font-weight: bold; 
-        }}
-        
-        .worse-rate {{ 
-            color: #666; 
-        }}
-        
-        .legend {{
-            display: none;
+        }
+
+        .better-rate {
+            color: #c71212;
+            font-weight: bold;
+        }
+
+        .worse-rate {
+            color: #666;
+        }
+
+        .legend {
+            display: none; /* Hidden for now, can be re-enabled if needed */
             position: fixed;
             bottom: 40px;
             right: 10px;
@@ -202,10 +306,10 @@
             border: 1px solid #dee2e6;
             font-size: 0.75rem;
             z-index: 1000;
-        }}
-        
+        }
+
         /* Filter styles */
-        .filter-info {{
+        .filter-info {
             margin-top: 10px;
             padding: 8px;
             background-color: #f8f9fa;
@@ -213,92 +317,97 @@
             font-size: 0.85rem;
             overflow-x: auto;
             white-space: nowrap;
-        }}
-        
-        .filter-label {{
+        }
+
+        .filter-label {
             font-weight: bold;
             color: #666;
-        }}
-        
-        .filter-link {{
+        }
+
+        .filter-link {
             color: #0066cc;
             text-decoration: none;
             padding: 2px 6px;
             border-radius: 3px;
             display: inline-block;
             margin: 2px;
-        }}
-        
-        .active-filter {{
+            cursor: pointer; /* Indicate it's clickable */
+        }
+         .filter-link:hover {
+             background-color: #e7f3ff;
+         }
+
+        .active-filter {
             background-color: #4CAF50;
             color: white;
             padding: 2px 6px;
             border-radius: 3px;
             font-weight: bold;
-        }}
-        
+        }
+
         /* Responsive adjustments */
-        @media (max-width: 768px) {{
-            body {{
+        @media (max-width: 768px) {
+            body {
                 padding: 5px;
                 padding-bottom: 60px;
-            }}
-            
-            h1 {{
+            }
+
+            h1 {
                 font-size: 1.2rem;
-            }}
-            
-            .station-info {{
+            }
+
+            .station-info {
                 padding: 10px;
                 font-size: 0.8rem;
-            }}
-            
-            .refresh-info {{
+            }
+
+            .refresh-info { /* update-status */
                 font-size: 0.75rem;
                 padding: 6px 10px;
-            }}
-            
-            .footer {{
+            }
+
+            .footer {
                 padding: 8px;
                 font-size: 0.7rem;
-            }}
-            
-            .category-tag {{
+            }
+
+            .category-tag {
                 font-size: 0.75rem;
                 margin: 1px;
                 padding: 1px 6px;
-            }}
-        }}
-        
+            }
+        }
+
         /* Print styles */
-        @media print {{ 
-            .refresh-info, .footer, .legend {{ 
-                display: none; 
-            }} 
-            body {{ 
-                padding-bottom: 0; 
-            }}
-            .table-container {{
+        @media print {
+            .refresh-info, .footer, .legend { /* update-status */
+                display: none;
+            }
+            body {
+                padding-bottom: 0;
+            }
+            .table-container {
                 overflow-x: visible;
                 background: none;
-            }}
-            table {{
+            }
+            table {
                 min-width: auto;
-            }}
-        }}
+            }
+        }
     </style>
     {additional_css}
 </head>
 <body>
-    <div class="refresh-info">
-        Next update in <span id="countdown">5:00</span>
+    <!-- Changed refresh-info to update-status -->
+    <div id="update-status" class="refresh-info">
+        Loading...
     </div>
 
-    <h1>Contest Progress Report - {contest}</h1>
-    
+    <h1>Live Contest Report - {contest}</h1> <!-- Changed title -->
+
     <div class="station-info">
-        <div>Monitoring: {callsign} | 
-        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | 
+        <div>Monitoring: {callsign} |
+        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> |
         Updated: {timestamp}</div>
         <div>Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
         {filter_info_div}

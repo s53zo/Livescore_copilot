@@ -3,11 +3,18 @@ import queue
 import threading
 import time
 import logging
+import re # For sanitizing room names
 from datetime import datetime
 
+# Helper function (copied from web_interface.py or imported if refactored)
+def _sanitize_room_name(name):
+    """Remove potentially problematic characters for room names."""
+    return re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+
 class BatchProcessor:
-    def __init__(self, db_handler, batch_interval=60):
+    def __init__(self, db_handler, socketio, batch_interval=60): # Added socketio parameter
         self.db_handler = db_handler
+        self.socketio = socketio # Store socketio instance
         self.batch_interval = batch_interval
         self.queue = queue.Queue()
         self.is_running = False
@@ -65,13 +72,37 @@ class BatchProcessor:
                     self.logger.info(f"Processing batch of {len(batch)} items")
                     
                     combined_xml = "\n".join(batch)
-                    contest_data = self.db_handler.parse_xml_data(combined_xml)
-                    if contest_data:
-                        self.db_handler.store_data(contest_data)
-                    
+                    # Parse data first
+                    parsed_contest_data = self.db_handler.parse_xml_data(combined_xml)
+
+                    if parsed_contest_data:
+                        # Store data
+                        self.db_handler.store_data(parsed_contest_data)
+
+                        # --- Emit SocketIO notifications ---
+                        updated_rooms = set()
+                        for data_item in parsed_contest_data:
+                            contest = data_item.get('contest')
+                            callsign = data_item.get('callsign')
+                            if contest and callsign:
+                                safe_contest = _sanitize_room_name(contest)
+                                safe_callsign = _sanitize_room_name(callsign)
+                                room = f"{safe_contest}_{safe_callsign}"
+                                updated_rooms.add(room)
+
+                        if updated_rooms:
+                            self.logger.info(f"Emitting notifications for rooms: {updated_rooms}")
+                            for room in updated_rooms:
+                                # Extract contest/callsign back from room name if needed for payload
+                                # Or just send a simple notification
+                                notification_payload = {'message': 'Scores updated'} # Simple notification
+                                # Alternatively, extract from room: parts = room.split('_', 1); payload = {'contest': parts[0], 'callsign': parts[1]}
+                                self.socketio.emit('score_updated_notification', notification_payload, room=room)
+                        # ------------------------------------
+
                     batch_time = time.time() - batch_start
-                    self.logger.info(f"Batch processed in {batch_time:.2f} seconds")
-                    
+                    self.logger.info(f"Batch processed and notifications sent in {batch_time:.2f} seconds")
+
                 except Exception as e:
                     self.logger.error(f"Error processing batch: {e}")
             
