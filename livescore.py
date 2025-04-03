@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Apply gevent monkey patching early
+import gevent.monkey
+gevent.monkey.patch_all()
+
 import argparse
 import logging
 import sys
