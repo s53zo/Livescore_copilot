@@ -698,29 +698,43 @@ class ScoreReporter:
                         top_rates = sorted(rates, reverse=True)[:10]
                         avg_rate = round(sum(top_rates) / len(top_rates))
                         band_avg_rates[band] = self.format_band_rates(avg_rate)
-    
-            html_content = template
+
+            # --- Replace placeholders using str.replace() instead of .format() ---
+            html_content = template # Start with the raw template content
+
+            # Replace band headers first (more specific target)
             for band in ['160', '80', '40', '20', '15', '10']:
                 count = active_ops[band]
                 rates_html = band_avg_rates.get(band, "")
-                html_content = html_content.replace(
-                    f'>{band}m</th>',
-                    f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
-                )
-    
-            html_content = html_content.format(
-                contest=contest,
-                callsign=callsign,
-                timestamp=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                power=stations[0][3],
-                assisted=stations[0][4],
-                filter_info_div=filter_info_div,
-                table_rows='\n'.join(table_rows),
-                additional_css=additional_css
-            )
-            
+                placeholder = f'>{band}m</th>'
+                replacement = f' class="band-header"><span class="band-rates">{count}OPs@</span> {band}m{rates_html}</th>'
+                html_content = html_content.replace(placeholder, replacement)
+
+            # Replace other placeholders
+            # Find the monitored station's data for header info
+            monitored_station_data = next((s for s in stations if s[1] == callsign), stations[0] if stations else None)
+            monitored_timestamp = monitored_station_data[5] if monitored_station_data else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            monitored_power = monitored_station_data[3] if monitored_station_data else 'N/A'
+            monitored_assisted = monitored_station_data[4] if monitored_station_data else 'N/A'
+
+            replacements = {
+                '{contest}': contest,
+                '{callsign}': callsign,
+                '{timestamp}': monitored_timestamp, # Use timestamp of monitored station
+                '{power}': monitored_power,
+                '{assisted}': monitored_assisted,
+                '{filter_info_div}': filter_info_div,
+                '{table_rows}': '\n'.join(table_rows),
+                '{additional_css}': additional_css
+            }
+
+            for placeholder, value in replacements.items():
+                # Ensure value is a string before replacing
+                html_content = html_content.replace(placeholder, str(value) if value is not None else '')
+
             return html_content
-    
+            # --- End of replacement logic ---
+
         except Exception as e:
             self.logger.error(f"Error generating HTML content: {e}")
             self.logger.error(traceback.format_exc())

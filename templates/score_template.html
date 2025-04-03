@@ -1,81 +1,79 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Live Contest Report - {contest}</title> <!-- Changed title slightly -->
+    <title>Live Contest Report - {contest}</title> <!-- Python Placeholder -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Include Socket.IO Client Library -->
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
     <script>
         // --- Real-time Update Logic ---
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', () => { // Correct JS braces
             const statusElement = document.getElementById('update-status');
             const params = new URLSearchParams(window.location.search);
             const currentContest = params.get('contest');
             const currentCallsign = params.get('callsign'); // The callsign being monitored
 
-            if (!currentContest || !currentCallsign) {
+            if (!currentContest || !currentCallsign) { // Correct JS braces
                 console.error("Missing contest or callsign in URL parameters.");
                 statusElement.textContent = 'Error: Missing parameters';
                 statusElement.style.backgroundColor = '#dc3545'; // Red for error
                 return;
-            }
+            } // Correct JS braces
 
-            console.log(`Monitoring: Contest=${currentContest}, Callsign=${currentCallsign}`);
+            console.log(`Monitoring: Contest=${currentContest}, Callsign=${currentCallsign}`); // Correct JS template literal braces
             statusElement.textContent = 'Connecting...';
 
             const socket = io(); // Connect to the server that served the page
 
-            socket.on('connect', () => {
+            socket.on('connect', () => { // Correct JS braces
                 console.log('Socket.IO connected:', socket.id);
                 statusElement.textContent = 'Live';
                 statusElement.style.backgroundColor = '#28a745'; // Green for connected
                 // Join the room for the specific contest/callsign being viewed
-                socket.emit('join_room', { contest: currentContest, callsign: currentCallsign });
-                console.log(`Emitted join_room for ${currentContest}_${currentCallsign}`);
-                // Optional: Initial fetch might be good here if the page load is older than batch interval
-                // fetchLatestAndUpdate(currentContest, currentCallsign);
-            });
+                socket.emit('join_room', { contest: currentContest, callsign: currentCallsign }); // Correct JS object literal braces
+                console.log(`Emitted join_room for ${currentContest}_${currentCallsign}`); // Correct JS template literal braces
+            }); // Correct JS braces
 
-            socket.on('disconnect', () => {
+            socket.on('disconnect', () => { // Correct JS braces
                 console.log('Socket.IO disconnected');
                 statusElement.textContent = 'Disconnected';
                 statusElement.style.backgroundColor = '#ffc107'; // Yellow for disconnected
-            });
+            }); // Correct JS braces
 
-            socket.on('connect_error', (error) => {
+            socket.on('connect_error', (error) => { // Correct JS braces
                 console.error('Socket.IO connection error:', error);
                 statusElement.textContent = 'Connection Error';
                 statusElement.style.backgroundColor = '#dc3545'; // Red for error
-            });
+            }); // Correct JS braces
 
             // Listen for the notification from the server
-            socket.on('score_updated_notification', (notification) => {
+            socket.on('score_updated_notification', (notification) => { // Correct JS braces
                 console.log('Received score update notification:', notification);
                 // Fetch latest data for the monitored callsign when *any* update for their contest happens
                 statusElement.textContent = 'Updating...';
                 statusElement.style.backgroundColor = '#17a2b8'; // Blue for updating
                 fetchLatestAndUpdate(currentContest, currentCallsign);
-            });
+            }); // Correct JS braces
 
             // Function to fetch latest data and update the table
-            function fetchLatestAndUpdate(contest, callsign) {
-                console.log(`Fetching latest score data for ${contest}/${callsign}...`);
+            function fetchLatestAndUpdate(contest, callsign) { // Correct JS braces
+                console.log(`Fetching latest score data for ${contest}/${callsign}...`); // Correct JS template literal braces
                 // Fetching full HTML fragment approach (simpler for now)
-                let reportUrl = `/reports/live.html?contest=${encodeURIComponent(contest)}&callsign=${encodeURIComponent(callsign)}`;
+                let reportUrl = `/reports/live.html?contest=${encodeURIComponent(contest)}&callsign=${encodeURIComponent(callsign)}`; // Correct JS template literal braces
                 const filterType = params.get('filter_type');
                 const filterValue = params.get('filter_value');
-                if (filterType && filterValue && filterType !== 'none' && filterValue !== 'none') {
-                    reportUrl += `&filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`;
-                }
+                if (filterType && filterValue && filterType !== 'none' && filterValue !== 'none') { // Correct JS braces
+                    reportUrl += `&filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`; // Correct JS template literal braces
+                } // Correct JS braces
 
                 fetch(reportUrl)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
+                    .then(response => { // Correct JS braces
+                        if (!response.ok) { // Correct JS braces
+                            throw new Error(`HTTP error! status: ${response.status}`); // Correct JS template literal braces
+                        } // Correct JS braces
                         return response.text(); // Get HTML content
-                    })
-                    .then(htmlContent => {
+                    }) // Correct JS braces
+                    .then(htmlContent => { // Correct JS braces
                         console.log('Received updated HTML fragment.');
                         // Replace the table container and station info content
                         const parser = new DOMParser();
@@ -85,35 +83,35 @@
                         const newStationInfo = doc.querySelector('.station-info');
                         const oldStationInfo = document.querySelector('.station-info');
 
-                        if (newTableContainer && oldTableContainer) {
+                        if (newTableContainer && oldTableContainer) { // Correct JS braces
                             oldTableContainer.innerHTML = newTableContainer.innerHTML;
                             console.log('Table updated.');
-                        } else {
+                        } else { // Correct JS braces
                             console.error('Could not find table container in fetched HTML or current page.');
-                        }
-                        if (newStationInfo && oldStationInfo) {
+                        } // Correct JS braces
+                        if (newStationInfo && oldStationInfo) { // Correct JS braces
                             oldStationInfo.innerHTML = newStationInfo.innerHTML;
                              // Re-attach filter click handlers if needed
                             attachFilterHandlers();
                             console.log('Station info updated.');
-                        } else {
+                        } else { // Correct JS braces
                              console.error('Could not find station info in fetched HTML or current page.');
-                        }
+                        } // Correct JS braces
 
                         statusElement.textContent = 'Live';
                         statusElement.style.backgroundColor = '#28a745'; // Green
                         updateRelativeTimes(); // Update relative times after table refresh
-                    })
-                    .catch(error => {
+                    }) // Correct JS braces
+                    .catch(error => { // Correct JS braces
                         console.error('Error fetching latest report HTML:', error);
                         statusElement.textContent = 'Update Error';
                         statusElement.style.backgroundColor = '#dc3545'; // Red
-                    });
-            }
+                    }); // Correct JS braces
+            } // Correct JS braces
 
             // --- Relative Time Update Logic ---
-            function updateRelativeTimes() {
-                document.querySelectorAll('.relative-time').forEach(el => {
+            function updateRelativeTimes() { // Correct JS braces
+                document.querySelectorAll('.relative-time').forEach(el => { // Correct JS braces
                     const timestampStr = el.dataset.timestamp;
                     if (!timestampStr) return; // Skip if no timestamp
                     // Attempt to parse timestamp, assuming UTC if no timezone specified
@@ -123,45 +121,46 @@
                     const now = new Date();
                     const diff = Math.floor((now - timestamp) / 1000 / 60); // Difference in minutes
 
-                    if (diff < 0) { // Handle potential future timestamps or clock skew
+                    if (diff < 0) { // Handle potential future timestamps or clock skew // Correct JS braces
                          el.textContent = 'just now';
-                    } else if (diff < 60) {
-                        el.textContent = `${diff}m ago`;
-                    } else if (diff < 1440) { // Less than a day
-                        el.textContent = `${Math.floor(diff / 60)}h ${diff % 60}m ago`;
-                    } else { // More than a day
+                    } else if (diff < 60) { // Correct JS braces
+                        el.textContent = `${diff}m ago`; // Correct JS template literal braces
+                    } else if (diff < 1440) { // Less than a day // Correct JS braces
+                        el.textContent = `${Math.floor(diff / 60)}h ${diff % 60}m ago`; // Correct JS template literal braces
+                    } else { // More than a day // Correct JS braces
                         el.textContent = Math.floor(diff / 1440) + 'd ago';
-                    }
-                });
-            }
+                    } // Correct JS braces
+                }); // Correct JS braces
+            } // Correct JS braces
 
             // Run relative time updates periodically
             setInterval(updateRelativeTimes, 60000); // Update every minute
             updateRelativeTimes(); // Initial call
 
             // --- Filter Link Handling ---
-            function attachFilterHandlers() {
-                document.querySelectorAll('.filter-link').forEach(link => {
+            function attachFilterHandlers() { // Correct JS braces
+                document.querySelectorAll('.filter-link').forEach(link => { // Correct JS braces
                     // Remove existing listeners first to avoid duplicates if re-attaching
                     link.replaceWith(link.cloneNode(true));
-                });
+                }); // Correct JS braces
                 // Add new listeners to the cloned elements
-                 document.querySelectorAll('.filter-link').forEach(link => {
-                    link.addEventListener('click', function(event) {
+                 document.querySelectorAll('.filter-link').forEach(link => { // Correct JS braces
+                    link.addEventListener('click', function(event) { // Correct JS braces
                         event.preventDefault();
                         const url = this.getAttribute('href');
-                        if (url) {
+                        if (url) { // Correct JS braces
                             window.location.href = url; // Navigate to apply filter
-                        }
-                    });
-                });
-            }
+                        } // Correct JS braces
+                    }); // Correct JS braces
+                }); // Correct JS braces
+            } // Correct JS braces
             attachFilterHandlers(); // Attach handlers on initial load
 
-        }); // End DOMContentLoaded
+        }); // End DOMContentLoaded // Correct JS braces
     </script>
     <style>
         /* Base styles */
+        /* Literal braces are NOT escaped here */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -346,7 +345,7 @@
         }
 
         /* Responsive adjustments */
-        @media (max-width: 768px) {
+        @media (max-width: 768px) { /* Correct CSS braces */
             body {
                 padding: 5px;
                 padding-bottom: 60px;
@@ -376,10 +375,10 @@
                 margin: 1px;
                 padding: 1px 6px;
             }
-        }
+        } /* Correct CSS braces */
 
         /* Print styles */
-        @media print {
+        @media print { /* Correct CSS braces */
             .refresh-info, .footer, .legend { /* update-status */
                 display: none;
             }
@@ -393,9 +392,9 @@
             table {
                 min-width: auto;
             }
-        }
+        } /* Correct CSS braces */
     </style>
-    {additional_css}
+    {additional_css} <!-- Python Placeholder -->
 </head>
 <body>
     <!-- Changed refresh-info to update-status -->
@@ -403,14 +402,14 @@
         Loading...
     </div>
 
-    <h1>Live Contest Report - {contest}</h1> <!-- Changed title -->
+    <h1>Live Contest Report - {contest}</h1> <!-- Python Placeholder -->
 
     <div class="station-info">
-        <div>Monitoring: {callsign} |
-        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> |
-        Updated: {timestamp}</div>
+        <div>Monitoring: {callsign} | <!-- Python Placeholder -->
+        Operating Category: <span class="category-tag">Power: {power}</span> <span class="category-tag">Assisted: {assisted}</span> | <!-- Python Placeholders -->
+        Updated: {timestamp}</div> <!-- Python Placeholder -->
         <div>Cell format: QSOs/Multipliers (60-minute rate/15-minute rate)</div>
-        {filter_info_div}
+        {filter_info_div} <!-- Python Placeholder -->
     </div>
 
     <div class="table-container">
@@ -429,7 +428,7 @@
                 <th>Total<br>QSO/Mults</th>
                 <th>Last Update</th>
             </tr>
-            {table_rows}
+            {table_rows} <!-- Python Placeholder -->
         </table>
     </div>
 
