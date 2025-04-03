@@ -11,6 +11,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from maintenance_task import perform_maintenance
 import os
+import fcntl  # For file locking
+import errno # For error codes
 
 def setup_logging(debug_mode, log_file):
     """Setup logging configuration"""
@@ -33,11 +35,22 @@ def setup_logging(debug_mode, log_file):
 
     return root_logger
 
+# Define lock file path (use /tmp or another suitable directory)
+MAINTENANCE_LOCK_FILE = '/tmp/livescore_maintenance.lock'
+
 def run_maintenance(db_path, logger):
-    """Run maintenance tasks with logging"""
+    """Run maintenance tasks with logging and file locking."""
+    lock_file_handle = None
     try:
+        # Attempt to acquire the lock
+        logger.debug(f"Attempting to acquire maintenance lock: {MAINTENANCE_LOCK_FILE}")
+        lock_file_handle = open(MAINTENANCE_LOCK_FILE, 'w')
+        fcntl.lockf(lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        logger.info("Successfully acquired maintenance lock.")
+
+        # --- Maintenance Logic Starts Here ---
         logger.info("Starting scheduled maintenance tasks...")
-        
+
         # Create maintenance directories if they don't exist
         backup_dir = "./backups"
         reports_dir = "./reports"
@@ -47,11 +60,35 @@ def run_maintenance(db_path, logger):
 
         # Run maintenance with dry_run=False
         perform_maintenance(db_path, dry_run=False)
-        logger.info("Scheduled maintenance completed successfully")
-        
+        logger.info("Scheduled maintenance completed successfully.")
+        # --- Maintenance Logic Ends Here ---
+
+    except (IOError, BlockingIOError) as e:
+        # Check if it's specifically a locking error
+        if e.errno == errno.EACCES or e.errno == errno.EAGAIN:
+            logger.debug("Maintenance lock already held by another process. Skipping run.")
+        else:
+            # Log other IOErrors
+            logger.error(f"IOError during maintenance lock/run: {e}")
+            logger.exception("Maintenance task IO error details:")
     except Exception as e:
-        logger.error(f"Error during scheduled maintenance: {e}")
-        logger.exception("Maintenance task error details:")
+        # Log any other exceptions during maintenance execution
+        logger.error(f"Error during scheduled maintenance execution: {e}")
+        logger.exception("Maintenance task execution error details:")
+    finally:
+        # Ensure the lock is always released if the handle was acquired
+        if lock_file_handle:
+            try:
+                fcntl.lockf(lock_file_handle, fcntl.LOCK_UN)
+                lock_file_handle.close()
+                logger.debug("Released maintenance lock.")
+                # Optionally remove the lock file after release, though not strictly necessary
+                # try:
+                #     os.remove(MAINTENANCE_LOCK_FILE)
+                # except OSError:
+                #     pass
+            except Exception as unlock_e:
+                logger.error(f"Error releasing maintenance lock: {unlock_e}")
 
 def parse_arguments():
     """Parse command line arguments"""
