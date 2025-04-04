@@ -134,7 +134,8 @@ def create_app(db_path='/opt/livescore/contest_data.db', debug=False):
 
     web_logger.info("Initializing Flask-SocketIO...")
     # Initialize SocketIO here, associated with the app
-    socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*")
+    # Removed explicit cors_allowed_origins to rely on defaults behind proxy
+    socketio = SocketIO(app, async_mode='gevent')
     web_logger.info("Flask-SocketIO initialized successfully")
 
     # Initialize Database Handler, passing the created socketio instance
