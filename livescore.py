@@ -151,8 +151,8 @@ def create_app(db_path='/opt/livescore/contest_data.db', debug=False):
     register_routes_and_handlers(app, socketio)
     web_logger.info("Registered routes and SocketIO handlers.")
 
-    # Return the configured app and socketio (socketio needed for running)
-    return app, socketio
+    # Return only the configured app instance for Gunicorn
+    return app
 # --- End of Application Factory ---
 
 
