@@ -175,8 +175,9 @@ def register_routes_and_handlers(app, socketio):
                 logger.info(f"Successfully generated report for {callsign} in {contest}")
                 return response
             else:
-            logger.error(f"No station data found for {callsign} in {contest}")
-            return render_template('error.html', error="No data found for the selected criteria")
+                # Correctly indent the else block content
+                logger.error(f"No station data found for {callsign} in {contest}")
+                return render_template('error.html', error="No data found for the selected criteria")
         except Exception as e:
             logger.error("Exception in live_report:")
             logger.error(traceback.format_exc())
