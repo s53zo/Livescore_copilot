@@ -9,6 +9,10 @@
         // --- Real-time Update Logic ---
         document.addEventListener('DOMContentLoaded', () => { // Correct JS braces
             const statusElement = document.getElementById('update-status');
+            // Store the original connection/update status text separately
+            let connectionStatusText = 'Connecting...';
+            let serverStatsText = ''; // To store CPU/User info
+
             const params = new URLSearchParams(window.location.search);
             const currentContest = params.get('contest');
             const currentCallsign = params.get('callsign'); // The callsign being monitored
@@ -21,14 +25,21 @@
             } // Correct JS braces
 
             console.log(`Monitoring: Contest=${currentContest}, Callsign=${currentCallsign}`); // Correct JS template literal braces
-            statusElement.textContent = 'Connecting...';
+            // Initial status
+            updateStatusDisplay();
 
             const socket = io(); // Connect to the server that served the page
 
+            // --- Helper to update the combined status display ---
+            function updateStatusDisplay() {
+                statusElement.textContent = connectionStatusText + serverStatsText;
+            }
+
             socket.on('connect', () => { // Correct JS braces
                 console.log('Socket.IO connected:', socket.id);
-                statusElement.textContent = 'Live';
+                connectionStatusText = 'Live';
                 statusElement.style.backgroundColor = '#28a745'; // Green for connected
+                updateStatusDisplay(); // Update display
                 // Join the room for the specific contest/callsign being viewed
                 socket.emit('join_room', { contest: currentContest, callsign: currentCallsign }); // Correct JS object literal braces
                 console.log(`Emitted join_room for ${currentContest}_${currentCallsign}`); // Correct JS template literal braces
@@ -36,23 +47,37 @@
 
             socket.on('disconnect', () => { // Correct JS braces
                 console.log('Socket.IO disconnected');
-                statusElement.textContent = 'Disconnected';
+                connectionStatusText = 'Disconnected';
+                serverStatsText = ''; // Clear stats on disconnect
                 statusElement.style.backgroundColor = '#ffc107'; // Yellow for disconnected
+                updateStatusDisplay(); // Update display
             }); // Correct JS braces
 
             socket.on('connect_error', (error) => { // Correct JS braces
                 console.error('Socket.IO connection error:', error);
-                statusElement.textContent = 'Connection Error';
+                connectionStatusText = 'Connection Error';
+                serverStatsText = ''; // Clear stats on error
                 statusElement.style.backgroundColor = '#dc3545'; // Red for error
+                updateStatusDisplay(); // Update display
             }); // Correct JS braces
 
-            // Listen for the notification from the server
+            // Listen for the score update notification from the server
             socket.on('score_updated_notification', (notification) => { // Correct JS braces
                 console.log('Received score update notification:', notification);
                 // Fetch latest data for the monitored callsign when *any* update for their contest happens
-                statusElement.textContent = 'Updating...';
+                connectionStatusText = 'Updating...'; // Show updating status briefly
                 statusElement.style.backgroundColor = '#17a2b8'; // Blue for updating
+                updateStatusDisplay(); // Update display
                 fetchLatestAndUpdate(currentContest, currentCallsign);
+            }); // Correct JS braces
+
+            // --- Listen for Server Status Updates ---
+            socket.on('server_status_update', (data) => { // Correct JS braces
+                // console.debug('Received server status:', data); // Optional debug
+                // Format the CPU and User data
+                serverStatsText = ` | CPU: ${data.cpu.toFixed(1)}% | Users: ${data.users}`;
+                // Update the display immediately
+                updateStatusDisplay();
             }); // Correct JS braces
 
             // Function to fetch latest data and update the table
@@ -98,14 +123,17 @@
                              console.error('Could not find station info in fetched HTML or current page.');
                         } // Correct JS braces
 
-                        statusElement.textContent = 'Live';
+                        // Restore 'Live' status after update completes
+                        connectionStatusText = 'Live';
                         statusElement.style.backgroundColor = '#28a745'; // Green
+                        updateStatusDisplay(); // Update display
                         updateRelativeTimes(); // Update relative times after table refresh
                     }) // Correct JS braces
                     .catch(error => { // Correct JS braces
                         console.error('Error fetching latest report HTML:', error);
-                        statusElement.textContent = 'Update Error';
+                        connectionStatusText = 'Update Error';
                         statusElement.style.backgroundColor = '#dc3545'; // Red
+                        updateStatusDisplay(); // Update display
                     }); // Correct JS braces
             } // Correct JS braces
 

@@ -20,10 +20,9 @@ import os
 import fcntl  # For file locking
 import errno # For error codes
 import argparse # Keep for main()
-
-# Apply gevent monkey patching early
-import gevent.monkey
-gevent.monkey.patch_all()
+import time # For sleep in background task
+import psutil # For CPU usage
+import sqlite3 # For direct DB access in background task
 
 
 def setup_logging(debug_mode, log_file):
@@ -150,6 +149,41 @@ def create_app(db_path='/opt/livescore/contest_data.db', debug=False):
     # Register Blueprints or routes defined in web_interface.py
     register_routes_and_handlers(app, socketio)
     web_logger.info("Registered routes and SocketIO handlers.")
+
+    # Return only the configured app instance for Gunicorn
+    # --- Background Task for Server Status ---
+    def _update_server_status_periodically(socketio_instance, db_path_for_task):
+        """Periodically fetches CPU usage and user count, emits via SocketIO."""
+        web_logger.info("Starting server status background task...")
+        while True:
+            try:
+                cpu = psutil.cpu_percent()
+                users = 0
+                try:
+                    # Need a separate connection for the background task
+                    with sqlite3.connect(db_path_for_task) as conn_task:
+                        cursor_task = conn_task.cursor()
+                        cursor_task.execute("SELECT value FROM system_stats WHERE key = 'connected_users'")
+                        result = cursor_task.fetchone()
+                        if result:
+                            users = int(result[0])
+                except Exception as db_err:
+                    web_logger.error(f"Error reading user count from DB in background task: {db_err}")
+                    # Keep users at 0 if DB read fails
+
+                # web_logger.debug(f"Emitting server status: CPU={cpu}%, Users={users}") # Optional debug log
+                socketio_instance.emit('server_status_update', {'cpu': cpu, 'users': users})
+
+            except Exception as task_err:
+                web_logger.error(f"Error in server status background task: {task_err}")
+                # Avoid crashing the loop, just log and continue
+            finally:
+                # Wait before next update
+                time.sleep(5) # Update every 5 seconds
+
+    # Start the background task
+    socketio.start_background_task(_update_server_status_periodically, socketio, db_path)
+    web_logger.info("Server status background task started.")
 
     # Return only the configured app instance for Gunicorn
     return app

@@ -286,11 +286,32 @@ def register_routes_and_handlers(app, socketio):
     @socketio.on('connect')
     def handle_connect():
         logger.info(f"Client connected: {request.sid}")
+        try:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                # Increment user count, ensuring table/row exists (though setup_database should handle it)
+                cursor.execute("INSERT OR IGNORE INTO system_stats (key, value) VALUES ('connected_users', 0)")
+                cursor.execute("UPDATE system_stats SET value = value + 1 WHERE key = 'connected_users'")
+                conn.commit()
+                logger.debug("Incremented connected_users count.")
+        except Exception as e:
+            logger.error(f"Error incrementing user count on connect: {e}")
+            # Don't prevent connection if DB update fails
 
     @socketio.on('disconnect')
     def handle_disconnect():
         # Rooms are left automatically by Flask-SocketIO
         logger.info(f"Client disconnected: {request.sid}")
+        try:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                # Decrement user count, ensuring it doesn't go below 0
+                cursor.execute("UPDATE system_stats SET value = MAX(0, value - 1) WHERE key = 'connected_users'")
+                conn.commit()
+                logger.debug("Decremented connected_users count.")
+        except Exception as e:
+            logger.error(f"Error decrementing user count on disconnect: {e}")
+            # Log error but proceed with disconnect
 
     @socketio.on('join_room')
     def handle_join_room(data):

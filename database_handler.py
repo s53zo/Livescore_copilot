@@ -65,6 +65,24 @@ class ContestDatabaseHandler:
                     FOREIGN KEY (contest_score_id) REFERENCES contest_scores(id)
                 )
             ''')
+
+            # Add system_stats table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS system_stats (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER
+                )
+            ''')
+            self.logger.info("Ensured system_stats table exists.") # Optional logging
+
+            # Initialize connected_users counter if it doesn't exist
+            conn.execute('''
+                INSERT OR IGNORE INTO system_stats (key, value)
+                VALUES ('connected_users', 0)
+            ''')
+            self.logger.info("Ensured 'connected_users' key exists in system_stats.") # Optional logging
+
+            conn.commit() # Ensure changes are saved
     
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS qth_info (
