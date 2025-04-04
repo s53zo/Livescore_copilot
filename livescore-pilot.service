@@ -8,7 +8,7 @@ Group=root
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONPATH=/opt/livescore"
 WorkingDirectory=/opt/livescore
-ExecStart=/usr/local/bin/gunicorn -c /opt/livescore/gunicorn_config.py livescore:app
+ExecStart=/usr/local/bin/gunicorn -c /opt/livescore/gunicorn_config.py 'livescore:create_app()'
 Restart=always
 RestartSec=10
 

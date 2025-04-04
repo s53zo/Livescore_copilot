@@ -6,20 +6,28 @@ gevent.monkey.patch_all()
 import argparse
 import logging
 import sys
-# Import the app and socketio instance from web_interface
-from web_interface import app, socketio
+# Import Flask and SocketIO for factory
+from flask import Flask
+from flask_socketio import SocketIO
+# Import the registration function and logger from web_interface
+from web_interface import register_routes_and_handlers, logger as web_logger # Use web_logger to avoid name clash
 # Import ContestDatabaseHandler directly
 from database_handler import ContestDatabaseHandler
-# from contest_server import ContestServer # No longer needed
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from maintenance_task import perform_maintenance
 import os
 import fcntl  # For file locking
 import errno # For error codes
+import argparse # Keep for main()
+
+# Apply gevent monkey patching early
+import gevent.monkey
+gevent.monkey.patch_all()
+
 
 def setup_logging(debug_mode, log_file):
-    """Setup logging configuration"""
+    """Setup logging configuration - Returns the root logger"""
     log_level = logging.DEBUG if debug_mode else logging.INFO
     
     formatter = logging.Formatter(
@@ -115,84 +123,110 @@ def parse_arguments():
                       help='Minute to run maintenance (default: 0)')
     return parser.parse_args()
 
+# +++ Application Factory Function +++
+def create_app(db_path='/opt/livescore/contest_data.db', debug=False):
+    """Application Factory"""
+    web_logger.info("Creating Flask application instance...")
+    # Note: Using web_logger assuming it's configured in web_interface.py
+    # If logging needs to be configured here, adjust accordingly.
+    app = Flask(__name__)
+    app.config['DEBUG'] = debug
+    # Add any other necessary app configurations here (e.g., SECRET_KEY if using sessions)
+
+    web_logger.info("Initializing Flask-SocketIO...")
+    # Initialize SocketIO here, associated with the app
+    socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*")
+    web_logger.info("Flask-SocketIO initialized successfully")
+
+    # Initialize Database Handler, passing the created socketio instance
+    # This also starts the BatchProcessor thread internally
+    web_logger.info("Initializing Database Handler and Batch Processor...")
+    db_handler = ContestDatabaseHandler(db_path=db_path, socketio=socketio)
+
+    # Store the handler in app config
+    app.config['DB_HANDLER'] = db_handler
+    web_logger.info("Database Handler instance stored in app.config['DB_HANDLER']")
+
+    # Register Blueprints or routes defined in web_interface.py
+    register_routes_and_handlers(app, socketio)
+    web_logger.info("Registered routes and SocketIO handlers.")
+
+    # Return the configured app and socketio (socketio needed for running)
+    return app, socketio
+# --- End of Application Factory ---
+
+
+# --- Main Execution Logic (for direct run `python livescore.py`) ---
 def main():
     # Parse command line arguments
     args = parse_arguments()
-    
-    # Setup logging (might need adjustment if Flask/SocketIO logging is configured differently)
-    logger = setup_logging(args.debug, args.log_file)
 
-    # Log startup information
-    logging.info("Livescore Application starting up with configuration:")
-    logging.info(f"Flask/SocketIO Host: {args.host}")
-    logging.info(f"Flask/SocketIO Port: {args.port}")
-    logging.info(f"Debug Mode: {'ON' if args.debug else 'OFF'}")
-    logging.info(f"Log File: {args.log_file}")
-    logging.info(f"Database File: {args.db_file}")
-    logging.info(f"Maintenance Time: {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
-    
-    # Initialize scheduler
+    # Setup logging for direct execution (can use its own logger)
+    # Using a separate logger instance for the main script execution part
+    main_logger = setup_logging(args.debug, args.log_file)
+
+    # Log startup information using main_logger
+    main_logger.info("Livescore Application starting up directly with configuration:")
+    main_logger.info(f"Flask/SocketIO Host: {args.host}")
+    main_logger.info(f"Flask/SocketIO Port: {args.port}")
+    main_logger.info(f"Debug Mode: {'ON' if args.debug else 'OFF'}")
+    main_logger.info(f"Log File: {args.log_file}")
+    main_logger.info(f"Database File: {args.db_file}")
+    main_logger.info(f"Maintenance Time: {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
+
+    # Create the app using the factory
+    # Pass relevant args like db_file and debug status
+    app, socketio = create_app(db_path=args.db_file, debug=args.debug)
+
+    # Initialize scheduler (can also be part of create_app if preferred)
     scheduler = BackgroundScheduler()
-    
     # Add maintenance job
     trigger = CronTrigger(
         hour=args.maintenance_hour,
         minute=args.maintenance_minute
     )
-    
     scheduler.add_job(
         run_maintenance,
         trigger=trigger,
-        args=[args.db_file, logger],
+        args=[args.db_file, main_logger], # Pass main_logger here
         id='maintenance_job',
         name='Database Maintenance',
         misfire_grace_time=3600  # Allow job to run up to 1 hour late
     )
-    
     # Start the scheduler
     scheduler.start()
-    logger.info(f"Scheduled maintenance job for {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
+    main_logger.info(f"Scheduled maintenance job for {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
 
-    # Initialize ContestDatabaseHandler directly, passing socketio
-    # This also starts the BatchProcessor thread internally
-    logger.info("Initializing Database Handler and Batch Processor...")
-    db_handler = ContestDatabaseHandler(db_path=args.db_file, socketio=socketio)
+    # db_handler is now initialized inside create_app and stored in app.config
 
-    # Make db_handler accessible to Flask routes
-    app.config['DB_HANDLER'] = db_handler
-    logger.info("Database Handler instance stored in app.config['DB_HANDLER']")
-
-    # Remove old ContestServer initialization
-    # contest_server_instance = ContestServer(...)
-
-    logger.info("Starting Flask-SocketIO server...")
+    main_logger.info("Starting Flask-SocketIO development server...")
     try:
-        # Run the Flask app with SocketIO
+        # Run using the socketio instance returned by the factory
         # Use host/port from arguments
         # debug=args.debug enables Flask debug mode (auto-reload, etc.)
         # Use use_reloader=False if APScheduler conflicts with Flask reloader
         socketio.run(app, host=args.host, port=args.port, debug=args.debug, use_reloader=False)
 
     except KeyboardInterrupt:
-        logger.info("Received shutdown signal (KeyboardInterrupt)")
+        main_logger.info("Received shutdown signal (KeyboardInterrupt)")
     except SystemExit:
-        logger.info("Received shutdown signal (SystemExit)")
+        main_logger.info("Received shutdown signal (SystemExit)")
     except Exception as e:
-        logger.error(f"Error starting Flask-SocketIO server: {e}")
-        logger.exception("Server error details:")
+        main_logger.error(f"Error starting Flask-SocketIO server: {e}")
+        main_logger.exception("Server error details:")
         # No need to raise again, just log and exit finally block
     finally:
         # Cleanup
-        logger.info("Shutting down scheduler...")
+        main_logger.info("Shutting down scheduler...")
         scheduler.shutdown(wait=False) # Don't wait for jobs to finish on shutdown
-        # Cleanup db_handler (which stops the batch processor)
-        if 'db_handler' in locals():
-             logger.info("Cleaning up Database Handler (stops batch processor)...")
-             db_handler.cleanup()
-        # Remove old ContestServer cleanup
-        # if 'contest_server_instance' in locals():
-        #     contest_server_instance.cleanup()
-        logger.info("Application shutdown complete.")
+        # Cleanup db_handler (access it from app.config)
+        # Need to check if 'app' exists in case create_app failed
+        if 'app' in locals():
+            db_handler = app.config.get('DB_HANDLER')
+            if db_handler:
+                 main_logger.info("Cleaning up Database Handler (stops batch processor)...")
+                 db_handler.cleanup()
+        main_logger.info("Application shutdown complete.")
 
 if __name__ == "__main__":
     main()
