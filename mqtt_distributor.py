@@ -294,13 +294,17 @@ class ContestMQTTPublisher(ContestDataSubscriber):
     def build_topic(self, record):
         """
         Build MQTT topic hierarchy from contest record.
-        Format: contest/live/v1/{contest}/{callsign}
+        Replaces '/' in callsigns with '_' to avoid MQTT level separation.
+        Format: contest/live/v1/{contest}/{callsign_safe}
         """
         score_data = record['score_data']
         contest = score_data[2].replace(' ', '_')
         callsign = score_data[3]
         
-        return f"contest/live/v1/{contest}/{callsign}"
+        # Replace '/' with '_' in the callsign for MQTT topic safety
+        callsign_safe = callsign.replace('/', '_') 
+        
+        return f"contest/live/v1/{contest}/{callsign_safe}"
 
     def get_contest_totals(self, contest, timestamp):
         """Get current contest totals including band breakdowns"""
