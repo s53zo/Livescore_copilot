@@ -141,9 +141,8 @@ class ContestDatabaseHandler:
         dxcc = get_safe_field(qth_data.get('dxcc_country'))
         cqz = get_safe_field(qth_data.get('cq_zone'))
 
-        grid = get_safe_field(qth_data.get('grid'))
-        # Take first 2 chars of grid if available and seems valid (letters/numbers), else 'NA'
-        grid2 = grid[:2] if len(grid) >= 2 and grid[:2].isalnum() else 'NA'
+        # grid = get_safe_field(qth_data.get('grid')) # REMOVED grid extraction
+        # grid2 = grid[:2] if len(grid) >= 2 and grid[:2].isalnum() else 'NA' # REMOVED grid2 logic
 
         power = get_safe_field(data.get('power'))
         assisted = get_safe_field(data.get('assisted'))
@@ -151,8 +150,8 @@ class ContestDatabaseHandler:
         callsign = get_safe_field(data.get('callsign'))
         callsign_safe = callsign.replace('/', '_') # Specifically handle '/' in callsigns
 
-        # Construct the topic
-        return f"contest/live/v1/{contest}/{dxcc}/{cqz}/{grid2}/{power}/{assisted}/{callsign_safe}"
+        # Construct the topic (without grid2)
+        return f"contest/live/v1/{contest}/{dxcc}/{cqz}/{power}/{assisted}/{callsign_safe}"
 
     def _build_payload(self, data, contest_score_id):
         """Build JSON payload from contest data dictionary."""
