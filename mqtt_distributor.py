@@ -269,20 +269,21 @@ class ContestMQTTPublisher(ContestDataSubscriber):
             raise
 
     # Updated signature for CallbackAPIVersion.VERSION2
+    # Updated signature for CallbackAPIVersion.VERSION2
     def on_connect(self, client, userdata, flags, reason_code, properties):
         """Enhanced connection callback with debugging"""
-        # Use reason_code (rc is still available for backward compatibility but reason_code is preferred)
+        # Use integer reason codes directly
         rc_codes = {
-            mqtt.MQTT_ERR_SUCCESS: "Connected successfully",
-            mqtt.MQTT_ERR_PROTOCOL: "Connection refused - incorrect protocol version",
-            mqtt.MQTT_ERR_IDENTIFIER_REJECTED: "Connection refused - invalid client identifier",
-            mqtt.MQTT_ERR_SERVER_UNAVAILABLE: "Connection refused - server unavailable",
-            mqtt.MQTT_ERR_BAD_USERNAME_OR_PASSWORD: "Connection refused - bad username or password",
-            mqtt.MQTT_ERR_NOT_AUTHORIZED: "Connection refused - not authorized"
-            # Add more reason codes if needed from paho.mqtt.reasoncodes
+            0: "Connected successfully",
+            131: "Connection refused - Malformed Packet",
+            132: "Connection refused - Protocol Error",
+            135: "Connection refused - Not authorized",
+            148: "Connection refused - Server unavailable",
+            151: "Connection refused - Bad user name or password",
+            # Add more reason codes if needed
         }
 
-        if reason_code == mqtt.MQTT_ERR_SUCCESS:
+        if reason_code == 0: # MQTT_ERR_SUCCESS is 0
             self.logger.info(f"Connected to MQTT broker at {self.mqtt_config['host']}:{self.mqtt_config['port']}")
             self.logger.debug(f"Connection flags: {flags}")
             self.logger.debug(f"Connection properties: {properties}")
@@ -293,9 +294,10 @@ class ContestMQTTPublisher(ContestDataSubscriber):
     # Updated signature for CallbackAPIVersion.VERSION2
     def on_disconnect(self, client, userdata, reason_code, properties):
         """Enhanced disconnection callback"""
-        if reason_code == mqtt.MQTT_ERR_SUCCESS: # 0 means clean disconnect
+        if reason_code == 0: # MQTT_ERR_SUCCESS is 0 for clean disconnect
             self.logger.info("Cleanly disconnected from MQTT broker")
         else:
+            # You might want to add more descriptive messages for disconnect reason codes too
             self.logger.warning(f"Unexpectedly disconnected from MQTT broker with reason code: {reason_code}")
             self.logger.info("Attempting to reconnect...")
             try:
