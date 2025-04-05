@@ -306,9 +306,11 @@ class ContestMQTTPublisher(ContestDataSubscriber):
                 self.logger.error(f"Reconnection failed: {e}")
                 self.logger.debug(traceback.format_exc())
 
-    def on_publish(self, client, userdata, mid):
+    # Updated signature for CallbackAPIVersion.VERSION2
+    def on_publish(self, client, userdata, mid, reason_code, properties):
         """Callback for successful message publication"""
-        self.logger.debug(f"Message {mid} published successfully")
+        # reason_code and properties are provided but not used in this simple log
+        self.logger.debug(f"Message {mid} published successfully (Reason Code: {reason_code})")
 
     def on_mqtt_log(self, client, userdata, level, buf):
         """Callback for MQTT client logging"""
