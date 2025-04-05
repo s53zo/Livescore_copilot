@@ -6,13 +6,15 @@ from custom_handler import CustomHandler
 from database_handler import ContestDatabaseHandler
 
 class ContestServer:
-    def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False):
+    # Added mqtt_config parameter
+    def __init__(self, host='127.0.0.1', port=8088, db_path='contest_data.db', debug=False, mqtt_config=None):
         self.host = host
         self.port = port
         self.db_path = db_path
         self.debug = debug
         self.logger = self._setup_logging(debug)
-        self.db_handler = ContestDatabaseHandler(db_path)
+        # Pass mqtt_config to ContestDatabaseHandler
+        self.db_handler = ContestDatabaseHandler(db_path, mqtt_config=mqtt_config)
         
     def _setup_logging(self, debug):
         logger = logging.getLogger('ContestServer')
@@ -53,12 +55,16 @@ class ContestServer:
             self.logger.error(f"Error during cleanup: {e}")
 
 class CustomServer(HTTPServer):
-    def __init__(self, *args, db_path='contest_data.db', debug=False, **kwargs):
+    # Removed redundant db_handler creation and debug parameter here
+    # The handler is passed down via the CustomHandler factory in ContestServer.start
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.db_handler = ContestDatabaseHandler(db_path)
-        self.debug = debug
-                
-    def server_close(self):
-        if hasattr(self, 'db_handler'):
-            self.db_handler.cleanup()
-        super().server_close()
+        # self.db_handler = ContestDatabaseHandler(db_path, mqtt_config=mqtt_config) # Removed redundant creation
+        # self.debug = debug # Removed redundant attribute
+
+    # server_close cleanup is handled by ContestServer.cleanup calling db_handler.cleanup
+    # No need for redundant cleanup here if db_handler is not owned by CustomServer
+    # def server_close(self):
+    #     if hasattr(self, 'db_handler'): # This db_handler wouldn't exist anymore
+    #         self.db_handler.cleanup()
+    #     super().server_close()

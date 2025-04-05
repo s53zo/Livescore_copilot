@@ -66,6 +66,12 @@ def parse_arguments():
                       help='Hour to run maintenance (24-hour format, default: 2)')
     parser.add_argument('--maintenance-minute', type=int, default=0,
                       help='Minute to run maintenance (default: 0)')
+    # Add MQTT arguments
+    parser.add_argument('--mqtt-host', help='MQTT broker hostname')
+    parser.add_argument('--mqtt-port', type=int, default=1883, help='MQTT broker port (default: 1883)')
+    parser.add_argument('--mqtt-username', help='MQTT username')
+    parser.add_argument('--mqtt-password', help='MQTT password')
+    # Add client-id? Maybe later if needed. TLS? Not requested for now.
     return parser.parse_args()
 
 def main():
@@ -76,13 +82,20 @@ def main():
     logger = setup_logging(args.debug, args.log_file)
     
     # Log startup information
-    logging.info("Server starting up with configuration:")
-    logging.info(f"Host: {args.host}")
-    logging.info(f"Port: {args.port}")
-    logging.info(f"Debug Mode: {'ON' if args.debug else 'OFF'}")
-    logging.info(f"Log File: {args.log_file}")
-    logging.info(f"Database File: {args.db_file}")
-    logging.info(f"Maintenance Time: {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
+    logger.info("Server starting up with configuration:") # Use logger instead of logging
+    logger.info(f"Host: {args.host}")
+    logger.info(f"Port: {args.port}")
+    logger.info(f"Debug Mode: {'ON' if args.debug else 'OFF'}")
+    logger.info(f"Log File: {args.log_file}")
+    logger.info(f"Database File: {args.db_file}")
+    logger.info(f"Maintenance Time: {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
+    # Log MQTT config if provided
+    if args.mqtt_host:
+        logger.info(f"MQTT Host: {args.mqtt_host}")
+        logger.info(f"MQTT Port: {args.mqtt_port}")
+        logger.info(f"MQTT Username: {args.mqtt_username if args.mqtt_username else 'None'}")
+    else:
+        logger.info("MQTT Publishing: Disabled (no --mqtt-host provided)")
     
     # Initialize scheduler
     scheduler = BackgroundScheduler()
@@ -106,11 +119,29 @@ def main():
     scheduler.start()
     logger.info(f"Scheduled maintenance job for {args.maintenance_hour:02d}:{args.maintenance_minute:02d}")
     
+    # Prepare MQTT config dictionary
+    mqtt_config = None
+    if args.mqtt_host:
+        mqtt_config = {
+            'host': args.mqtt_host,
+            'port': args.mqtt_port,
+            'username': args.mqtt_username,
+            'password': args.mqtt_password,
+            # 'client_id': None, # Can add later if needed
+            # 'use_tls': False # Can add later if needed
+        }
+
     try:
-        # Create and start server
-        server = ContestServer(args.host, args.port, args.db_file, args.debug)
+        # Create and start server, passing MQTT config
+        server = ContestServer(
+            host=args.host,
+            port=args.port,
+            db_path=args.db_file,
+            debug=args.debug,
+            mqtt_config=mqtt_config # Pass the config dict
+        )
         server.start()
-        
+
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:
