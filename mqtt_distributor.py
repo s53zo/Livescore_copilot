@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import paho.mqtt.client as mqtt
+from paho.mqtt.client import CallbackAPIVersion
 import json
 import logging
 import time
@@ -7,6 +8,7 @@ from datetime import datetime
 import signal
 import sys
 import sqlite3
+import threading
 import argparse
 import traceback
 
@@ -18,7 +20,8 @@ class ContestDataSubscriber:
         self.last_processed_id = 0
         self.running = True
         self.last_check_time = datetime.now()
-        
+        self.shutdown_event = threading.Event()
+
         # Setup signal handlers
         signal.signal(signal.SIGINT, self.handle_shutdown)
         signal.signal(signal.SIGTERM, self.handle_shutdown)
@@ -27,6 +30,7 @@ class ContestDataSubscriber:
         """Handle shutdown signals gracefully"""
         self.logger.info("Received shutdown signal, stopping...")
         self.running = False
+        self.shutdown_event.set() # Signal the event to interrupt sleep
 
     def get_new_records(self):
         """Fetch new records from the database since last check"""
@@ -152,8 +156,12 @@ class ContestDataSubscriber:
                 if wait_time > 0:
                     if self.logger.isEnabledFor(logging.DEBUG):
                         self.logger.debug(f"Waiting {wait_time:.2f} seconds until next check")
-                    time.sleep(wait_time)
-                    
+                    # Use interruptible wait instead of sleep
+                    interrupted = self.shutdown_event.wait(timeout=wait_time)
+                    if interrupted:
+                        self.logger.debug("Wait interrupted by shutdown signal.")
+                        break # Exit loop immediately if interrupted
+
                 # Log polling stats in debug mode
                 if self.logger.isEnabledFor(logging.DEBUG):
                     total_time = (datetime.now() - self.last_check_time).total_seconds()
@@ -163,7 +171,11 @@ class ContestDataSubscriber:
             except Exception as e:
                 self.logger.error(f"Error in processing loop: {e}")
                 self.logger.debug(traceback.format_exc())
-                time.sleep(self.polling_interval)  # Wait before retry
+                # Use interruptible wait here too
+                interrupted = self.shutdown_event.wait(timeout=self.polling_interval) # Wait before retry
+                if interrupted:
+                    self.logger.debug("Wait after error interrupted by shutdown signal.")
+                    break # Exit loop immediately if interrupted
 
     def cleanup(self):
         """Cleanup resources"""
@@ -213,10 +225,13 @@ class ContestMQTTPublisher(ContestDataSubscriber):
     def setup_mqtt(self):
         """Initialize MQTT client with detailed logging"""
         self.logger.debug("Setting up MQTT client")
-        
-        # Create MQTT client
-        self.mqtt_client = mqtt.Client(client_id=self.mqtt_config.get('client_id'))
-        
+
+        # Create MQTT client using the latest callback API version
+        self.mqtt_client = mqtt.Client(
+            client_id=self.mqtt_config.get('client_id'),
+            callback_api_version=CallbackAPIVersion.VERSION2
+        )
+
         # Enable MQTT client logging if in debug mode
         if self.logger.getEffectiveLevel() == logging.DEBUG:
             self.mqtt_client.enable_logger()  # Changed: removed self.logger argument
